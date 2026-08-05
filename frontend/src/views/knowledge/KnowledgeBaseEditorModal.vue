@@ -457,7 +457,7 @@ import { KB_EDITOR_FOCUS_SECTION_EVENT, markContextualGuideDone } from '@/config
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { createKnowledgeBase, getKnowledgeBaseById, listKnowledgeFiles, updateKnowledgeBase, rebuildKBIndex } from '@/api/knowledge-base'
 import { updateKBConfig, type KBModelConfigRequest } from '@/api/initialization'
-import { type ModelConfig } from '@/api/model'
+import { getDefaultVLMConfig, type DefaultVLMConfig, type ModelConfig } from '@/api/model'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useUIStore } from '@/stores/ui'
@@ -538,6 +538,13 @@ onBeforeUnmount(() => {
 const saving = ref(false)
 const loading = ref(false)
 const allModels = ref<any[]>([])
+const deploymentDefaultVLM = ref<DefaultVLMConfig>({
+  enabled: false,
+  model_id: '',
+  description_language: '',
+  custom_instructions: ''
+})
+const deploymentDefaultVLMLoaded = ref(false)
 const hasFiles = ref(false)
 const initialStorageProvider = ref<string>('')
 /** Tenant-wide default from Settings → Storage engine (used when creating a KB). */
@@ -683,11 +690,21 @@ const applyDefaultModelsIfEmpty = () => {
   }
   const chat = pick('KnowledgeQA')
   const embedding = pick('Embedding')
+  const vlmDefault = deploymentDefaultVLM.value
+  const vlm = vlmDefault.enabled
+    ? allModels.value.find((m) => m.type === 'VLLM' && m.id === vlmDefault.model_id)
+    : undefined
   if (!formData.value.modelConfig.llmModelId && chat?.id) {
     formData.value.modelConfig.llmModelId = chat.id
   }
   if (!formData.value.modelConfig.embeddingModelId && embedding?.id) {
     formData.value.modelConfig.embeddingModelId = embedding.id
+  }
+  if (vlm?.id && !formData.value.multimodalConfig.vllmModelId) {
+    formData.value.multimodalConfig.enabled = true
+    formData.value.multimodalConfig.vllmModelId = vlm.id
+    formData.value.multimodalConfig.descriptionLanguage = vlmDefault.description_language || ''
+    formData.value.multimodalConfig.customInstructions = vlmDefault.custom_instructions || ''
   }
 }
 
@@ -807,6 +824,16 @@ const loadAllModels = async (force = false) => {
     console.error('Failed to load model list:', error)
     MessagePlugin.error(t('knowledgeEditor.messages.loadModelsFailed'))
     allModels.value = []
+  }
+}
+
+const loadDeploymentDefaultVLM = async () => {
+  try {
+    deploymentDefaultVLM.value = await getDefaultVLMConfig()
+    deploymentDefaultVLMLoaded.value = true
+  } catch (error) {
+    console.error('Failed to load deployment default VLM:', error)
+    deploymentDefaultVLMLoaded.value = false
   }
 }
 
@@ -1195,14 +1222,25 @@ const buildSubmitData = () => {
     data.vector_store_id = formData.value.vectorStoreId
   }
 
-  // 添加多模态配置
-  data.vlm_config = {
-    enabled: formData.value.multimodalConfig.enabled,
-    model_id: formData.value.multimodalConfig.enabled
-      ? (formData.value.multimodalConfig.vllmModelId || '')
-      : '',
-    description_language: formData.value.multimodalConfig.descriptionLanguage || '',
-    custom_instructions: formData.value.multimodalConfig.customInstructions || ''
+  // During create, only submit VLM config after the deployment policy and its
+  // selected model have both resolved. On a transient fetch failure, omitting
+  // the field lets the backend remain authoritative instead of accidentally
+  // turning the fallback into an explicit opt-out.
+  const defaultVLMResolvedForCreate = deploymentDefaultVLMLoaded.value && (
+    !deploymentDefaultVLM.value.enabled ||
+    allModels.value.some((model) =>
+      model.type === 'VLLM' && model.id === deploymentDefaultVLM.value.model_id
+    )
+  )
+  if (props.mode === 'edit' || defaultVLMResolvedForCreate) {
+    data.vlm_config = {
+      enabled: formData.value.multimodalConfig.enabled,
+      model_id: formData.value.multimodalConfig.enabled
+        ? (formData.value.multimodalConfig.vllmModelId || '')
+        : '',
+      description_language: formData.value.multimodalConfig.descriptionLanguage || '',
+      custom_instructions: formData.value.multimodalConfig.customInstructions || ''
+    }
   }
 
   // 添加ASR语音识别配置
@@ -1491,6 +1529,7 @@ const resetState = () => {
   hasFiles.value = false
   initialStorageProvider.value = ''
   tenantDefaultStorageProvider.value = 'local'
+  deploymentDefaultVLMLoaded.value = false
   initialIndexingStrategy.value = null
   saving.value = false
   loading.value = false
@@ -1519,7 +1558,7 @@ watch(() => props.visible, async (newVal) => {
     }
     
     // 加载模型列表与空间默认存储引擎（创建 KB 时即使用，不依赖是否打开「存储引擎」Tab）
-    await Promise.all([loadAllModels(), loadTenantDefaultStorageProvider()])
+    await Promise.all([loadAllModels(), loadDeploymentDefaultVLM(), loadTenantDefaultStorageProvider()])
     
     // 根据模式加载数据
     if (props.mode === 'edit' && props.kbId) {

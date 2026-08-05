@@ -120,6 +120,7 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb.CreatedAt = time.Now()
 	kb.TenantID = types.MustTenantIDFromContext(ctx)
 	kb.UpdatedAt = time.Now()
+	s.applyDefaultVLMConfig(ctx, kb)
 	// Record the creator so RBAC's RequireOwnershipOrRole can let
 	// Contributors edit their own KBs without granting them tenant-wide
 	// edit rights. The X-API-Key auth path attaches a synthetic

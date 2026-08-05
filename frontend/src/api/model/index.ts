@@ -49,6 +49,21 @@ export interface ModelConfig {
   deleted_at?: string | null;
 }
 
+export interface DefaultVLMConfig {
+  enabled: boolean;
+  model_id: string;
+  description_language: string;
+  custom_instructions: string;
+}
+
+export async function getDefaultVLMConfig(): Promise<DefaultVLMConfig> {
+  const response: any = await get('/api/v1/models/defaults/vlm');
+  if (!response?.success || !response?.data) {
+    return { enabled: false, model_id: '', description_language: '', custom_instructions: '' };
+  }
+  return response.data as DefaultVLMConfig;
+}
+
 // 创建模型
 export function createModel(data: ModelConfig): Promise<ModelConfig> {
   return new Promise((resolve, reject) => {

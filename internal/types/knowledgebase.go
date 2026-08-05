@@ -85,6 +85,9 @@ type KnowledgeBase struct {
 	SummaryModelID string `yaml:"summary_model_id"        json:"summary_model_id"`
 	// VLM config
 	VLMConfig VLMConfig `yaml:"vlm_config"              json:"vlm_config"              gorm:"type:json"`
+	// VLMConfigProvided distinguishes an omitted create payload from an
+	// explicit {"enabled": false}. It is request metadata only.
+	VLMConfigProvided bool `yaml:"-" json:"-" gorm:"-"`
 	// ASR config (Automatic Speech Recognition)
 	ASRConfig ASRConfig `yaml:"asr_config"              json:"asr_config"              gorm:"type:json"`
 	// Storage provider config (new): only stores provider selection; credentials from workspace StorageEngineConfig
