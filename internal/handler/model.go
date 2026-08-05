@@ -205,6 +205,24 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 	})
 }
 
+// GetDefaultVLMConfig returns the deployment policy after resolving it
+// against the current tenant's visible models. The frontend consumes this
+// instead of reimplementing environment/default-model selection rules.
+func (h *ModelHandler) GetDefaultVLMConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	models, err := h.service.ListModels(ctx)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    service.ResolveDefaultVLMConfig(models),
+	})
+}
+
 const modelDebugMaxInputBytes = 64 * 1024
 
 // ModelDebugOptions contains the cross-provider parameters exposed by the

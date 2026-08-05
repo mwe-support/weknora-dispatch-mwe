@@ -1,0 +1,48 @@
+builtin_models:
+  - id: builtin-local-qwythos-q4-mm
+    type: KnowledgeQA
+    source: remote
+    is_default: true
+    name: ${LLM_MODEL_NAME}
+    parameters:
+      base_url: ${LLM_BASE_URL}
+      api_key: ${LLM_API_KEY}
+      provider: openai
+      supports_vision: true
+
+  - id: builtin-local-qwythos-q4-vlm
+    type: VLLM
+    source: remote
+    is_default: true
+    name: ${LLM_MODEL_NAME}
+    description: Default Qwythos multimodal model for new knowledge bases
+    parameters:
+      base_url: ${LLM_BASE_URL}
+      api_key: ${LLM_API_KEY}
+      interface_type: openai
+      provider: generic
+      supports_vision: true
+      max_concurrency: 8
+
+  - id: builtin-qwen3-embedding-4b
+    type: Embedding
+    source: remote
+    is_default: true
+    name: ${EMBEDDING_MODEL_NAME}
+    parameters:
+      base_url: ${EMBEDDING_BASE_URL}
+      api_key: ${EMBEDDING_API_KEY}
+      provider: openai
+      embedding_parameters:
+        dimension: 2560
+        truncate_prompt_tokens: 0
+
+  - id: builtin-qwen3-reranker-06b
+    type: Rerank
+    source: remote
+    is_default: true
+    name: ${RERANK_MODEL_NAME}
+    parameters:
+      base_url: ${RERANK_BASE_URL}
+      api_key: ${RERANK_API_KEY}
+      provider: generic
