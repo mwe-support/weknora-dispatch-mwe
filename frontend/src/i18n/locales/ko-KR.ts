@@ -641,6 +641,7 @@ export default {
     daysAgo: '{n}일 전',
     resourceType: {
       wikiSpace: '위키 공간',
+      tencentDocsSpace: 'Tencent Docs 공간',
       docCategory: '문서 태그',
       book: 'Yuque 지식베이스'
     },
@@ -656,6 +657,8 @@ export default {
       appSecret: 'App Secret',
       integrationToken: 'Integration Token',
       apiToken: 'API Token',
+      tencentDocsMcpToken: 'Tencent Docs MCP Token',
+      tencentDocsMcpTokenHint: 'Tencent Docs MCP 인증 과정에서 생성된 토큰을 입력하세요. 이 토큰으로 볼 수 있는 공간과 문서만 읽을 수 있습니다.',
       baseUrl: 'Base URL',
       baseUrlHint: "비워두면 기본 퍼블릭 클라우드 주소가 사용됩니다. 프라이빗/엔터프라이즈 배포거나 리버스 프록시를 통해 액세스해야 하는 경우 사용자 정의 주소를 입력하세요 (예: https://api-proxy.example.com)",
       feedUrls: '피드 주소',
@@ -670,6 +673,7 @@ export default {
       lark_drive: "Lark 드라이브 폴더에서 문서, 스프레드시트, 파일 동기화",
       notion: 'Notion에서 페이지 및 데이터베이스 동기화',
       yuque: '위큐 지식베이스에서 문서 동기화',
+      tencent_docs: 'Tencent Docs MCP를 통해 공간, 폴더 및 문서 동기화',
       rss: 'RSS / Atom 피드에서 글 동기화'
     },
     connector: {
@@ -679,6 +683,7 @@ export default {
       lark_drive: "Lark 드라이브",
       notion: 'Notion',
       yuque: '위큐 (Yuque)',
+      tencent_docs: 'Tencent Docs',
       rss: 'RSS / Atom 피드'
     },
     logDetail: {
@@ -5347,6 +5352,7 @@ export default {
     channelIm: 'IM 채널',
     channelNotion: 'Notion',
     channelYuque: 'Yuque',
+    channelTencentDocs: 'Tencent Docs',
     channelUpload: '업로드',
     channelManual: '수동',
     channelUrl: '웹',

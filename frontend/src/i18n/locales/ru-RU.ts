@@ -641,6 +641,7 @@ export default {
     daysAgo: '{n} д назад',
     resourceType: {
       wikiSpace: 'Пространство вики',
+      tencentDocsSpace: 'Пространство Tencent Docs',
       docCategory: 'Тег документа',
       book: 'База знаний Yuque'
     },
@@ -656,6 +657,8 @@ export default {
       appSecret: 'App Secret',
       integrationToken: 'Integration Token',
       apiToken: 'API Token',
+      tencentDocsMcpToken: 'Tencent Docs MCP Token',
+      tencentDocsMcpTokenHint: 'Введите токен, созданный в процессе авторизации Tencent Docs MCP. Он дает доступ только к видимым для этого токена пространствам и документам.',
       baseUrl: 'Base URL',
       baseUrlHint: 'Оставьте пустым, чтобы использовать адрес общедоступного облака по умолчанию. Для частных/корпоративных развертываний или при доступе через обратный прокси введите ваш собственный адрес (например, https://api-proxy.example.com)',
       feedUrls: 'Адреса лент',
@@ -670,6 +673,7 @@ export default {
       lark_drive: 'Синхронизация документов, таблиц и файлов из папки Lark Drive',
       notion: 'Синхронизация страниц и баз данных из Notion',
       yuque: 'Синхронизация документов из баз знаний Yuque',
+      tencent_docs: 'Синхронизация пространств, папок и документов через Tencent Docs MCP',
       rss: 'Синхронизация статей из лент RSS / Atom'
     },
     connector: {
@@ -679,6 +683,7 @@ export default {
       lark_drive: 'Lark Drive',
       notion: 'Notion',
       yuque: 'Yuque (Юйцюэ)',
+      tencent_docs: 'Tencent Docs',
       rss: 'RSS / Atom лента'
     },
     logDetail: {
@@ -5347,6 +5352,7 @@ export default {
     channelIm: 'IM канал',
     channelNotion: 'Notion',
     channelYuque: 'Yuque',
+    channelTencentDocs: 'Tencent Docs',
     channelUpload: 'Загрузка',
     channelManual: 'Вручную',
     channelUrl: 'Веб',

@@ -13,6 +13,7 @@ type Client interface {
 	GetContent(ctx context.Context, fileID string) (*DocumentContent, error)
 	StartExport(ctx context.Context, fileID string) (*ExportTask, error)
 	GetExportProgress(ctx context.Context, taskID string) (*ExportStatus, error)
+	DownloadExport(ctx context.Context, fileURL string) ([]byte, error)
 	Close() error
 }
 

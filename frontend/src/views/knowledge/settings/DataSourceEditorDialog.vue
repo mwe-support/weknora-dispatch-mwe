@@ -586,6 +586,23 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'tencent_docs',
+    available: true,
+    docUrl: 'https://docs.qq.com/scenario/open-claw.html?nlc=1',
+    permissionDocUrl: '',
+    permissionPageUrl: '',
+    requiredPermissions: [],
+    fields: [
+      {
+        key: 'mcp_token',
+        labelKey: 'datasource.field.tencentDocsMcpToken',
+        placeholder: '',
+        secret: true,
+        hintKey: 'datasource.field.tencentDocsMcpTokenHint',
+      },
+    ],
+  },
+  {
     type: 'rss',
     available: true,
     docUrl: '',
@@ -600,6 +617,13 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
 
 
 const currentDef = computed(() => connectorDefs.value.find(d => d.type === form.value.type))
+
+watch(() => form.value.type, (type) => {
+  // WeKnora currently treats deletion markers as informational and never
+  // removes knowledge automatically. Do not persist a misleading deletion
+  // policy for the Tencent Docs connector.
+  if (type === 'tencent_docs') form.value.sync_deletions = false
+})
 
 // --- Drawer lifecycle ---
 watch(visible, async (v) => {
@@ -1123,6 +1147,7 @@ function collapseAllNodes() {
 
 const resourceTypeLabelMap: Record<string, string> = {
   wiki_space: 'datasource.resourceType.wikiSpace',
+  tencent_docs_space: 'datasource.resourceType.tencentDocsSpace',
   doc_category: 'datasource.resourceType.docCategory',
   book: 'datasource.resourceType.book',
 }
@@ -1729,7 +1754,7 @@ const drawerConfirmText = computed(() => {
           </div>
         </div>
 
-        <div class="form-item form-item--flat">
+        <div v-if="form.type !== 'tencent_docs'" class="form-item form-item--flat">
           <t-checkbox v-model="form.sync_deletions">{{ t('datasource.syncDeletions') }}</t-checkbox>
         </div>
       </section>

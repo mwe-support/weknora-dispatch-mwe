@@ -269,6 +269,14 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "custom",
 		Capabilities: []string{"incremental"},
 	},
+	types.ConnectorTypeTencentDocs: {
+		Type:         types.ConnectorTypeTencentDocs,
+		Name:         "Tencent Docs (腾讯文档)",
+		Description:  "Sync spaces, folders, and documents from Tencent Docs",
+		Priority:     4,
+		AuthType:     "token",
+		Capabilities: []string{"incremental"},
+	},
 }
 
 // ListAvailableConnectors returns all available connector metadata

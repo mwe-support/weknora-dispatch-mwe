@@ -451,3 +451,23 @@ func TestInvalidTencentDocsCredentialsAreClassified(t *testing.T) {
 		t.Fatalf("ListSpaces() error = %v, want code and trace ID", err)
 	}
 }
+
+func TestValidateExportURLRejectsUntrustedOrInsecureHosts(t *testing.T) {
+	for _, rawURL := range []string{
+		"http://docs.qq.com/export/file.pdf",
+		"https://example.com/file.pdf",
+		"file:///etc/passwd",
+	} {
+		if err := validateExportURL(rawURL); err == nil {
+			t.Fatalf("validateExportURL(%q) expected rejection", rawURL)
+		}
+	}
+	for _, rawURL := range []string{
+		"https://docs-import-export.cos.ap-guangzhou.myqcloud.com/export/file.pdf",
+		"https://docs.qq.com/export/file.pdf",
+	} {
+		if err := validateExportURL(rawURL); err != nil {
+			t.Fatalf("validateExportURL(%q) error: %v", rawURL, err)
+		}
+	}
+}

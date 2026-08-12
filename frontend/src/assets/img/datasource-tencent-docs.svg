@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Tencent Docs">
+  <rect width="64" height="64" rx="14" fill="#2f73ff"/>
+  <path d="M19 13h19l10 10v28H19z" fill="#fff"/>
+  <path d="M38 13v11h10" fill="#cfe0ff"/>
+  <path d="M25 31h17M25 38h17M25 45h12" stroke="#2f73ff" stroke-width="3" stroke-linecap="round"/>
+</svg>

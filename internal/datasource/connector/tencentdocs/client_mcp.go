@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +31,7 @@ const (
 
 	defaultMCPTimeout = 30 * time.Second
 	maxMCPPagination  = 10000
+	maxExportBytes    = 100 << 20
 )
 
 // MCPClientConfig configures access to the official Tencent Docs MCP service.
@@ -283,6 +286,59 @@ func (c *TencentDocsMCPClient) GetExportProgress(
 		return nil, err
 	}
 	return &status, nil
+}
+
+// DownloadExport downloads the short-lived URL returned by export_progress.
+// The URL is not authenticated with the MCP token. Restricting scheme, host,
+// redirects and size prevents the remote tool response from becoming an SSRF
+// or unbounded-download primitive inside WeKnora.
+func (c *TencentDocsMCPClient) DownloadExport(ctx context.Context, fileURL string) ([]byte, error) {
+	if err := validateExportURL(fileURL); err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create Tencent Docs export download: %w", err)
+	}
+	client := &http.Client{
+		Timeout: c.config.Timeout,
+		CheckRedirect: func(request *http.Request, _ []*http.Request) error {
+			return validateExportURL(request.URL.String())
+		},
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("download Tencent Docs export: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("download Tencent Docs export: HTTP status %d", response.StatusCode)
+	}
+	if response.ContentLength > maxExportBytes {
+		return nil, fmt.Errorf("download Tencent Docs export exceeds %d bytes", maxExportBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxExportBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read Tencent Docs export: %w", err)
+	}
+	if len(data) > maxExportBytes {
+		return nil, fmt.Errorf("download Tencent Docs export exceeds %d bytes", maxExportBytes)
+	}
+	return data, nil
+}
+
+func validateExportURL(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Scheme != "https" || parsed.User != nil {
+		return errors.New("Tencent Docs export URL must be an HTTPS URL")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	allowed := host == "docs.qq.com" || strings.HasSuffix(host, ".qq.com") ||
+		strings.HasSuffix(host, ".myqcloud.com") || strings.HasSuffix(host, ".tencentcos.cn")
+	if !allowed {
+		return fmt.Errorf("Tencent Docs export URL host %q is not allowed", host)
+	}
+	return nil
 }
 
 func (c *TencentDocsMCPClient) ensureReady(ctx context.Context) error {

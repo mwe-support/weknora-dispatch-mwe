@@ -641,6 +641,7 @@ export default {
     daysAgo: '{n} 天前',
     resourceType: {
       wikiSpace: '知识库空间',
+      tencentDocsSpace: '腾讯文档空间',
       docCategory: '文档标签',
       book: '语雀知识库'
     },
@@ -656,6 +657,8 @@ export default {
       appSecret: 'App Secret',
       integrationToken: 'Integration Token',
       apiToken: 'API Token',
+      tencentDocsMcpToken: '腾讯文档 MCP Token',
+      tencentDocsMcpTokenHint: '请填写腾讯文档 MCP 授权流程生成的 Token。该凭证仅用于读取当前 Token 可见的空间和文档。',
       baseUrl: 'Base URL（可选）',
       baseUrlHint: '留空将使用默认公有云地址；如果是私有部署/企业内网部署，或需要通过反向代理访问，请填写自定义地址（例如 https://api-proxy.example.com）',
       feedUrls: '订阅源地址',
@@ -670,6 +673,7 @@ export default {
       lark_drive: "同步 Lark 云盘文件夹中的文档、表格、文件（飞书国际版）",
       notion: '同步 Notion 中的页面和数据库',
       yuque: '同步语雀知识库中的文档',
+      tencent_docs: '通过腾讯文档 MCP 同步空间、目录和文档',
       rss: '同步 RSS / Atom 订阅源中的文章'
     },
     connector: {
@@ -679,6 +683,7 @@ export default {
       lark_drive: "Lark 云盘",
       notion: 'Notion',
       yuque: '语雀',
+      tencent_docs: '腾讯文档',
       rss: 'RSS / Atom 订阅'
     },
     logDetail: {
@@ -5347,6 +5352,7 @@ export default {
     channelIm: 'IM 渠道',
     channelNotion: 'Notion',
     channelYuque: '语雀',
+    channelTencentDocs: '腾讯文档',
     channelUpload: '上传',
     channelManual: '手动',
     channelUrl: '网页',

@@ -36,6 +36,9 @@ const (
 	ConnectorTypeSlack       = "slack"
 	ConnectorTypeIMAP        = "imap"
 	ConnectorTypeRSS         = "rss"
+	// ConnectorTypeTencentDocs syncs Tencent Docs knowledge spaces through
+	// Tencent Docs' official Streamable HTTP MCP service.
+	ConnectorTypeTencentDocs = "tencent_docs"
 
 	// Sync modes
 	SyncModeIncremental = "incremental"

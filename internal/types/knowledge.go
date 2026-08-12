@@ -35,6 +35,7 @@ const (
 	ChannelNotion           = "notion"            // Notion
 	ChannelYuque            = "yuque"             // Yuque (语雀)
 	ChannelRSS              = "rss"               // RSS / Atom feed
+	ChannelTencentDocs      = "tencent_docs"      // Tencent Docs (腾讯文档)
 )
 
 // Knowledge parse status constants

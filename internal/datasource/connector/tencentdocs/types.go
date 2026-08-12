@@ -59,5 +59,6 @@ type ExportStatus struct {
 	Status   string `json:"status"`
 	FileName string `json:"file_name"`
 	FileURL  string `json:"file_url"`
+	Error    string `json:"error"`
 	TraceID  string `json:"trace_id"`
 }
