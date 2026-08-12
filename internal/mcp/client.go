@@ -51,6 +51,12 @@ type MCPClient interface {
 type ClientConfig struct {
 	Service *types.MCPService
 
+	// HTTPClient optionally supplies the transport used by HTTP-based MCP
+	// clients. When nil, NewMCPClient creates the standard timeout-configured
+	// client. Callers may use this hook to preserve provider-specific HTTP
+	// error semantics without reimplementing the MCP protocol.
+	HTTPClient *http.Client
+
 	// OAuth wiring (only used when Service.AuthConfig.AuthType == oauth).
 	// The token store is scoped to (TenantID, Principal, Service.ID) so each
 	// identity connects with its own access/refresh token.
@@ -153,8 +159,9 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 		timeout = time.Duration(config.Service.AdvancedConfig.Timeout) * time.Second
 	}
 
-	httpClient := &http.Client{
-		Timeout: timeout,
+	httpClient := config.HTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: timeout}
 	}
 
 	// Build headers
