@@ -15,6 +15,7 @@ type fakeConnectorClient struct {
 	nodes       map[string][]Node
 	nodeErrs    map[string]error
 	listCalls   int
+	homeNodes   map[string][]HomeNode
 	infos       map[string]*FileInfo
 	contents    map[string]*DocumentContent
 	infoErrs    map[string]error
@@ -35,6 +36,9 @@ func (f *fakeConnectorClient) ListNodes(_ context.Context, spaceID, parentID str
 		return nil, err
 	}
 	return append([]Node(nil), f.nodes[spaceID+"/"+parentID]...), nil
+}
+func (f *fakeConnectorClient) ListHomeNodes(_ context.Context, folderID string) ([]HomeNode, error) {
+	return append([]HomeNode(nil), f.homeNodes[folderID]...), nil
 }
 
 type recordingStreamHandler struct {
@@ -144,10 +148,11 @@ func TestConnectorListResourcesLazyHierarchy(t *testing.T) {
 	connector := testConnector(client)
 	ctx := context.Background()
 
-	spaces, err := connector.ListResources(ctx, testDataSourceConfig(), "")
-	if err != nil || len(spaces) != 1 {
-		t.Fatalf("ListResources(root) = %+v, %v", spaces, err)
+	resources, err := connector.ListResources(ctx, testDataSourceConfig(), "")
+	if err != nil || len(resources) != 2 {
+		t.Fatalf("ListResources(root) = %+v, %v", resources, err)
 	}
+	spaces := resources[1:]
 	spaceID := encodeSpaceResourceID("space-1")
 	if spaces[0].ExternalID != spaceID || spaces[0].Type != resourceTypeSpace || !spaces[0].HasChildren {
 		t.Fatalf("space resource = %+v", spaces[0])
@@ -168,6 +173,69 @@ func TestConnectorListResourcesLazyHierarchy(t *testing.T) {
 	}
 	if docs[0].ParentID != folderID || docs[0].Type != "smartcanvas" {
 		t.Fatalf("document resource = %+v", docs[0])
+	}
+}
+
+func TestConnectorListResourcesIncludesPersonalHomeHierarchy(t *testing.T) {
+	client := &fakeConnectorClient{
+		spaces: []Space{{ID: "space-1", Title: "财务部"}},
+		homeNodes: map[string][]HomeNode{
+			"": {
+				{ID: "home-folder-1", Title: "制度", IsFolder: true},
+				{ID: "home-doc-1", Title: "报销说明", URL: "https://docs.qq.com/doc/home-doc-1"},
+			},
+			"home-folder-1": {{ID: "home-doc-2", Title: "采购说明"}},
+		},
+	}
+	connector := testConnector(client)
+	ctx := context.Background()
+
+	root, err := connector.ListResources(ctx, testDataSourceConfig(), "")
+	if err != nil || len(root) != 2 {
+		t.Fatalf("ListResources(root) = %+v, %v", root, err)
+	}
+	if root[0].ExternalID != homeRootResourceID || root[0].Type != resourceTypeHome || !root[0].HasChildren {
+		t.Fatalf("personal-home resource = %+v", root[0])
+	}
+	if root[1].ExternalID != encodeSpaceResourceID("space-1") {
+		t.Fatalf("space resource = %+v", root[1])
+	}
+
+	home, err := connector.ListResources(ctx, testDataSourceConfig(), homeRootResourceID)
+	if err != nil || len(home) != 2 {
+		t.Fatalf("ListResources(home) = %+v, %v", home, err)
+	}
+	folderID := encodeHomeNodeResourceID("home-folder-1")
+	if home[0].ExternalID != folderID || home[0].ParentID != homeRootResourceID || !home[0].HasChildren {
+		t.Fatalf("home folder resource = %+v", home[0])
+	}
+	if home[1].ExternalID != encodeHomeNodeResourceID("home-doc-1") || home[1].HasChildren {
+		t.Fatalf("home document resource = %+v", home[1])
+	}
+
+	children, err := connector.ListResources(ctx, testDataSourceConfig(), folderID)
+	if err != nil || len(children) != 1 || children[0].ParentID != folderID {
+		t.Fatalf("ListResources(home folder) = %+v, %v", children, err)
+	}
+}
+
+func TestConnectorResolvePersonalHomeAncestors(t *testing.T) {
+	client := &fakeConnectorClient{
+		homeNodes: map[string][]HomeNode{
+			"":            {{ID: "home-folder", Title: "制度", IsFolder: true}},
+			"home-folder": {{ID: "home-doc", Title: "报销说明"}},
+		},
+	}
+	connector := testConnector(client)
+	ancestors, err := connector.ResolveResourceAncestors(
+		context.Background(), testDataSourceConfig(), []string{encodeHomeNodeResourceID("home-doc")},
+	)
+	if err != nil {
+		t.Fatalf("ResolveResourceAncestors() error: %v", err)
+	}
+	want := []string{homeRootResourceID, encodeHomeNodeResourceID("home-folder")}
+	if !reflect.DeepEqual(ancestors, want) {
+		t.Fatalf("ancestors = %v, want %v", ancestors, want)
 	}
 }
 
@@ -204,6 +272,81 @@ func TestConnectorFetchAllSelectedSpaceTraversesAndDeduplicates(t *testing.T) {
 	}
 	if items[0].ContentType != "text/markdown" || items[0].Metadata["channel"] != types.ChannelTencentDocs {
 		t.Fatalf("item metadata = %+v", items[0])
+	}
+}
+
+func TestConnectorFetchAllPersonalHomeAndSpaceTraversesAndDeduplicatesByFileID(t *testing.T) {
+	client := &fakeConnectorClient{
+		homeNodes: map[string][]HomeNode{
+			"": {
+				{ID: "doc-shared", Title: "共同制度"},
+				{ID: "home-folder", Title: "个人资料", IsFolder: true},
+			},
+			"home-folder": {{ID: "doc-home", Title: "个人说明"}},
+		},
+		nodes: map[string][]Node{
+			"space-1/": {
+				{ID: "doc-shared", Title: "共同制度", Type: "wiki_file", DocumentType: "smartcanvas"},
+				{ID: "doc-space", Title: "空间制度", Type: "wiki_file", DocumentType: "smartcanvas"},
+			},
+		},
+		infos: map[string]*FileInfo{
+			"doc-shared": {ID: "doc-shared", Title: "共同制度", Type: "smartcanvas", ModifiedAt: 100},
+			"doc-home":   {ID: "doc-home", Title: "个人说明", Type: "smartcanvas", ModifiedAt: 200},
+			"doc-space":  {ID: "doc-space", Title: "空间制度", Type: "smartcanvas", ModifiedAt: 300, SpaceID: "space-1"},
+		},
+		contents: map[string]*DocumentContent{
+			"doc-shared": {Text: "shared"},
+			"doc-home":   {Text: "home"},
+			"doc-space":  {Text: "space"},
+		},
+	}
+	connector := testConnector(client)
+	spaceID := encodeSpaceResourceID("space-1")
+	items, err := connector.FetchAll(
+		context.Background(), testDataSourceConfig(homeRootResourceID, spaceID),
+		[]string{homeRootResourceID, spaceID},
+	)
+	if err != nil {
+		t.Fatalf("FetchAll() error: %v", err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("FetchAll() len = %d, want 3 unique files: %+v", len(items), items)
+	}
+	seen := make(map[string]int)
+	for _, item := range items {
+		seen[item.Metadata["file_id"]]++
+	}
+	if !reflect.DeepEqual(seen, map[string]int{"doc-shared": 1, "doc-home": 1, "doc-space": 1}) {
+		t.Fatalf("file-id counts = %#v", seen)
+	}
+	if items[0].Metadata["location"] != "personal_home" {
+		t.Fatalf("personal-home metadata = %+v", items[0].Metadata)
+	}
+}
+
+func TestConnectorFetchAllSelectedPersonalHomeResourceExportsFile(t *testing.T) {
+	client := &fakeConnectorClient{
+		homeNodes: map[string][]HomeNode{"": {{ID: "home-pdf", Title: "附件.pdf"}}},
+		infos: map[string]*FileInfo{
+			"home-pdf": {ID: "home-pdf", Title: "附件.pdf", Type: "pdf", ModifiedAt: 100},
+		},
+		exportTasks: map[string]*ExportTask{"home-pdf": {ID: "task-home-pdf"}},
+		exportStats: map[string]*ExportStatus{
+			"task-home-pdf": {Progress: 100, Status: "done", FileName: "附件.pdf", FileURL: "https://example.invalid/home-pdf"},
+		},
+		exportData: map[string][]byte{"https://example.invalid/home-pdf": []byte("pdf-bytes")},
+	}
+	connector := testConnector(client)
+	items, err := connector.FetchAll(
+		context.Background(), testDataSourceConfig(homeRootResourceID), []string{homeRootResourceID},
+	)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("FetchAll() = %+v, %v", items, err)
+	}
+	item := items[0]
+	if string(item.Content) != "pdf-bytes" || item.ExternalID != encodeHomeNodeResourceID("home-pdf") || item.Metadata["location"] != "personal_home" {
+		t.Fatalf("personal-home resource item = %+v", item)
 	}
 }
 
@@ -294,6 +437,29 @@ func TestConnectorFetchIncrementalReallySkipsUnchangedDocument(t *testing.T) {
 	}
 	if next == nil {
 		t.Fatal("next cursor is nil")
+	}
+}
+
+func TestConnectorFetchIncrementalFileInfoFailureDoesNotEmitDeletion(t *testing.T) {
+	spaceID := encodeSpaceResourceID("space-1")
+	externalID := encodeNodeResourceID("space-1", "doc-1")
+	client := &fakeConnectorClient{
+		nodes: map[string][]Node{"space-1/": {{
+			ID: "doc-1", Title: "A", Type: "wiki_file", DocumentType: "smartcanvas",
+		}}},
+		infoErrs: map[string]error{"doc-1": errors.New("temporary metadata failure")},
+	}
+	cursor := &types.SyncCursor{ConnectorCursor: map[string]interface{}{
+		"document_times": map[string]interface{}{externalID: float64(100)},
+	}}
+	items, _, err := testConnector(client).FetchIncremental(
+		context.Background(), testDataSourceConfig(spaceID), cursor,
+	)
+	if err != nil {
+		t.Fatalf("FetchIncremental() error: %v", err)
+	}
+	if len(items) != 1 || items[0].IsDeleted || items[0].Metadata["error"] == "" {
+		t.Fatalf("items = %+v, want one non-deletion failure", items)
 	}
 }
 

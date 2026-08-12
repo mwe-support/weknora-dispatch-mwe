@@ -9,6 +9,7 @@ type Client interface {
 	Validate(ctx context.Context) error
 	ListSpaces(ctx context.Context) ([]Space, error)
 	ListNodes(ctx context.Context, spaceID string, parentID string) ([]Node, error)
+	ListHomeNodes(ctx context.Context, folderID string) ([]HomeNode, error)
 	GetFileInfo(ctx context.Context, fileID string) (*FileInfo, error)
 	GetContent(ctx context.Context, fileID string) (*DocumentContent, error)
 	StartExport(ctx context.Context, fileID string) (*ExportTask, error)

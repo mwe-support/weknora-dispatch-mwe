@@ -22,12 +22,13 @@ const (
 	// DefaultMCPEndpoint is Tencent Docs' official Streamable HTTP MCP endpoint.
 	DefaultMCPEndpoint = "https://docs.qq.com/openapi/mcp"
 
-	toolQuerySpaceList = "query_space_list"
-	toolQuerySpaceNode = "query_space_node"
-	toolQueryFileInfo  = "manage.query_file_info"
-	toolGetContent     = "get_content"
-	toolExportFile     = "manage.export_file"
-	toolExportProgress = "manage.export_progress"
+	toolQuerySpaceList   = "query_space_list"
+	toolQuerySpaceNode   = "query_space_node"
+	toolManageFolderList = "manage.folder_list"
+	toolQueryFileInfo    = "manage.query_file_info"
+	toolGetContent       = "get_content"
+	toolExportFile       = "manage.export_file"
+	toolExportProgress   = "manage.export_progress"
 
 	defaultMCPTimeout = 30 * time.Second
 	maxMCPPagination  = 10000
@@ -220,6 +221,46 @@ func (c *TencentDocsMCPClient) ListNodes(
 		}
 	}
 	return nil, fmt.Errorf("Tencent Docs MCP tool %s exceeded %d pages", toolQuerySpaceNode, maxMCPPagination)
+}
+
+// ListHomeNodes returns every direct child in the Tencent Docs personal-home
+// hierarchy. An empty folderID lists the account's personal-home root.
+func (c *TencentDocsMCPClient) ListHomeNodes(ctx context.Context, folderID string) ([]HomeNode, error) {
+	if err := c.ensureReady(ctx); err != nil {
+		return nil, err
+	}
+
+	nodes := make([]HomeNode, 0)
+	start := 0
+	emptyUnfinishedStart := -1
+	for page := 0; page < maxMCPPagination; page++ {
+		args := map[string]interface{}{"start": start}
+		if folderID != "" {
+			args["folder_id"] = folderID
+		}
+		var response listHomeNodesResponse
+		if err := c.callToolJSON(ctx, toolManageFolderList, args, &response); err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, response.List...)
+		if response.Finish {
+			return nodes, nil
+		}
+		if len(response.List) == 0 {
+			// manage.folder_list can report finish=false on the empty page just
+			// beyond the real end of a personal-home directory. Retry the same
+			// cursor once so a transient empty page cannot silently truncate the
+			// listing; a repeated empty response is the service's effective EOF.
+			if emptyUnfinishedStart == start {
+				return nodes, nil
+			}
+			emptyUnfinishedStart = start
+			continue
+		}
+		emptyUnfinishedStart = -1
+		start += len(response.List)
+	}
+	return nil, fmt.Errorf("Tencent Docs MCP tool %s exceeded %d pages", toolManageFolderList, maxMCPPagination)
 }
 
 // GetFileInfo retrieves metadata for one Tencent Docs file or folder.
@@ -527,4 +568,9 @@ type listSpacesResponse struct {
 type listNodesResponse struct {
 	Children []Node `json:"children"`
 	HasNext  bool   `json:"has_next"`
+}
+
+type listHomeNodesResponse struct {
+	List   []HomeNode `json:"list"`
+	Finish bool       `json:"finish"`
 }

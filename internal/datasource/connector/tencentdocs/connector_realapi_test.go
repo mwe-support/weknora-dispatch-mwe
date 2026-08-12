@@ -10,7 +10,7 @@ import (
 )
 
 // TestConnectorRealMCP is an opt-in, read-only integration test. It validates
-// exactly the path used by the data-source UI: token -> spaces -> lazy tree ->
+// exactly the path used by the data-source UI: token -> personal home/spaces -> lazy tree ->
 // one selected document -> fetched Markdown. No remote content is modified.
 func TestConnectorRealMCP(t *testing.T) {
 	token := os.Getenv("TENCENT_DOCS_TOKEN")
@@ -28,17 +28,17 @@ func TestConnectorRealMCP(t *testing.T) {
 	if err := connector.Validate(ctx, config); err != nil {
 		t.Fatalf("Validate() error: %v", err)
 	}
-	spaces, err := connector.ListResources(ctx, config, "")
+	rootResources, err := connector.ListResources(ctx, config, "")
 	if err != nil {
 		t.Fatalf("ListResources(root) error: %v", err)
 	}
-	if len(spaces) == 0 {
-		t.Fatal("token can connect but exposes no Tencent Docs spaces")
+	if len(rootResources) == 0 {
+		t.Fatal("token can connect but exposes no Tencent Docs resources")
 	}
 	if wantedSpaceID := os.Getenv("TENCENT_DOCS_TEST_SPACE_ID"); wantedSpaceID != "" {
 		wantedResourceID := encodeSpaceResourceID(wantedSpaceID)
-		filtered := spaces[:0]
-		for _, space := range spaces {
+		filtered := rootResources[:0]
+		for _, space := range rootResources {
 			if space.ExternalID == wantedResourceID {
 				filtered = append(filtered, space)
 			}
@@ -46,12 +46,12 @@ func TestConnectorRealMCP(t *testing.T) {
 		if len(filtered) == 0 {
 			t.Fatalf("TENCENT_DOCS_TEST_SPACE_ID %q is not visible to this token", wantedSpaceID)
 		}
-		spaces = filtered
+		rootResources = filtered
 	}
 
-	document, ok := findFirstRealDocument(ctx, t, connector, config, spaces, 0)
+	document, ok := findFirstRealDocument(ctx, t, connector, config, rootResources, 0)
 	if !ok {
-		t.Skipf("listed %d space(s), but none contains a document visible to this token", len(spaces))
+		t.Skipf("listed %d root resource(s), but none contains a document visible to this token", len(rootResources))
 	}
 	items, err := connector.FetchAll(ctx, config, []string{document.ExternalID})
 	if err != nil {
@@ -60,7 +60,7 @@ func TestConnectorRealMCP(t *testing.T) {
 	if len(items) != 1 || len(items[0].Content) == 0 {
 		t.Fatalf("FetchAll(selected document) returned %d item(s), content bytes=%d", len(items), firstContentLength(items))
 	}
-	t.Logf("real MCP verified: spaces=%d selected=%q markdown_bytes=%d", len(spaces), document.Name, len(items[0].Content))
+	t.Logf("real MCP verified: roots=%d selected=%q content_bytes=%d", len(rootResources), document.Name, len(items[0].Content))
 }
 
 func findFirstRealDocument(
@@ -76,7 +76,7 @@ func findFirstRealDocument(
 		return types.Resource{}, false
 	}
 	for _, parent := range parents {
-		if parent.Type != resourceTypeSpace && isSyncableResourceType(parent.Type) {
+		if parent.Type != resourceTypeSpace && parent.Type != resourceTypeHome && isSyncableResourceType(parent.Type) {
 			return parent, true
 		}
 		if !parent.HasChildren {
@@ -95,7 +95,7 @@ func findFirstRealDocument(
 
 func isSyncableResourceType(resourceType string) bool {
 	switch resourceType {
-	case "", "folder", "wiki_folder", "space", "link", "shortcut", resourceTypeSpace:
+	case "", "folder", "wiki_folder", "space", "link", "shortcut", resourceTypeSpace, resourceTypeHome:
 		return false
 	default:
 		return true

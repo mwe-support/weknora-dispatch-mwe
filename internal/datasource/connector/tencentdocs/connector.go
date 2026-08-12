@@ -17,8 +17,11 @@ import (
 
 const (
 	resourceTypeSpace  = "tencent_docs_space"
+	resourceTypeHome   = "tencent_docs_home"
+	homeRootResourceID = "tdoc:home"
 	spaceIDPrefix      = "tdoc:space:"
 	nodeIDPrefix       = "tdoc:node:"
+	homeNodeIDPrefix   = "tdoc:home-node:"
 	exportPollInterval = 3 * time.Second
 	exportTimeout      = 2 * time.Minute
 )
@@ -102,9 +105,17 @@ func (c *Connector) ListResources(
 		if err != nil {
 			return nil, fmt.Errorf("list Tencent Docs spaces: %w", err)
 		}
-		resources := make([]types.Resource, 0, len(spaces))
+		resources := make([]types.Resource, 0, len(spaces)+1)
+		resources = append(resources, types.Resource{
+			ExternalID:  homeRootResourceID,
+			Name:        "个人首页",
+			Type:        resourceTypeHome,
+			Description: "腾讯文档个人首页中的文件和文件夹",
+			HasChildren: true,
+		})
+		spaceResources := make([]types.Resource, 0, len(spaces))
 		for _, space := range spaces {
-			resources = append(resources, types.Resource{
+			spaceResources = append(spaceResources, types.Resource{
 				ExternalID:  encodeSpaceResourceID(space.ID),
 				Name:        space.Title,
 				Type:        resourceTypeSpace,
@@ -118,13 +129,28 @@ func (c *Connector) ListResources(
 				},
 			})
 		}
-		sort.SliceStable(resources, func(i, j int) bool { return resources[i].Name < resources[j].Name })
+		sort.SliceStable(spaceResources, func(i, j int) bool { return spaceResources[i].Name < spaceResources[j].Name })
+		resources = append(resources, spaceResources...)
 		return resources, nil
+	}
+	if parentID == homeRootResourceID {
+		nodes, err := client.ListHomeNodes(ctx, "")
+		if err != nil {
+			return nil, fmt.Errorf("list Tencent Docs personal home: %w", err)
+		}
+		return homeNodesToResources(parentID, nodes), nil
 	}
 
 	ref, err := decodeResourceID(parentID)
 	if err != nil {
 		return nil, err
+	}
+	if ref.kind == resourceKindHomeNode {
+		nodes, err := client.ListHomeNodes(ctx, ref.nodeID)
+		if err != nil {
+			return nil, fmt.Errorf("list Tencent Docs personal-home folder: %w", err)
+		}
+		return homeNodesToResources(parentID, nodes), nil
 	}
 	parentNodeID := ""
 	if ref.kind == resourceKindNode {
@@ -135,6 +161,36 @@ func (c *Connector) ListResources(
 		return nil, fmt.Errorf("list Tencent Docs nodes: %w", err)
 	}
 	return nodesToResources(ref.spaceID, parentID, nodes), nil
+}
+
+func homeNodesToResources(parentID string, nodes []HomeNode) []types.Resource {
+	resources := make([]types.Resource, 0, len(nodes))
+	for _, node := range nodes {
+		resourceType := "file"
+		if node.IsFolder {
+			resourceType = "folder"
+		}
+		resources = append(resources, types.Resource{
+			ExternalID:  encodeHomeNodeResourceID(node.ID),
+			Name:        node.Title,
+			Type:        resourceType,
+			URL:         node.URL,
+			ParentID:    parentID,
+			HasChildren: node.IsFolder,
+			Metadata: map[string]interface{}{
+				"file_id":   node.ID,
+				"is_folder": node.IsFolder,
+				"location":  "personal_home",
+			},
+		})
+	}
+	sort.SliceStable(resources, func(i, j int) bool {
+		if resources[i].HasChildren != resources[j].HasChildren {
+			return resources[i].HasChildren
+		}
+		return resources[i].Name < resources[j].Name
+	})
+	return resources
 }
 
 func nodesToResources(spaceID, parentID string, nodes []Node) []types.Resource {
@@ -184,12 +240,21 @@ func (c *Connector) ResolveResourceAncestors(
 	}
 	grouped := make(map[string]*spaceTargets)
 	spaceOrder := make([]string, 0)
+	homeTargets := make(map[string]bool)
+	homeOrder := make([]string, 0)
 	for _, resourceID := range resourceIDs {
 		ref, err := decodeResourceID(resourceID)
 		if err != nil {
 			return nil, err
 		}
-		if ref.kind == resourceKindSpace {
+		if ref.kind == resourceKindSpace || ref.kind == resourceKindHomeRoot {
+			continue
+		}
+		if ref.kind == resourceKindHomeNode {
+			if !homeTargets[ref.nodeID] {
+				homeTargets[ref.nodeID] = true
+				homeOrder = append(homeOrder, ref.nodeID)
+			}
 			continue
 		}
 		group := grouped[ref.spaceID]
@@ -206,6 +271,27 @@ func (c *Connector) ResolveResourceAncestors(
 
 	result := make([]string, 0)
 	seen := make(map[string]bool)
+	if len(homeTargets) > 0 {
+		paths := make(map[string][]string, len(homeTargets))
+		if err := findHomeAncestorPaths(
+			ctx, client, "", homeTargets, []string{homeRootResourceID},
+			make(map[string]bool), paths,
+		); err != nil {
+			return nil, fmt.Errorf("resolve Tencent Docs personal-home ancestors: %w", err)
+		}
+		for _, nodeID := range homeOrder {
+			path, found := paths[nodeID]
+			if !found {
+				return nil, fmt.Errorf("%w: Tencent Docs personal-home node %s", datasource.ErrResourceNotFound, nodeID)
+			}
+			for _, id := range path {
+				if !seen[id] {
+					seen[id] = true
+					result = append(result, id)
+				}
+			}
+		}
+	}
 	for _, spaceID := range spaceOrder {
 		group := grouped[spaceID]
 		paths := make(map[string][]string, len(group.targets))
@@ -230,6 +316,46 @@ func (c *Connector) ResolveResourceAncestors(
 		}
 	}
 	return result, nil
+}
+
+func findHomeAncestorPaths(
+	ctx context.Context,
+	client Client,
+	parentFolderID string,
+	targetNodeIDs map[string]bool,
+	path []string,
+	visited map[string]bool,
+	paths map[string][]string,
+) error {
+	if len(paths) == len(targetNodeIDs) {
+		return nil
+	}
+	if visited[parentFolderID] {
+		return nil
+	}
+	visited[parentFolderID] = true
+	nodes, err := client.ListHomeNodes(ctx, parentFolderID)
+	if err != nil {
+		return err
+	}
+	for _, node := range nodes {
+		if targetNodeIDs[node.ID] {
+			paths[node.ID] = append([]string(nil), path...)
+		}
+		if len(paths) == len(targetNodeIDs) {
+			return nil
+		}
+		if !node.IsFolder {
+			continue
+		}
+		childPath := append(append([]string(nil), path...), encodeHomeNodeResourceID(node.ID))
+		if err := findHomeAncestorPaths(
+			ctx, client, node.ID, targetNodeIDs, childPath, visited, paths,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // findAncestorPaths traverses a Tencent Docs space once for all selected
@@ -383,6 +509,7 @@ func (c *Connector) fetch(
 		previous:     previous,
 		incremental:  incremental,
 		seenDocs:     make(map[string]bool),
+		seenFileIDs:  make(map[string]bool),
 		visitedNodes: make(map[string]bool),
 		next:         copyTencentDocsCursor(previous),
 	}
@@ -401,6 +528,16 @@ func (c *Connector) fetch(
 			}
 			continue
 		}
+		if ref.kind == resourceKindHomeRoot {
+			nodes, err := client.ListHomeNodes(ctx, "")
+			if err != nil {
+				return nil, nil, fmt.Errorf("list Tencent Docs personal home: %w", err)
+			}
+			if err := state.walkHomeNodes(ctx, nodes, selectedID); err != nil {
+				return nil, nil, err
+			}
+			continue
+		}
 
 		info, err := client.GetFileInfo(ctx, ref.nodeID)
 		if err != nil {
@@ -408,6 +545,19 @@ func (c *Connector) fetch(
 		}
 		node := nodeFromFileInfo(info)
 		if info.IsFolder {
+			var childrenErr error
+			if ref.kind == resourceKindHomeNode {
+				children, listErr := client.ListHomeNodes(ctx, ref.nodeID)
+				if listErr == nil {
+					childrenErr = state.walkHomeNodes(ctx, children, selectedID)
+				} else {
+					childrenErr = listErr
+				}
+				if childrenErr != nil {
+					return nil, nil, fmt.Errorf("list selected Tencent Docs personal-home folder %s: %w", ref.nodeID, childrenErr)
+				}
+				continue
+			}
 			children, listErr := client.ListNodes(ctx, ref.spaceID, ref.nodeID)
 			if listErr != nil {
 				return nil, nil, fmt.Errorf("list selected Tencent Docs folder %s: %w", ref.nodeID, listErr)
@@ -420,7 +570,11 @@ func (c *Connector) fetch(
 		if !isSyncableNode(node) {
 			return nil, nil, fmt.Errorf("%w: Tencent Docs node %s is not a syncable document", datasource.ErrInvalidConfig, ref.nodeID)
 		}
-		if err := state.fetchNode(ctx, ref.spaceID, node, info, selectedID); err != nil {
+		spaceID := ref.spaceID
+		if ref.kind == resourceKindHomeNode {
+			spaceID = ""
+		}
+		if err := state.fetchNode(ctx, spaceID, node, info, selectedID); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -469,9 +623,45 @@ type fetchState struct {
 	previous     *tencentDocsCursor
 	incremental  bool
 	seenDocs     map[string]bool
+	seenFileIDs  map[string]bool
 	visitedNodes map[string]bool
 	next         *tencentDocsCursor
 	items        []types.FetchedItem
+}
+
+func (s *fetchState) walkHomeNodes(ctx context.Context, nodes []HomeNode, sourceResourceID string) error {
+	for _, homeNode := range nodes {
+		visitKey := "personal_home/" + homeNode.ID
+		if s.visitedNodes[visitKey] {
+			continue
+		}
+		s.visitedNodes[visitKey] = true
+
+		if homeNode.IsFolder {
+			children, err := s.client.ListHomeNodes(ctx, homeNode.ID)
+			if err != nil {
+				failureNode := Node{ID: homeNode.ID, Title: homeNode.Title, URL: homeNode.URL, Type: "folder", HasChildren: true}
+				failure := failedFetchedItem(
+					encodeHomeNodeResourceID(homeNode.ID), homeNode.Title, "", failureNode, sourceResourceID,
+					fmt.Errorf("list Tencent Docs personal-home children: %w", err),
+				)
+				if emitErr := s.emit(ctx, failure); emitErr != nil {
+					return emitErr
+				}
+				continue
+			}
+			if err := s.walkHomeNodes(ctx, children, sourceResourceID); err != nil {
+				return err
+			}
+			continue
+		}
+
+		node := Node{ID: homeNode.ID, Title: homeNode.Title, URL: homeNode.URL, Type: "file"}
+		if err := s.fetchNode(ctx, "", node, nil, sourceResourceID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *fetchState) emit(ctx context.Context, item types.FetchedItem) error {
@@ -564,10 +754,40 @@ func (s *fetchState) fetchNode(
 	knownInfo *FileInfo,
 	sourceResourceID string,
 ) error {
-	if strings.EqualFold(node.Type, "resource") {
-		return s.fetchResource(ctx, spaceID, node, knownInfo, sourceResourceID)
+	info := knownInfo
+	var err error
+	if info == nil {
+		info, err = s.client.GetFileInfo(ctx, node.ID)
 	}
-	return s.fetchDocument(ctx, spaceID, node, knownInfo, sourceResourceID)
+	if err != nil {
+		externalID := fetchedNodeResourceID(spaceID, node.ID)
+		if s.seenFileIDs[node.ID] {
+			return nil
+		}
+		s.seenFileIDs[node.ID] = true
+		s.seenDocs[externalID] = true
+		if s.previous != nil {
+			if previousTime, ok := s.previous.DocumentTimes[externalID]; ok {
+				s.next.DocumentTimes[externalID] = previousTime
+			}
+		}
+		return s.emit(ctx, failedFetchedItem(
+			externalID, node.Title, spaceID, node, sourceResourceID,
+			fmt.Errorf("get Tencent Docs file info: %w", err),
+		))
+	}
+	resolved := nodeFromFileInfo(info)
+	resolved.Title = firstNonEmpty(resolved.Title, node.Title)
+	resolved.URL = firstNonEmpty(resolved.URL, node.URL)
+	if strings.TrimSpace(info.Type) == "" {
+		resolved.Type = node.Type
+		resolved.DocumentType = node.DocumentType
+		resolved.HasChildren = node.HasChildren
+	}
+	if strings.EqualFold(resolved.Type, "resource") {
+		return s.fetchResource(ctx, spaceID, resolved, info, sourceResourceID)
+	}
+	return s.fetchDocument(ctx, spaceID, resolved, info, sourceResourceID)
 }
 
 func (s *fetchState) fetchDocument(
@@ -577,10 +797,11 @@ func (s *fetchState) fetchDocument(
 	knownInfo *FileInfo,
 	sourceResourceID string,
 ) error {
-	externalID := encodeNodeResourceID(spaceID, node.ID)
-	if s.seenDocs[externalID] {
+	externalID := fetchedNodeResourceID(spaceID, node.ID)
+	if s.seenFileIDs[node.ID] {
 		return nil
 	}
+	s.seenFileIDs[node.ID] = true
 	s.seenDocs[externalID] = true
 
 	info := knownInfo
@@ -621,6 +842,16 @@ func (s *fetchState) fetchDocument(
 	if url == "" {
 		url = node.URL
 	}
+	metadata := map[string]string{
+		"channel":       types.ChannelTencentDocs,
+		"space_id":      spaceID,
+		"file_id":       node.ID,
+		"node_type":     node.Type,
+		"document_type": firstNonEmpty(node.DocumentType, info.Type),
+	}
+	if spaceID == "" {
+		metadata["location"] = "personal_home"
+	}
 	return s.emit(ctx, types.FetchedItem{
 		ExternalID:       externalID,
 		Title:            title,
@@ -630,13 +861,7 @@ func (s *fetchState) fetchDocument(
 		URL:              url,
 		UpdatedAt:        timestamp(info.ModifiedAt),
 		SourceResourceID: sourceResourceID,
-		Metadata: map[string]string{
-			"channel":       types.ChannelTencentDocs,
-			"space_id":      spaceID,
-			"file_id":       node.ID,
-			"node_type":     node.Type,
-			"document_type": firstNonEmpty(node.DocumentType, info.Type),
-		},
+		Metadata:         metadata,
 	})
 }
 
@@ -647,10 +872,11 @@ func (s *fetchState) fetchResource(
 	knownInfo *FileInfo,
 	sourceResourceID string,
 ) error {
-	externalID := encodeNodeResourceID(spaceID, node.ID)
-	if s.seenDocs[externalID] {
+	externalID := fetchedNodeResourceID(spaceID, node.ID)
+	if s.seenFileIDs[node.ID] {
 		return nil
 	}
+	s.seenFileIDs[node.ID] = true
 	s.seenDocs[externalID] = true
 
 	info := knownInfo
@@ -710,6 +936,15 @@ func (s *fetchState) fetchResource(
 		fileName = "tencent-docs-resource"
 	}
 	s.next.DocumentTimes[externalID] = info.ModifiedAt
+	metadata := map[string]string{
+		"channel":   types.ChannelTencentDocs,
+		"space_id":  spaceID,
+		"file_id":   node.ID,
+		"node_type": node.Type,
+	}
+	if spaceID == "" {
+		metadata["location"] = "personal_home"
+	}
 	return s.emit(ctx, types.FetchedItem{
 		ExternalID:       externalID,
 		Title:            firstNonEmpty(info.Title, node.Title, fileName),
@@ -719,13 +954,15 @@ func (s *fetchState) fetchResource(
 		URL:              firstNonEmpty(info.URL, node.URL),
 		UpdatedAt:        timestamp(info.ModifiedAt),
 		SourceResourceID: sourceResourceID,
-		Metadata: map[string]string{
-			"channel":   types.ChannelTencentDocs,
-			"space_id":  spaceID,
-			"file_id":   node.ID,
-			"node_type": node.Type,
-		},
+		Metadata:         metadata,
 	})
+}
+
+func fetchedNodeResourceID(spaceID, nodeID string) string {
+	if spaceID == "" {
+		return encodeHomeNodeResourceID(nodeID)
+	}
+	return encodeNodeResourceID(spaceID, nodeID)
 }
 
 func (s *fetchState) emitResourceFailure(
@@ -752,17 +989,21 @@ func failedFetchedItem(
 	sourceResourceID string,
 	err error,
 ) types.FetchedItem {
+	metadata := map[string]string{
+		"channel":   types.ChannelTencentDocs,
+		"space_id":  spaceID,
+		"file_id":   node.ID,
+		"node_type": node.Type,
+		"error":     err.Error(),
+	}
+	if spaceID == "" {
+		metadata["location"] = "personal_home"
+	}
 	return types.FetchedItem{
 		ExternalID:       externalID,
 		Title:            title,
 		SourceResourceID: sourceResourceID,
-		Metadata: map[string]string{
-			"channel":   types.ChannelTencentDocs,
-			"space_id":  spaceID,
-			"file_id":   node.ID,
-			"node_type": node.Type,
-			"error":     err.Error(),
-		},
+		Metadata:         metadata,
 	}
 }
 
@@ -780,6 +1021,8 @@ type resourceKind int
 const (
 	resourceKindSpace resourceKind = iota + 1
 	resourceKindNode
+	resourceKindHomeRoot
+	resourceKindHomeNode
 )
 
 type resourceRef struct {
@@ -796,6 +1039,10 @@ func encodeNodeResourceID(spaceID, nodeID string) string {
 	return nodeIDPrefix + encodeIDPart(spaceID) + ":" + encodeIDPart(nodeID)
 }
 
+func encodeHomeNodeResourceID(nodeID string) string {
+	return homeNodeIDPrefix + encodeIDPart(nodeID)
+}
+
 func encodeIDPart(value string) string {
 	return base64.RawURLEncoding.EncodeToString([]byte(value))
 }
@@ -809,6 +1056,13 @@ func decodeIDPart(value string) (string, error) {
 }
 
 func decodeResourceID(value string) (resourceRef, error) {
+	if value == homeRootResourceID {
+		return resourceRef{kind: resourceKindHomeRoot}, nil
+	}
+	if strings.HasPrefix(value, homeNodeIDPrefix) {
+		nodeID, err := decodeIDPart(strings.TrimPrefix(value, homeNodeIDPrefix))
+		return resourceRef{kind: resourceKindHomeNode, nodeID: nodeID}, err
+	}
 	if strings.HasPrefix(value, spaceIDPrefix) {
 		spaceID, err := decodeIDPart(strings.TrimPrefix(value, spaceIDPrefix))
 		return resourceRef{kind: resourceKindSpace, spaceID: spaceID}, err

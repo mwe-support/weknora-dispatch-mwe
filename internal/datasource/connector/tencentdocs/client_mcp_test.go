@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -308,6 +309,86 @@ func TestListNodesPaginatesWithParent(t *testing.T) {
 		t.Fatalf("node[0] = %+v", nodes[0])
 	}
 }
+
+func TestListHomeNodesPaginatesFromRoot(t *testing.T) {
+	transport := &fakeMCPClient{}
+	var starts []int
+	transport.callTool = func(name string, args map[string]interface{}) (*internalmcp.CallToolResult, error) {
+		if name != toolManageFolderList {
+			t.Fatalf("tool = %q, want %q", name, toolManageFolderList)
+		}
+		if _, ok := args["folder_id"]; ok {
+			t.Fatalf("root listing must omit folder_id: %#v", args)
+		}
+		start := args["start"].(int)
+		starts = append(starts, start)
+		if start == 0 {
+			return toolJSON(t, map[string]interface{}{
+				"list": []map[string]interface{}{{
+					"id": "home-folder-1", "title": "制度", "is_folder": true,
+				}},
+				"finish": false,
+			}), nil
+		}
+		return toolJSON(t, map[string]interface{}{
+			"list": []map[string]interface{}{{
+				"id": "home-doc-1", "title": "报销制度", "url": "https://docs.qq.com/doc/home-doc-1",
+			}},
+			"finish": true,
+		}), nil
+	}
+
+	client := newTestClient(t, transport)
+	nodes, err := client.ListHomeNodes(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListHomeNodes() error: %v", err)
+	}
+	if !reflect.DeepEqual(starts, []int{0, 1}) {
+		t.Fatalf("starts = %v, want [0 1]", starts)
+	}
+	if len(nodes) != 2 || nodes[0].ID != "home-folder-1" || !nodes[0].IsFolder || nodes[1].ID != "home-doc-1" {
+		t.Fatalf("home nodes = %+v", nodes)
+	}
+}
+
+func TestListHomeNodesTreatsRepeatedEmptyUnfinishedTailAsComplete(t *testing.T) {
+	transport := &fakeMCPClient{}
+	var starts []int
+	transport.callTool = func(name string, args map[string]interface{}) (*internalmcp.CallToolResult, error) {
+		if name != toolManageFolderList {
+			t.Fatalf("tool = %q, want %q", name, toolManageFolderList)
+		}
+		start := args["start"].(int)
+		starts = append(starts, start)
+		if start == 0 {
+			items := make([]map[string]interface{}, 55)
+			for i := range items {
+				items[i] = map[string]interface{}{
+					"id": "home-doc-" + strconv.Itoa(i+1), "title": "首页文档",
+				}
+			}
+			return toolJSON(t, map[string]interface{}{
+				"list": items, "finish": false,
+			}), nil
+		}
+		return toolJSON(t, map[string]interface{}{
+			"list": []map[string]interface{}{}, "finish": false,
+		}), nil
+	}
+
+	client := newTestClient(t, transport)
+	nodes, err := client.ListHomeNodes(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListHomeNodes() error: %v", err)
+	}
+	if len(nodes) != 55 {
+		t.Fatalf("len(nodes) = %d, want 55", len(nodes))
+	}
+	if !reflect.DeepEqual(starts, []int{0, 55, 55}) {
+		t.Fatalf("starts = %v, want [0 55 55]", starts)
+	}
+}
+
 func TestTypedTencentDocsTools(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -321,11 +402,12 @@ func TestTypedTencentDocsTools(t *testing.T) {
 			args: map[string]interface{}{"file_id": "file-1"},
 			response: map[string]interface{}{
 				"file_id": "file-1", "title": "采购流程", "type": "smartcanvas",
-				"last_modify_time": 1713686400, "space_id": "space-1", "is_folder": false,
+				"create_time": "1713600000000", "last_modify_time": "1713686400000",
+				"space_id": "space-1", "is_folder": false,
 			},
 			assert: func(t *testing.T, client *TencentDocsMCPClient) {
 				info, err := client.GetFileInfo(context.Background(), "file-1")
-				if err != nil || info.ID != "file-1" || info.ModifiedAt != 1713686400 {
+				if err != nil || info.ID != "file-1" || info.CreatedAt != 1713600000000 || info.ModifiedAt != 1713686400000 {
 					t.Fatalf("GetFileInfo() = %+v, %v", info, err)
 				}
 			},
