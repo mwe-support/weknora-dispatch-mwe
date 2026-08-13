@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -432,6 +433,9 @@ func (c *TencentDocsMCPClient) callToolJSON(
 		if !client.IsConnected() {
 			c.markNeedsRebuild(generation)
 		}
+		if toolErr := parseTransportBusinessError(tool, err); toolErr != nil {
+			return classifyCredentialError(toolErr)
+		}
 		return classifyCredentialError(fmt.Errorf("call Tencent Docs MCP tool %s: %w", tool, err))
 	}
 	if result == nil {
@@ -467,6 +471,52 @@ func (c *TencentDocsMCPClient) callToolJSON(
 		return fmt.Errorf("decode JSON response from Tencent Docs MCP tool %s: %w", tool, decodeErr)
 	}
 	return fmt.Errorf("Tencent Docs MCP tool %s returned no JSON text content", tool)
+}
+
+// parseTransportBusinessError normalizes the structured diagnostic currently
+// returned by Tencent Docs as an MCP transport error instead of a CallTool
+// result. Matching both the requested tool and the complete business prefix
+// keeps this conservative: unrelated transport, permission, and network
+// failures retain their original error path.
+func parseTransportBusinessError(tool string, err error) *MCPToolError {
+	if err == nil {
+		return nil
+	}
+	raw := err.Error()
+	if !strings.Contains(raw, "(tool: "+tool+")") {
+		return nil
+	}
+	const prefix = "type:business, code:"
+	start := strings.Index(raw, prefix)
+	if start < 0 {
+		return nil
+	}
+	payload := raw[start+len(prefix):]
+	const messageMarker = ", msg:"
+	messageStart := strings.Index(payload, messageMarker)
+	if messageStart < 0 {
+		return nil
+	}
+	code, parseErr := strconv.Atoi(strings.TrimSpace(payload[:messageStart]))
+	if parseErr != nil {
+		return nil
+	}
+	messageAndTrace := payload[messageStart+len(messageMarker):]
+	message := messageAndTrace
+	traceID := ""
+	const traceMarker = ", trace_id:"
+	if traceStart := strings.LastIndex(messageAndTrace, traceMarker); traceStart >= 0 {
+		message = messageAndTrace[:traceStart]
+		traceFields := strings.Fields(strings.TrimSpace(messageAndTrace[traceStart+len(traceMarker):]))
+		if len(traceFields) > 0 {
+			traceID = strings.Trim(traceFields[0], "()[]{}")
+		}
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return nil
+	}
+	return &MCPToolError{Tool: tool, Code: code, Message: message, TraceID: traceID}
 }
 
 func (c *TencentDocsMCPClient) currentTransport() (internalmcp.MCPClient, uint64) {

@@ -23,17 +23,16 @@ import (
 // unknownFileType is returned by getFileType when a name carries no extension.
 const unknownFileType = "unknown"
 
-// supportedImportFileExtensions is the single source of truth for extensions
-// accepted by every knowledge import path: direct upload, file-URL download,
-// and the worker's post-download re-check. Keeping one set avoids the drift
-// that let direct upload accept xlsx while URL import rejected it (#2447).
-var supportedImportFileExtensions = map[string]struct{}{
-	"pdf": {}, "txt": {}, "docx": {}, "doc": {}, "epub": {},
-	"html": {}, "htm": {}, "mhtml": {}, "md": {}, "markdown": {},
-	"png": {}, "jpg": {}, "jpeg": {}, "gif": {},
-	"csv": {}, "xlsx": {}, "xls": {}, "pptx": {}, "ppt": {}, "json": {},
-	"mp3": {}, "wav": {}, "m4a": {}, "flac": {}, "ogg": {},
-}
+// supportedImportFileExtensions is retained for package-local compatibility
+// tests, but is derived from the shared types-level source of truth used by
+// direct upload, URL import, workers, and data-source connectors.
+var supportedImportFileExtensions = func() map[string]struct{} {
+	extensions := make(map[string]struct{})
+	for _, extension := range types.SupportedKnowledgeFileExtensions() {
+		extensions[extension] = struct{}{}
+	}
+	return extensions
+}()
 
 // dataTableFileExtensions are the spreadsheet formats that get an extra
 // table-summary task after their document-process task.
@@ -53,8 +52,7 @@ func isSupportedImportExtension(ext string) bool {
 	if ext == "" || ext == unknownFileType {
 		return false
 	}
-	_, ok := supportedImportFileExtensions[ext]
-	return ok
+	return types.IsSupportedKnowledgeFileExtension(ext)
 }
 
 // isValidFileType checks if a filename's extension is supported for import.

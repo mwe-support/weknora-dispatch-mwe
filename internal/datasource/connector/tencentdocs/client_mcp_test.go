@@ -514,6 +514,49 @@ func TestToolErrorsRemainDiagnostic(t *testing.T) {
 	}
 }
 
+func TestCallToolTransportBusinessErrorIsNormalized(t *testing.T) {
+	transport := &fakeMCPClient{
+		callTool: func(string, map[string]interface{}) (*internalmcp.CallToolResult, error) {
+			return nil, errors.New(
+				"failed to call tool: internal error: tool execution failed " +
+					"(tool: manage.query_file_info): type:business, code:400001, " +
+					"msg:file type not support query, trace_id:7f80d4d2185949ca9a8b8182bc99f498",
+			)
+		},
+	}
+	client := newTestClient(t, transport)
+
+	_, err := client.GetFileInfo(context.Background(), "file-1")
+	var toolErr *MCPToolError
+	if !errors.As(err, &toolErr) {
+		t.Fatalf("GetFileInfo() error = %T %v, want *MCPToolError", err, err)
+	}
+	if toolErr.Tool != toolQueryFileInfo || toolErr.Code != 400001 ||
+		toolErr.Message != "file type not support query" ||
+		toolErr.TraceID != "7f80d4d2185949ca9a8b8182bc99f498" {
+		t.Fatalf("MCPToolError = %+v", toolErr)
+	}
+}
+
+func TestCallToolTransportBusinessErrorRequiresMatchingTool(t *testing.T) {
+	transport := &fakeMCPClient{
+		callTool: func(string, map[string]interface{}) (*internalmcp.CallToolResult, error) {
+			return nil, errors.New(
+				"failed to call tool: internal error: tool execution failed " +
+					"(tool: another.tool): type:business, code:400001, " +
+					"msg:file type not support query, trace_id:trace-other",
+			)
+		},
+	}
+	client := newTestClient(t, transport)
+
+	_, err := client.GetFileInfo(context.Background(), "file-1")
+	var toolErr *MCPToolError
+	if errors.As(err, &toolErr) {
+		t.Fatalf("GetFileInfo() error = %+v, mismatched tool must not be normalized", toolErr)
+	}
+}
+
 func TestInvalidTencentDocsCredentialsAreClassified(t *testing.T) {
 	transport := &fakeMCPClient{
 		callTool: func(string, map[string]interface{}) (*internalmcp.CallToolResult, error) {

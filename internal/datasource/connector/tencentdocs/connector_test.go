@@ -10,20 +10,23 @@ import (
 )
 
 type fakeConnectorClient struct {
-	validateErr error
-	spaces      []Space
-	nodes       map[string][]Node
-	nodeErrs    map[string]error
-	listCalls   int
-	homeNodes   map[string][]HomeNode
-	infos       map[string]*FileInfo
-	contents    map[string]*DocumentContent
-	infoErrs    map[string]error
-	contentErrs map[string]error
-	exportTasks map[string]*ExportTask
-	exportStats map[string]*ExportStatus
-	exportData  map[string][]byte
-	closed      int
+	validateErr  error
+	spaces       []Space
+	nodes        map[string][]Node
+	nodeErrs     map[string]error
+	listCalls    int
+	homeNodes    map[string][]HomeNode
+	infos        map[string]*FileInfo
+	contents     map[string]*DocumentContent
+	infoErrs     map[string]error
+	contentErrs  map[string]error
+	exportTasks  map[string]*ExportTask
+	exportStats  map[string]*ExportStatus
+	exportData   map[string][]byte
+	contentGets  int
+	exportStarts int
+	downloads    int
+	closed       int
 }
 
 func (f *fakeConnectorClient) Validate(context.Context) error { return f.validateErr }
@@ -67,6 +70,7 @@ func (f *fakeConnectorClient) GetFileInfo(_ context.Context, fileID string) (*Fi
 	return &copy, nil
 }
 func (f *fakeConnectorClient) GetContent(_ context.Context, fileID string) (*DocumentContent, error) {
+	f.contentGets++
 	if err := f.contentErrs[fileID]; err != nil {
 		return nil, err
 	}
@@ -78,6 +82,7 @@ func (f *fakeConnectorClient) GetContent(_ context.Context, fileID string) (*Doc
 	return &copy, nil
 }
 func (f *fakeConnectorClient) StartExport(context.Context, string) (*ExportTask, error) {
+	f.exportStarts++
 	for _, task := range f.exportTasks {
 		copy := *task
 		return &copy, nil
@@ -93,6 +98,7 @@ func (f *fakeConnectorClient) GetExportProgress(_ context.Context, taskID string
 	return &copy, nil
 }
 func (f *fakeConnectorClient) DownloadExport(_ context.Context, fileURL string) ([]byte, error) {
+	f.downloads++
 	data, ok := f.exportData[fileURL]
 	if !ok {
 		return nil, errors.New("missing export data")
@@ -124,6 +130,51 @@ func TestConnectorTypeAndValidate(t *testing.T) {
 	}
 	if client.closed != 1 {
 		t.Fatalf("Close() calls = %d, want 1", client.closed)
+	}
+}
+
+func TestTencentDocsOnlineTypeCompatibilityMatrix(t *testing.T) {
+	for _, documentType := range []string{
+		"word", "excel", "form", "slide", "smartcanvas", "smartsheet", "mind", "flowchart",
+		"doc", "sheet",
+	} {
+		if !isTencentDocsOnlineType(documentType) {
+			t.Errorf("isTencentDocsOnlineType(%q) = false, want true", documentType)
+		}
+	}
+	for _, documentType := range []string{"", "pdf", "png", "zip", "derivative"} {
+		if isTencentDocsOnlineType(documentType) {
+			t.Errorf("isTencentDocsOnlineType(%q) = true, want false", documentType)
+		}
+	}
+}
+
+func TestConnectorFetchAllUsesContentPathForEveryOnlineDocumentType(t *testing.T) {
+	for _, documentType := range []string{
+		"word", "excel", "form", "slide", "smartcanvas", "smartsheet", "mind", "flowchart",
+	} {
+		t.Run(documentType, func(t *testing.T) {
+			client := &fakeConnectorClient{
+				nodes: map[string][]Node{"space-1/": {{
+					ID: "online-1", Title: "Online", Type: "wiki_file", DocumentType: documentType,
+				}}},
+				infos: map[string]*FileInfo{"online-1": {
+					ID: "online-1", Title: "Online", Type: documentType, ModifiedAt: 100,
+				}},
+				contents: map[string]*DocumentContent{"online-1": {Text: "content"}},
+			}
+
+			items, err := testConnector(client).FetchAll(
+				context.Background(), testDataSourceConfig(encodeSpaceResourceID("space-1")),
+				[]string{encodeSpaceResourceID("space-1")},
+			)
+			if err != nil || len(items) != 1 || string(items[0].Content) != "content" {
+				t.Fatalf("FetchAll() = %+v, %v", items, err)
+			}
+			if client.contentGets != 1 || client.exportStarts != 0 {
+				t.Fatalf("GetContent=%d StartExport=%d, want 1/0", client.contentGets, client.exportStarts)
+			}
+		})
 	}
 }
 
@@ -350,6 +401,33 @@ func TestConnectorFetchAllSelectedPersonalHomeResourceExportsFile(t *testing.T) 
 	}
 }
 
+func TestConnectorFetchAllDirectlySelectedUnclassifiedPersonalHomeFile(t *testing.T) {
+	const fileURL = "https://example.myqcloud.com/download?response-content-disposition=attachment%3Bfilename%3D%22home.pdf%22"
+	client := &fakeConnectorClient{
+		infoErrs: map[string]error{"home-pdf": &MCPToolError{
+			Tool: toolQueryFileInfo, Code: 400001, Message: "file type not support query",
+		}},
+		exportTasks: map[string]*ExportTask{"home-pdf": {ID: "task-home-pdf"}},
+		exportStats: map[string]*ExportStatus{"task-home-pdf": {
+			Progress: 100, FileURL: fileURL,
+		}},
+		exportData: map[string][]byte{fileURL: []byte("pdf-bytes")},
+	}
+	selectedID := encodeHomeNodeResourceID("home-pdf")
+
+	items, err := testConnector(client).FetchAll(
+		context.Background(), testDataSourceConfig(selectedID), []string{selectedID},
+	)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("FetchAll() = %+v, %v", items, err)
+	}
+	item := items[0]
+	if item.ExternalID != selectedID || item.FileName != "home.pdf" ||
+		string(item.Content) != "pdf-bytes" || item.Metadata["location"] != "personal_home" {
+		t.Fatalf("personal-home fallback item = %+v", item)
+	}
+}
+
 func TestConnectorFetchAllContinuesAfterOneDocumentFails(t *testing.T) {
 	client := &fakeConnectorClient{
 		nodes: map[string][]Node{"space-1/": {
@@ -410,6 +488,241 @@ func TestConnectorFetchAllExportsResourceFiles(t *testing.T) {
 	}
 	if string(items[1].Content) != "ok" {
 		t.Fatalf("document item = %+v", items[1])
+	}
+}
+
+func TestConnectorFetchAllExportsUnclassifiedSpaceFilesWhenFileInfoDoesNotSupportType(t *testing.T) {
+	tests := []struct {
+		name     string
+		fileID   string
+		title    string
+		fileName string
+		fileURL  string
+		content  string
+	}{
+		{
+			name: "PDF", fileID: "pdf-1", title: "报销制度", fileName: "policy.pdf",
+			fileURL: "https://example.myqcloud.com/download?response-content-disposition=attachment%3Bfilename%3D%22policy.pdf%22",
+			content: "pdf-bytes",
+		},
+		{
+			name: "PNG", fileID: "png-1", title: "财务部组织架构图", fileName: "组织图.png",
+			fileURL: "https://example.myqcloud.com/download?response-content-disposition=attachment%3Bfilename%3D%22.png%22%3Bfilename%2A%3DUTF-8%27%27%25E7%25BB%2584%25E7%25BB%2587%25E5%259B%25BE.png",
+			content: "png-bytes",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &fakeConnectorClient{
+				nodes: map[string][]Node{"space-1/": {{
+					ID: tt.fileID, Title: tt.title, Type: "wiki_file",
+				}}},
+				infoErrs: map[string]error{tt.fileID: &MCPToolError{
+					Tool: toolQueryFileInfo, Code: 400001, Message: "file type not support query",
+				}},
+				exportTasks: map[string]*ExportTask{tt.fileID: {ID: "task-1"}},
+				exportStats: map[string]*ExportStatus{"task-1": {
+					Progress: 100, FileURL: tt.fileURL,
+				}},
+				exportData: map[string][]byte{tt.fileURL: []byte(tt.content)},
+			}
+
+			items, err := testConnector(client).FetchAll(
+				context.Background(), testDataSourceConfig(encodeSpaceResourceID("space-1")),
+				[]string{encodeSpaceResourceID("space-1")},
+			)
+			if err != nil {
+				t.Fatalf("FetchAll() error: %v", err)
+			}
+			if len(items) != 1 {
+				t.Fatalf("items = %+v, want one exported file", items)
+			}
+			if items[0].Metadata["error"] != "" || items[0].FileName != tt.fileName || string(items[0].Content) != tt.content {
+				t.Fatalf("item = %+v, want exported %s bytes", items[0], tt.name)
+			}
+		})
+	}
+}
+
+func TestConnectorFetchAllExportsDirectlySelectedUnclassifiedFile(t *testing.T) {
+	const fileURL = "https://example.myqcloud.com/download?response-content-disposition=attachment%3Bfilename%3D%22policy.pdf%22"
+	client := &fakeConnectorClient{
+		infoErrs: map[string]error{"pdf-1": &MCPToolError{
+			Tool: toolQueryFileInfo, Code: 400001, Message: "file type not support query",
+		}},
+		exportTasks: map[string]*ExportTask{"pdf-1": {ID: "task-1"}},
+		exportStats: map[string]*ExportStatus{"task-1": {
+			Progress: 100, FileURL: fileURL,
+		}},
+		exportData: map[string][]byte{fileURL: []byte("pdf-bytes")},
+	}
+	selectedID := encodeNodeResourceID("space-1", "pdf-1")
+
+	items, err := testConnector(client).FetchAll(
+		context.Background(), testDataSourceConfig(selectedID), []string{selectedID},
+	)
+	if err != nil {
+		t.Fatalf("FetchAll() error: %v", err)
+	}
+	if len(items) != 1 || items[0].FileName != "policy.pdf" || string(items[0].Content) != "pdf-bytes" {
+		t.Fatalf("items = %+v, want directly selected exported PDF", items)
+	}
+}
+
+func TestConnectorFetchAllExportsResourceWithDocumentTypeOnExactUnsupportedInfoError(t *testing.T) {
+	const fileURL = "https://example.myqcloud.com/download?response-content-disposition=attachment%3Bfilename%3D%22policy.pdf%22"
+	client := &fakeConnectorClient{
+		nodes: map[string][]Node{"space-1/": {{
+			ID: "pdf-1", Title: "Policy", Type: "resource", DocumentType: "pdf",
+		}}},
+		infoErrs: map[string]error{"pdf-1": &MCPToolError{
+			Tool: toolQueryFileInfo, Code: 400001, Message: "file type not support query",
+		}},
+		exportTasks: map[string]*ExportTask{"pdf-1": {ID: "task-1"}},
+		exportStats: map[string]*ExportStatus{"task-1": {Progress: 100, FileURL: fileURL}},
+		exportData:  map[string][]byte{fileURL: []byte("pdf-bytes")},
+	}
+
+	items, err := testConnector(client).FetchAll(
+		context.Background(), testDataSourceConfig(encodeSpaceResourceID("space-1")),
+		[]string{encodeSpaceResourceID("space-1")},
+	)
+	if err != nil || len(items) != 1 || items[0].Metadata["error"] != "" || string(items[0].Content) != "pdf-bytes" {
+		t.Fatalf("FetchAll() = %+v, %v, want exported resource", items, err)
+	}
+}
+
+func TestConnectorFetchAllPrefersExportNameWithExtension(t *testing.T) {
+	const fileURL = "https://example.myqcloud.com/download?response-content-disposition=attachment%3Bfilename%3D%22policy.pdf%22"
+	client := &fakeConnectorClient{
+		nodes: map[string][]Node{"space-1/": {{ID: "pdf-1", Title: "Policy", Type: "wiki_file"}}},
+		infoErrs: map[string]error{"pdf-1": &MCPToolError{
+			Tool: toolQueryFileInfo, Code: 400001, Message: "file type not support query",
+		}},
+		exportTasks: map[string]*ExportTask{"pdf-1": {ID: "task-1"}},
+		exportStats: map[string]*ExportStatus{"task-1": {
+			Progress: 100, FileName: "download", FileURL: fileURL,
+		}},
+		exportData: map[string][]byte{fileURL: []byte("pdf-bytes")},
+	}
+
+	items, err := testConnector(client).FetchAll(
+		context.Background(), testDataSourceConfig(encodeSpaceResourceID("space-1")),
+		[]string{encodeSpaceResourceID("space-1")},
+	)
+	if err != nil || len(items) != 1 || items[0].FileName != "policy.pdf" || string(items[0].Content) != "pdf-bytes" {
+		t.Fatalf("FetchAll() = %+v, %v, want URL filename with supported extension", items, err)
+	}
+}
+
+func TestConnectorFetchAllSkipsUnsupportedExportedResourceExtension(t *testing.T) {
+	const fileURL = "https://example.myqcloud.com/download?response-content-disposition=attachment%3Bfilename%3D%22agent-bundle.zip%22"
+	client := &fakeConnectorClient{
+		nodes: map[string][]Node{"space-1/": {{
+			ID: "zip-1", Title: "Agent bundle", Type: "wiki_file",
+		}}},
+		infoErrs: map[string]error{"zip-1": &MCPToolError{
+			Tool: toolQueryFileInfo, Code: 400001, Message: "file type not support query",
+		}},
+		exportTasks: map[string]*ExportTask{"zip-1": {ID: "task-1"}},
+		exportStats: map[string]*ExportStatus{"task-1": {
+			Progress: 100, FileURL: fileURL,
+		}},
+		exportData: map[string][]byte{fileURL: []byte("zip-bytes")},
+	}
+
+	items, err := testConnector(client).FetchAll(
+		context.Background(), testDataSourceConfig(encodeSpaceResourceID("space-1")),
+		[]string{encodeSpaceResourceID("space-1")},
+	)
+	if err != nil {
+		t.Fatalf("FetchAll() error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %+v, want one explicit skip placeholder", items)
+	}
+	item := items[0]
+	if item.Metadata["error"] != "" || item.Metadata["skip_reason"] != "unsupported_file_type" {
+		t.Fatalf("item metadata = %+v, want a non-failure unsupported-file skip", item.Metadata)
+	}
+	if len(item.Content) != 0 || item.URL != "" {
+		t.Fatalf("item = %+v, unsupported file must not reach ingestion", item)
+	}
+	if client.downloads != 0 {
+		t.Fatalf("DownloadExport() calls = %d, unsupported file must be rejected from export metadata", client.downloads)
+	}
+}
+
+func TestConnectorFetchIncrementalSkipsUnchangedUnsupportedExportMetadata(t *testing.T) {
+	const fileURL = "https://example.myqcloud.com/download?response-content-disposition=attachment%3Bfilename%3D%22agent-bundle.zip%22"
+	client := &fakeConnectorClient{
+		nodes: map[string][]Node{"space-1/": {{ID: "zip-1", Title: "Agent bundle", Type: "wiki_file"}}},
+		infoErrs: map[string]error{"zip-1": &MCPToolError{
+			Tool: toolQueryFileInfo, Code: 400001, Message: "file type not support query",
+		}},
+		exportTasks: map[string]*ExportTask{"zip-1": {ID: "task-1"}},
+		exportStats: map[string]*ExportStatus{"task-1": {Progress: 100, FileURL: fileURL}},
+	}
+	connector := testConnector(client)
+	config := testDataSourceConfig(encodeSpaceResourceID("space-1"))
+
+	first, cursor, err := connector.FetchIncremental(context.Background(), config, nil)
+	if err != nil || len(first) != 1 || first[0].Metadata["skip_reason"] != "unsupported_file_type" {
+		t.Fatalf("first FetchIncremental() = %+v, %+v, %v", first, cursor, err)
+	}
+	second, _, err := connector.FetchIncremental(context.Background(), config, cursor)
+	if err != nil {
+		t.Fatalf("second FetchIncremental() error: %v", err)
+	}
+	if len(second) != 0 {
+		t.Fatalf("second items = %+v, want unchanged unsupported file to stay skipped", second)
+	}
+	if client.downloads != 0 {
+		t.Fatalf("DownloadExport() calls = %d, unsupported file must never be downloaded", client.downloads)
+	}
+}
+
+func TestConnectorFetchIncrementalSkipsUnchangedUnclassifiedFileByContentHash(t *testing.T) {
+	const (
+		fileID  = "pdf-1"
+		fileURL = "https://example.myqcloud.com/download?response-content-disposition=attachment%3Bfilename%3D%22policy.pdf%22"
+	)
+	client := &fakeConnectorClient{
+		nodes: map[string][]Node{"space-1/": {{ID: fileID, Title: "报销制度", Type: "wiki_file"}}},
+		infoErrs: map[string]error{fileID: &MCPToolError{
+			Tool: toolQueryFileInfo, Code: 400001, Message: "file type not support query",
+		}},
+		exportTasks: map[string]*ExportTask{fileID: {ID: "task-1"}},
+		exportStats: map[string]*ExportStatus{"task-1": {
+			Progress: 100, FileURL: fileURL,
+		}},
+		exportData: map[string][]byte{fileURL: []byte("same-pdf-bytes")},
+	}
+	connector := testConnector(client)
+	config := testDataSourceConfig(encodeSpaceResourceID("space-1"))
+
+	first, cursor, err := connector.FetchIncremental(context.Background(), config, nil)
+	if err != nil || len(first) != 1 || cursor == nil {
+		t.Fatalf("first FetchIncremental() = %+v, %+v, %v", first, cursor, err)
+	}
+	second, next, err := connector.FetchIncremental(context.Background(), config, cursor)
+	if err != nil {
+		t.Fatalf("second FetchIncremental() error: %v", err)
+	}
+	if len(second) != 0 {
+		t.Fatalf("second items = %+v, want unchanged exported file to be skipped", second)
+	}
+	if next == nil {
+		t.Fatal("second cursor is nil")
+	}
+	client.exportData[fileURL] = []byte("changed-pdf-bytes")
+	third, _, err := connector.FetchIncremental(context.Background(), config, next)
+	if err != nil {
+		t.Fatalf("third FetchIncremental() error: %v", err)
+	}
+	if len(third) != 1 || string(third[0].Content) != "changed-pdf-bytes" {
+		t.Fatalf("third items = %+v, want changed exported file", third)
 	}
 }
 
@@ -610,6 +923,76 @@ func TestConnectorFetchStreamEmitsAndCheckpointsWithoutBuffering(t *testing.T) {
 	}
 	if next == nil || next.ConnectorCursor == nil {
 		t.Fatal("final cursor is nil")
+	}
+}
+
+func TestConnectorFetchStreamExportsUnclassifiedFile(t *testing.T) {
+	const fileURL = "https://example.myqcloud.com/download?response-content-disposition=attachment%3Bfilename%3D%22org-chart.png%22"
+	client := &fakeConnectorClient{
+		nodes: map[string][]Node{"space-1/": {{ID: "png-1", Title: "组织架构图", Type: "wiki_file"}}},
+		infoErrs: map[string]error{"png-1": &MCPToolError{
+			Tool: toolQueryFileInfo, Code: 400001, Message: "file type not support query",
+		}},
+		exportTasks: map[string]*ExportTask{"png-1": {ID: "task-1"}},
+		exportStats: map[string]*ExportStatus{"task-1": {
+			Progress: 100, FileURL: fileURL,
+		}},
+		exportData: map[string][]byte{fileURL: []byte("png-bytes")},
+	}
+	handler := &recordingStreamHandler{}
+	spaceID := encodeSpaceResourceID("space-1")
+	next, err := testConnector(client).FetchStream(
+		context.Background(), testDataSourceConfig(spaceID), nil, handler,
+	)
+	if err != nil {
+		t.Fatalf("FetchStream() error: %v", err)
+	}
+	if len(handler.items) != 1 || len(handler.checkpoints) != 1 {
+		t.Fatalf("items=%d checkpoints=%d, want 1/1", len(handler.items), len(handler.checkpoints))
+	}
+	if handler.items[0].FileName != "org-chart.png" || string(handler.items[0].Content) != "png-bytes" {
+		t.Fatalf("stream item = %+v", handler.items[0])
+	}
+	if next == nil || next.ConnectorCursor == nil {
+		t.Fatal("final cursor is nil")
+	}
+}
+
+func TestConnectorFetchStreamCheckpointsAndSkipsUnchangedUnsupportedResource(t *testing.T) {
+	const fileURL = "https://example.myqcloud.com/download?response-content-disposition=attachment%3Bfilename%3D%22bundle.zip%22"
+	client := &fakeConnectorClient{
+		nodes: map[string][]Node{"space-1/": {{ID: "zip-1", Title: "Bundle", Type: "wiki_file"}}},
+		infoErrs: map[string]error{"zip-1": &MCPToolError{
+			Tool: toolQueryFileInfo, Code: 400001, Message: "file type not support query",
+		}},
+		exportTasks: map[string]*ExportTask{"zip-1": {ID: "task-1"}},
+		exportStats: map[string]*ExportStatus{"task-1": {Progress: 100, FileURL: fileURL}},
+	}
+	connector := testConnector(client)
+	spaceID := encodeSpaceResourceID("space-1")
+	firstHandler := &recordingStreamHandler{}
+	firstCursor, err := connector.FetchStream(
+		context.Background(), testDataSourceConfig(spaceID), nil, firstHandler,
+	)
+	if err != nil || len(firstHandler.items) != 1 || len(firstHandler.checkpoints) != 1 {
+		t.Fatalf("first FetchStream items=%+v checkpoints=%d err=%v", firstHandler.items, len(firstHandler.checkpoints), err)
+	}
+	if firstHandler.items[0].Metadata["skip_reason"] != "unsupported_file_type" {
+		t.Fatalf("first item = %+v, want explicit unsupported skip", firstHandler.items[0])
+	}
+
+	secondHandler := &recordingStreamHandler{}
+	_, err = connector.FetchStream(
+		context.Background(), testDataSourceConfig(spaceID), firstCursor, secondHandler,
+	)
+	if err != nil {
+		t.Fatalf("second FetchStream() error: %v", err)
+	}
+	if len(secondHandler.items) != 0 || len(secondHandler.checkpoints) != 1 {
+		t.Fatalf("second items=%d checkpoints=%d, want 0/1", len(secondHandler.items), len(secondHandler.checkpoints))
+	}
+	if client.downloads != 0 {
+		t.Fatalf("DownloadExport() calls = %d, unsupported resource must not be downloaded", client.downloads)
 	}
 }
 

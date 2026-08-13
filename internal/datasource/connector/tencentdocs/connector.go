@@ -2,10 +2,14 @@ package tencentdocs
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
+	"net/url"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -16,14 +20,16 @@ import (
 )
 
 const (
-	resourceTypeSpace  = "tencent_docs_space"
-	resourceTypeHome   = "tencent_docs_home"
-	homeRootResourceID = "tdoc:home"
-	spaceIDPrefix      = "tdoc:space:"
-	nodeIDPrefix       = "tdoc:node:"
-	homeNodeIDPrefix   = "tdoc:home-node:"
-	exportPollInterval = 3 * time.Second
-	exportTimeout      = 2 * time.Minute
+	resourceTypeSpace              = "tencent_docs_space"
+	resourceTypeHome               = "tencent_docs_home"
+	homeRootResourceID             = "tdoc:home"
+	spaceIDPrefix                  = "tdoc:space:"
+	nodeIDPrefix                   = "tdoc:node:"
+	homeNodeIDPrefix               = "tdoc:home-node:"
+	exportPollInterval             = 3 * time.Second
+	exportTimeout                  = 2 * time.Minute
+	fileInfoUnsupportedTypeCode    = 400001
+	fileInfoUnsupportedTypeMessage = "file type not support query"
 )
 
 type connectorClientFactory func(MCPClientConfig) (Client, error)
@@ -412,7 +418,8 @@ func (c *Connector) FetchAll(
 }
 
 type tencentDocsCursor struct {
-	DocumentTimes map[string]uint64 `json:"document_times"`
+	DocumentTimes        map[string]uint64 `json:"document_times"`
+	ResourceFingerprints map[string]string `json:"resource_fingerprints,omitempty"`
 }
 
 func (c *Connector) FetchIncremental(
@@ -541,6 +548,23 @@ func (c *Connector) fetch(
 
 		info, err := client.GetFileInfo(ctx, ref.nodeID)
 		if err != nil {
+			nodeType := "wiki_file"
+			spaceID := ref.spaceID
+			if ref.kind == resourceKindHomeNode {
+				nodeType = "file"
+				spaceID = ""
+			}
+			node := Node{ID: ref.nodeID, Type: nodeType}
+			if shouldExportUnclassifiedNode(node, err) {
+				if err := state.fetchResource(ctx, spaceID, Node{
+					ID: ref.nodeID, Type: "resource",
+				}, &FileInfo{ID: ref.nodeID, SpaceID: spaceID}, selectedID); err != nil {
+					return nil, nil, err
+				}
+				continue
+			}
+		}
+		if err != nil {
 			return nil, nil, fmt.Errorf("get selected Tencent Docs node %s: %w", ref.nodeID, err)
 		}
 		node := nodeFromFileInfo(info)
@@ -583,6 +607,7 @@ func (c *Connector) fetch(
 		for externalID := range previous.DocumentTimes {
 			if !state.seenDocs[externalID] {
 				delete(state.next.DocumentTimes, externalID)
+				delete(state.next.ResourceFingerprints, externalID)
 				if err := state.emit(ctx, types.FetchedItem{ExternalID: externalID, IsDeleted: true}); err != nil {
 					return nil, nil, err
 				}
@@ -593,10 +618,16 @@ func (c *Connector) fetch(
 }
 
 func copyTencentDocsCursor(previous *tencentDocsCursor) *tencentDocsCursor {
-	next := &tencentDocsCursor{DocumentTimes: make(map[string]uint64)}
+	next := &tencentDocsCursor{
+		DocumentTimes:        make(map[string]uint64),
+		ResourceFingerprints: make(map[string]string),
+	}
 	if previous != nil {
 		for externalID, modifiedAt := range previous.DocumentTimes {
 			next.DocumentTimes[externalID] = modifiedAt
+		}
+		for externalID, fingerprint := range previous.ResourceFingerprints {
+			next.ResourceFingerprints[externalID] = fingerprint
 		}
 	}
 	return next
@@ -747,6 +778,54 @@ func isTencentDocsOnlineType(value string) bool {
 	}
 }
 
+func shouldExportUnclassifiedNode(node Node, err error) bool {
+	// Tencent may label uploaded attachments as resource + pdf/png while
+	// manage.query_file_info still rejects them as non-online documents. The
+	// exact resource type is sufficient to use the export path; for all other
+	// node types, only unclassified nodes are eligible for this fallback.
+	if !strings.EqualFold(strings.TrimSpace(node.Type), "resource") &&
+		strings.TrimSpace(node.DocumentType) != "" {
+		return false
+	}
+	if !isSyncableNode(node) {
+		return false
+	}
+
+	var toolErr *MCPToolError
+	return errors.As(err, &toolErr) &&
+		toolErr.Tool == toolQueryFileInfo &&
+		toolErr.Code == fileInfoUnsupportedTypeCode &&
+		strings.Contains(strings.ToLower(toolErr.Message), fileInfoUnsupportedTypeMessage)
+}
+
+func exportFileNameFromURL(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	disposition := parsed.Query().Get("response-content-disposition")
+	if disposition == "" {
+		return ""
+	}
+	_, params, err := mime.ParseMediaType(disposition)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(params["filename"])
+}
+
+func exportFileName(statusFileName, rawURL string, fallbacks ...string) string {
+	urlFileName := exportFileNameFromURL(rawURL)
+	candidates := append([]string{statusFileName, urlFileName}, fallbacks...)
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate != "" && filepath.Ext(candidate) != "" {
+			return candidate
+		}
+	}
+	return firstNonEmpty(candidates...)
+}
+
 func (s *fetchState) fetchNode(
 	ctx context.Context,
 	spaceID string,
@@ -758,6 +837,14 @@ func (s *fetchState) fetchNode(
 	var err error
 	if info == nil {
 		info, err = s.client.GetFileInfo(ctx, node.ID)
+	}
+	if err != nil && shouldExportUnclassifiedNode(node, err) {
+		resourceNode := node
+		resourceNode.Type = "resource"
+		resourceNode.DocumentType = ""
+		return s.fetchResource(ctx, spaceID, resourceNode, &FileInfo{
+			ID: node.ID, Title: node.Title, URL: node.URL, SpaceID: spaceID,
+		}, sourceResourceID)
 	}
 	if err != nil {
 		externalID := fetchedNodeResourceID(spaceID, node.ID)
@@ -834,6 +921,7 @@ func (s *fetchState) fetchDocument(
 		))
 	}
 	s.next.DocumentTimes[externalID] = info.ModifiedAt
+	delete(s.next.ResourceFingerprints, externalID)
 	title := info.Title
 	if title == "" {
 		title = node.Title
@@ -927,13 +1015,35 @@ func (s *fetchState) fetchResource(
 		return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID,
 			errors.New("Tencent Docs resource export returned no download URL"))
 	}
+	fileName := exportFileName(status.FileName, status.FileURL, info.Title, node.Title)
+	if fileName == "" {
+		fileName = "tencent-docs-resource"
+	}
+	title := firstNonEmpty(info.Title, node.Title, fileName)
+	extension := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileName)), ".")
+	if !types.IsSupportedKnowledgeFileExtension(extension) {
+		fingerprint := resourceFingerprint(nil, fileName, title)
+		s.next.ResourceFingerprints[externalID] = fingerprint
+		s.next.DocumentTimes[externalID] = info.ModifiedAt
+		if s.incremental && s.previous != nil &&
+			s.previous.ResourceFingerprints[externalID] == fingerprint {
+			return s.checkpoint(ctx)
+		}
+		return s.emit(ctx, skippedFetchedItem(
+			externalID, title, spaceID, node, sourceResourceID,
+			"unsupported_file_type", extension, fileName,
+		))
+	}
 	data, err := s.client.DownloadExport(ctx, status.FileURL)
 	if err != nil {
 		return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID, err)
 	}
-	fileName := firstNonEmpty(status.FileName, info.Title, node.Title)
-	if fileName == "" {
-		fileName = "tencent-docs-resource"
+	fingerprint := resourceFingerprint(data, fileName, title)
+	s.next.ResourceFingerprints[externalID] = fingerprint
+	if s.incremental && s.previous != nil && info.ModifiedAt == 0 &&
+		s.previous.ResourceFingerprints[externalID] == fingerprint {
+		s.next.DocumentTimes[externalID] = info.ModifiedAt
+		return s.checkpoint(ctx)
 	}
 	s.next.DocumentTimes[externalID] = info.ModifiedAt
 	metadata := map[string]string{
@@ -947,7 +1057,7 @@ func (s *fetchState) fetchResource(
 	}
 	return s.emit(ctx, types.FetchedItem{
 		ExternalID:       externalID,
-		Title:            firstNonEmpty(info.Title, node.Title, fileName),
+		Title:            title,
 		Content:          data,
 		ContentType:      "application/octet-stream",
 		FileName:         fileName,
@@ -956,6 +1066,41 @@ func (s *fetchState) fetchResource(
 		SourceResourceID: sourceResourceID,
 		Metadata:         metadata,
 	})
+}
+
+func skippedFetchedItem(
+	externalID, title, spaceID string,
+	node Node,
+	sourceResourceID, reason, fileExtension, fileName string,
+) types.FetchedItem {
+	metadata := map[string]string{
+		"channel":        types.ChannelTencentDocs,
+		"space_id":       spaceID,
+		"file_id":        node.ID,
+		"node_type":      node.Type,
+		"skip_reason":    reason,
+		"file_extension": fileExtension,
+	}
+	if spaceID == "" {
+		metadata["location"] = "personal_home"
+	}
+	return types.FetchedItem{
+		ExternalID:       externalID,
+		Title:            title,
+		FileName:         fileName,
+		SourceResourceID: sourceResourceID,
+		Metadata:         metadata,
+	}
+}
+
+func resourceFingerprint(data []byte, fileName, title string) string {
+	hash := sha256.New()
+	_, _ = hash.Write(data)
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write([]byte(fileName))
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write([]byte(title))
+	return fmt.Sprintf("%x", hash.Sum(nil))
 }
 
 func fetchedNodeResourceID(spaceID, nodeID string) string {
