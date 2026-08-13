@@ -90,6 +90,9 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 	imageRefs, mdContent := c.processImages(mdContent, imagesB64)
 
 	mdContent, imageRefs = ensureOriginalImageRef(req, mdContent, imageRefs)
+	if strings.TrimSpace(mdContent) == "" && len(imageRefs) == 0 {
+		return nil, fmt.Errorf("MinerU file_parse: completed response contains no usable markdown or images")
+	}
 
 	logger.Infof(context.Background(), "[MinerU] Parsed successfully, markdown=%d chars, images=%d", len(mdContent), len(imageRefs))
 
@@ -99,18 +102,21 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 	}, nil
 }
 
+type mineruFileResult struct {
+	MDContent string            `json:"md_content"`
+	Images    map[string]string `json:"images"` // path -> "data:image/png;base64,..." or raw base64
+}
+
 // mineruFileParseResponse mirrors the relevant fields from the MinerU API response.
+// MinerU 3.4.4 keys results by the returned file name, while older deployments
+// use the reserved keys "document" or "files".
 type mineruFileParseResponse struct {
-	Results struct {
-		Document struct {
-			MDContent string            `json:"md_content"`
-			Images    map[string]string `json:"images"` // path -> "data:image/png;base64,..." or raw base64
-		} `json:"document"`
-		Files struct {
-			MDContent string            `json:"md_content"`
-			Images    map[string]string `json:"images"` // path -> "data:image/png;base64,..." or raw base64
-		} `json:"files"`
-	} `json:"results"`
+	FileNames []string                    `json:"file_names"`
+	Results   map[string]mineruFileResult `json:"results"`
+}
+
+func hasMinerUContent(result mineruFileResult) bool {
+	return strings.TrimSpace(result.MDContent) != "" || len(result.Images) > 0
 }
 
 func (c *MinerUReader) callFileParse(ctx context.Context, content []byte, filename string) (string, map[string]string, error) {
@@ -197,20 +203,29 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte, filena
 		return "", nil, fmt.Errorf("decode response: %w", err)
 	}
 
-	// MinerU response schema differs by version/deployment:
-	// - older/self-hosted variants: results.document.*
-	// - some variants:            results.files.*
-	// Prefer document when available, then fallback to files.
-	if result.Results.Document.MDContent != "" || len(result.Results.Document.Images) > 0 {
-		logger.Infof(context.Background(), "[MinerU] Using response path: results.document")
-		return result.Results.Document.MDContent, result.Results.Document.Images, nil
+	// Prefer the legacy reserved keys, then the file name reported by MinerU.
+	for _, key := range []string{"document", "files"} {
+		if fileResult, ok := result.Results[key]; ok && hasMinerUContent(fileResult) {
+			logger.Infof(context.Background(), "[MinerU] Using response path: results.%s", key)
+			return fileResult.MDContent, fileResult.Images, nil
+		}
 	}
-	if result.Results.Files.MDContent != "" || len(result.Results.Files.Images) > 0 {
-		logger.Infof(context.Background(), "[MinerU] Using response path: results.files")
-		return result.Results.Files.MDContent, result.Results.Files.Images, nil
+	for _, fileName := range result.FileNames {
+		if fileResult, ok := result.Results[fileName]; ok && hasMinerUContent(fileResult) {
+			logger.Infof(context.Background(), "[MinerU] Using response path: results[%q]", fileName)
+			return fileResult.MDContent, fileResult.Images, nil
+		}
+	}
+	// A request uploads exactly one file. Some deployments omit file_names or
+	// normalize it differently from the result key, so a single result is safe.
+	if len(result.Results) == 1 {
+		for key, fileResult := range result.Results {
+			logger.Infof(context.Background(), "[MinerU] Using sole response path: results[%q]", key)
+			return fileResult.MDContent, fileResult.Images, nil
+		}
 	}
 
-	logger.Errorf(context.Background(), "[MinerU] Response has no markdown/images under results.document or results.files")
+	logger.Errorf(context.Background(), "[MinerU] Response has no recognized single-file result")
 	return "", nil, nil
 }
 

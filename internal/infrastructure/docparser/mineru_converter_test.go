@@ -42,6 +42,137 @@ func TestMinerUReadPreservesOriginalOfficeFilename(t *testing.T) {
 	require.Equal(t, "财务 汇报.pptx", uploadedFilename)
 }
 
+func TestMinerUReadAcceptsVersion344FilenameKey(t *testing.T) {
+	png := createTestPNG(200, 150)
+	encodedImage := base64.StdEncoding.EncodeToString(png)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseMultipartForm(1<<20))
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+			"status":     "completed",
+			"file_names": []string{"财务制度"},
+			"results": map[string]any{
+				"财务制度": map[string]any{
+					"md_content": "# 财务制度\n\n![](images/第 1 页.jpg)",
+					"images": map[string]string{
+						"第 1 页.jpg": "data:image/png;base64," + encodedImage,
+					},
+				},
+			},
+		}))
+	}))
+	defer server.Close()
+
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	utils.ResetSSRFWhitelistForTest()
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+
+	reader := NewMinerUReader(map[string]string{"mineru_endpoint": server.URL})
+	result, err := reader.Read(t.Context(), &types.ReadRequest{
+		FileName:    "财务制度.pdf",
+		FileType:    "pdf",
+		FileContent: []byte("pdf payload"),
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "# 财务制度\n\n![](images/第 1 页.jpg)", result.MarkdownContent)
+	require.Len(t, result.ImageRefs, 1)
+	require.Equal(t, "images/第 1 页.jpg", result.ImageRefs[0].OriginalRef)
+}
+
+func TestMinerUReadRejectsCompletedResponseWithoutContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseMultipartForm(1<<20))
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+			"status":     "completed",
+			"file_names": []string{"空白文档"},
+			"results": map[string]any{
+				"空白文档": map[string]any{
+					"md_content": "",
+					"images":     map[string]string{},
+				},
+			},
+		}))
+	}))
+	defer server.Close()
+
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	utils.ResetSSRFWhitelistForTest()
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+
+	reader := NewMinerUReader(map[string]string{"mineru_endpoint": server.URL})
+	result, err := reader.Read(t.Context(), &types.ReadRequest{
+		FileName:    "空白文档.pdf",
+		FileType:    "pdf",
+		FileContent: []byte("pdf payload"),
+	})
+
+	require.Nil(t, result)
+	require.ErrorContains(t, err, "completed response contains no usable markdown or images")
+}
+
+func TestMinerUReadSkipsEmptyLegacyResultBeforeValidFilesResult(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseMultipartForm(1<<20))
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+			"results": map[string]any{
+				"document": map[string]any{},
+				"files":    map[string]any{"md_content": "legacy files content"},
+			},
+		}))
+	}))
+	defer server.Close()
+
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	utils.ResetSSRFWhitelistForTest()
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+
+	reader := NewMinerUReader(map[string]string{"mineru_endpoint": server.URL})
+	result, err := reader.Read(t.Context(), &types.ReadRequest{
+		FileName:    "legacy.pdf",
+		FileType:    "pdf",
+		FileContent: []byte("pdf payload"),
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "legacy files content", result.MarkdownContent)
+}
+
+func TestMinerUReadRejectsImagesThatProduceNoUsableReferences(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseMultipartForm(1<<20))
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+			"file_names": []string{"empty-image"},
+			"results": map[string]any{
+				"empty-image": map[string]any{
+					"md_content": "",
+					"images": map[string]string{
+						"unreferenced.png": "not-valid-base64",
+					},
+				},
+			},
+		}))
+	}))
+	defer server.Close()
+
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	utils.ResetSSRFWhitelistForTest()
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+
+	reader := NewMinerUReader(map[string]string{"mineru_endpoint": server.URL})
+	result, err := reader.Read(t.Context(), &types.ReadRequest{
+		FileName:    "empty-image.pdf",
+		FileType:    "pdf",
+		FileContent: []byte("pdf payload"),
+	})
+
+	require.Nil(t, result)
+	require.ErrorContains(t, err, "completed response contains no usable markdown or images")
+}
+
 func TestMinerUUploadFilenameStripsControlCharacters(t *testing.T) {
 	require.Equal(t, "report.pptx", mineruUploadFilename("../report\r\n\x00.pptx", "pptx"))
 	require.Equal(t, "document.pdf", mineruUploadFilename("\r\n\x7f", "pdf"))
