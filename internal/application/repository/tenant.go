@@ -115,7 +115,9 @@ func (r *tenantRepository) SearchTenants(ctx context.Context, keyword string, te
 
 // UpdateTenant updates tenant.
 func (r *tenantRepository) UpdateTenant(ctx context.Context, tenant *types.Tenant) error {
-	return r.db.WithContext(ctx).Model(&types.Tenant{}).Where("id = ?", tenant.ID).Updates(tenant).Error
+	persisted := *tenant
+	persisted.ParserEngineConfig = tenant.ParserEngineConfigForPersistence()
+	return r.db.WithContext(ctx).Model(&types.Tenant{}).Where("id = ?", tenant.ID).Updates(&persisted).Error
 }
 
 // DeleteTenant soft-deletes the tenant and every active membership row
@@ -146,7 +148,12 @@ func (r *tenantRepository) AdjustStorageUsed(ctx context.Context, tenantID uint6
 			tenant.StorageUsed = 0
 		}
 
-		return tx.Save(&tenant).Error
+		// Update only the counter. tenant was loaded with read-time deployment
+		// defaults, and saving the full model here would accidentally persist
+		// those inherited parser settings on every file upload/delete.
+		return tx.Model(&types.Tenant{}).
+			Where("id = ?", tenant.ID).
+			UpdateColumn("storage_used", tenant.StorageUsed).Error
 	})
 }
 

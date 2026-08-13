@@ -88,6 +88,10 @@ type KnowledgeBase struct {
 	// VLMConfigProvided distinguishes an omitted create payload from an
 	// explicit {"enabled": false}. It is request metadata only.
 	VLMConfigProvided bool `yaml:"-" json:"-" gorm:"-"`
+	// ParserEngineRulesProvided distinguishes an omitted create payload from
+	// an explicit empty rule list (which means all-builtin). It is request
+	// metadata only and is never persisted.
+	ParserEngineRulesProvided bool `yaml:"-" json:"-" gorm:"-"`
 	// ASR config (Automatic Speech Recognition)
 	ASRConfig ASRConfig `yaml:"asr_config"              json:"asr_config"              gorm:"type:json"`
 	// Storage provider config (new): only stores provider selection; credentials from workspace StorageEngineConfig

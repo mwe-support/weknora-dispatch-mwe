@@ -106,7 +106,7 @@ type mineruEngine struct{}
 func (e *mineruEngine) Name() string        { return "mineru" }
 func (e *mineruEngine) Description() string { return "MinerU self-hosted service" }
 func (e *mineruEngine) FileTypes(_ bool) []string {
-	return []string{"pdf", "jpg", "jpeg", "png", "bmp", "tiff", "doc", "docx", "ppt", "pptx"}
+	return []string{"pdf", "jpg", "jpeg", "png", "bmp", "tiff", "doc", "docx", "pptx"}
 }
 func (e *mineruEngine) CheckAvailable(_ bool, overrides map[string]string) (bool, string) {
 	endpoint := strings.TrimSpace(overrides["mineru_endpoint"])

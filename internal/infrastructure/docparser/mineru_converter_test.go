@@ -2,9 +2,50 @@ package docparser
 
 import (
 	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
+	"github.com/stretchr/testify/require"
 )
+
+func TestMinerUReadPreservesOriginalOfficeFilename(t *testing.T) {
+	var uploadedFilename string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseMultipartForm(1<<20))
+		_, header, err := r.FormFile("files")
+		require.NoError(t, err)
+		uploadedFilename = header.Filename
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+			"results": map[string]any{"document": map[string]any{"md_content": "ok"}},
+		}))
+	}))
+	defer server.Close()
+
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	utils.ResetSSRFWhitelistForTest()
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+
+	reader := NewMinerUReader(map[string]string{"mineru_endpoint": server.URL})
+	result, err := reader.Read(t.Context(), &types.ReadRequest{
+		FileName:    "财务 汇报.pptx",
+		FileType:    "pptx",
+		FileContent: []byte("pptx payload"),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "ok", result.MarkdownContent)
+	require.Equal(t, "财务 汇报.pptx", uploadedFilename)
+}
+
+func TestMinerUUploadFilenameStripsControlCharacters(t *testing.T) {
+	require.Equal(t, "report.pptx", mineruUploadFilename("../report\r\n\x00.pptx", "pptx"))
+	require.Equal(t, "document.pdf", mineruUploadFilename("\r\n\x7f", "pdf"))
+}
 
 func TestNewMinerUReaderResolvesParseMethod(t *testing.T) {
 	tests := []struct {

@@ -1426,6 +1426,7 @@ func (h *TenantHandler) updateTenantParserEngineConfigInternal(c *gin.Context) {
 		return
 	}
 	tenant.ParserEngineConfig = merged
+	tenant.MarkParserEngineConfigExplicit()
 	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {

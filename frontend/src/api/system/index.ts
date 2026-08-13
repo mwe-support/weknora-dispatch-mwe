@@ -91,6 +91,7 @@ export interface ParserEngineInfo {
   Name: string
   Description: string
   FileTypes: string[]
+  DefaultFileTypes?: string[]
   Available?: boolean
   UnavailableReason?: string
 }

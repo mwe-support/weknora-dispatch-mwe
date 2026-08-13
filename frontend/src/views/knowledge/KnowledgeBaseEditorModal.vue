@@ -247,6 +247,7 @@
                 <div v-if="!isFAQ && formData && currentSection === 'parser'" class="section">
                   <KBParserSettings
                     :parser-engine-rules="formData.chunkingConfig.parserEngineRules"
+                    :use-deployment-defaults="editorMode === 'create'"
                     @update:parser-engine-rules="handleParserEngineRulesUpdate"
                   />
                 </div>

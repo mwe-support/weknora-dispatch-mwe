@@ -45,6 +45,7 @@
                 :key="opt.value"
                 :value="opt.value"
                 :label="opt.selectLabel"
+                :disabled="opt.disabled"
               />
             </t-select>
             <t-checkbox
@@ -72,6 +73,13 @@ import { type ParserEngineInfo } from '@/api/system'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useUIStore } from '@/stores/ui'
 import { storeToRefs } from 'pinia'
+import {
+  LEGACY_PPT_EXTENSIONS,
+  MINERU_IMAGE_EXTENSIONS,
+  PPTX_EXTENSIONS,
+  resolveDefaultParserEngineName,
+  resolveDeploymentRuleSeed,
+} from './parserEngineDefaults'
 
 const { t } = useI18n()
 const editorResources = useEditorResourcesStore()
@@ -92,6 +100,7 @@ interface EngineOption {
   value: string
   selectLabel: string
   isDefault: boolean
+  disabled: boolean
 }
 
 function buildOptionLabel(name: string, isDefault: boolean): string {
@@ -105,12 +114,15 @@ interface Props {
   embedded?: boolean
   /** When set, only show file-type groups matching these extensions */
   relevantExtensions?: string[]
+  /** Apply operator defaults only while creating a new knowledge base. */
+  useDeploymentDefaults?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   parserEngineRules: () => [],
   embedded: false,
   relevantExtensions: () => [],
+  useDeploymentDefaults: false,
 })
 
 const emit = defineEmits<{
@@ -138,7 +150,8 @@ const fileTypeGroups = computed(() => {
 
   const pdfExts = ['pdf'].filter(e => ft.has(e))
   const officeExts = ['docx', 'doc'].filter(e => ft.has(e))
-  const pptExts = ['pptx', 'ppt'].filter(e => ft.has(e))
+  const pptxExts = PPTX_EXTENSIONS.filter(e => ft.has(e))
+  const legacyPptExts = LEGACY_PPT_EXTENSIONS.filter(e => ft.has(e))
   const excelExts = ['xlsx', 'xls'].filter(e => ft.has(e))
   const ebookExts = ['epub'].filter(e => ft.has(e))
   const webArchiveExts = ['mhtml'].filter(e => ft.has(e))
@@ -146,13 +159,18 @@ const fileTypeGroups = computed(() => {
   const mdExts = ['md', 'markdown'].filter(e => ft.has(e))
   const txtExts = ['txt'].filter(e => ft.has(e))
   const jsonExts = ['json'].filter(e => ft.has(e))
-  const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp'].filter(e => ft.has(e))
+  // Keep the deployment-default MinerU-compatible image formats in one row.
+  // GIF/WebP remain ungrouped below and therefore retain their own builtin
+  // default instead of inheriting MinerU merely because the old UI grouped
+  // every image extension together.
+  const imageExts = MINERU_IMAGE_EXTENSIONS.filter(e => ft.has(e))
   const audioExts = ['mp3', 'wav', 'm4a', 'flac', 'ogg'].filter(e => ft.has(e))
   const audiovisualExts = [...audioExts]
 
   if (pdfExts.length) groups.push({ key: 'pdf', label: t('kbSettings.parser.fileTypePdf'), icon: 'file-pdf', extensions: pdfExts })
   if (officeExts.length) groups.push({ key: 'office', label: t('kbSettings.parser.fileTypeWord'), icon: 'file-word', extensions: officeExts })
-  if (pptExts.length) groups.push({ key: 'ppt', label: t('kbSettings.parser.fileTypePpt'), icon: 'file-powerpoint', extensions: pptExts })
+  if (pptxExts.length) groups.push({ key: 'pptx', label: t('kbSettings.parser.fileTypePpt'), icon: 'file-powerpoint', extensions: pptxExts })
+  if (legacyPptExts.length) groups.push({ key: 'ppt-legacy', label: t('kbSettings.parser.fileTypePpt'), icon: 'file-powerpoint', extensions: legacyPptExts })
   if (excelExts.length) groups.push({ key: 'excel', label: t('kbSettings.parser.fileTypeExcel'), icon: 'file-excel', extensions: excelExts })
   if (ebookExts.length) groups.push({ key: 'ebook', label: t('kbSettings.parser.fileTypeEbook'), icon: 'file', extensions: ebookExts })
   if (webArchiveExts.length) groups.push({ key: 'webarchive', label: t('kbSettings.parser.fileTypeWebArchive'), icon: 'file', extensions: webArchiveExts })
@@ -199,18 +217,19 @@ function getEngineOptions(extensions: string[]): EngineOption[] {
       })
     }
   }
-  const defaultName = raw.find(e => e.available)?.name ?? ''
+  const defaultName = resolveDefaultParserEngineName(parserEngines.value, extensions, props.useDeploymentDefaults)
   return raw
-    .filter(e => e.available)
+    .filter(e => e.available || (props.useDeploymentDefaults && e.name === defaultName))
     .map(e => ({
       value: e.name,
       selectLabel: buildOptionLabel(e.name, defaultName !== '' && e.name === defaultName),
       isDefault: defaultName !== '' && e.name === defaultName,
+      disabled: !e.available,
     }))
 }
 
 function hasAvailableEngine(extensions: string[]): boolean {
-  return getEngineOptions(extensions).length > 0
+  return getEngineOptions(extensions).some(option => !option.disabled)
 }
 
 function getDefaultEngine(extensions: string[]): string {
@@ -303,10 +322,10 @@ async function loadEngines(force = false) {
 function ensureCompleteRules() {
   if (!parserEngines.value.length) return
   const complete = buildCompleteRules()
-  if (complete.length && complete.length > localEngineRules.value.length) {
-    localEngineRules.value = complete
-    emit('update:parserEngineRules', complete)
-  }
+  const seed = resolveDeploymentRuleSeed(localEngineRules.value, complete, props.useDeploymentDefaults)
+  if (!seed) return
+  localEngineRules.value = seed
+  emit('update:parserEngineRules', seed)
 }
 
 onMounted(loadEngines)

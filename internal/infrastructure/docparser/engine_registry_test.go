@@ -26,3 +26,19 @@ func TestListAllEnginesBuiltinIncludesHTML(t *testing.T) {
 
 	t.Fatal("builtin engine not found")
 }
+
+func TestSelfHostedMinerUDoesNotAdvertiseUnsupportedLegacyPPT(t *testing.T) {
+	engines := ListAllEngines(true, map[string]string{"mineru_endpoint": ""}, nil)
+	for _, engine := range engines {
+		if engine.Name != "mineru" {
+			continue
+		}
+		for _, fileType := range engine.FileTypes {
+			if fileType == "ppt" {
+				t.Fatal("self-hosted MinerU 3.4.4 rejects legacy .ppt and must not advertise it")
+			}
+		}
+		return
+	}
+	t.Fatal("mineru engine not found")
+}

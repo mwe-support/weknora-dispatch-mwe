@@ -369,6 +369,7 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 		return
 	}
 	_, req.VLMConfigProvided = rawFields["vlm_config"]
+	req.ParserEngineRulesProvided = hasParserEngineRulesField(rawFields)
 	if err := validateExtractConfig(req.ExtractConfig); err != nil {
 		logger.Error(ctx, "Invalid extract configuration", err)
 		c.Error(err)
@@ -411,6 +412,19 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 		"success": true,
 		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
 	})
+}
+
+func hasParserEngineRulesField(rawFields map[string]json.RawMessage) bool {
+	rawChunking, ok := rawFields["chunking_config"]
+	if !ok {
+		return false
+	}
+	var chunkingFields map[string]json.RawMessage
+	if err := json.Unmarshal(rawChunking, &chunkingFields); err != nil {
+		return false
+	}
+	_, ok = chunkingFields["parser_engine_rules"]
+	return ok
 }
 
 // validateAndGetKnowledgeBase validates request parameters and retrieves the knowledge base.

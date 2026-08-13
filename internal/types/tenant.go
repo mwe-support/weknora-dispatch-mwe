@@ -124,6 +124,13 @@ type Tenant struct {
 	UpdatedAt time.Time `yaml:"updated_at"          json:"updated_at"`
 	// Deletion time
 	DeletedAt gorm.DeletedAt `yaml:"deleted_at"          json:"deleted_at"          gorm:"index"`
+
+	// Read-time deployment defaults are deliberately not persisted. These
+	// bookkeeping fields let the repository distinguish inherited values from
+	// explicit workspace overrides during unrelated updates.
+	persistedParserEngineConfig *ParserEngineConfig `gorm:"-" json:"-" yaml:"-"`
+	parserEngineConfigLoaded    bool                `gorm:"-" json:"-" yaml:"-"`
+	parserEngineConfigExplicit  bool                `gorm:"-" json:"-" yaml:"-"`
 }
 
 // RetrieverEngines represents the retriever engines for a tenant
@@ -144,6 +151,20 @@ func (t *Tenant) BeforeCreate(tx *gorm.DB) error {
 	if t.RetrieverEngines.Engines == nil {
 		t.RetrieverEngines.Engines = []RetrieverEngineParams{}
 	}
+	return nil
+}
+
+// AfterCreate exposes deployment defaults on the returned tenant while
+// leaving the new database row blank and therefore centrally managed.
+func (t *Tenant) AfterCreate(tx *gorm.DB) error {
+	t.ApplyInheritedParserEngineDefaults()
+	return nil
+}
+
+// AfterFind applies deployment defaults to existing workspaces without a
+// destructive database migration. Explicit workspace values always win.
+func (t *Tenant) AfterFind(tx *gorm.DB) error {
+	t.ApplyInheritedParserEngineDefaults()
 	return nil
 }
 

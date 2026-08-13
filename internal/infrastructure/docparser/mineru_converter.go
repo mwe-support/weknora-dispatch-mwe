@@ -76,7 +76,7 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 
 	logger.Infof(context.Background(), "[MinerU] Parsing file=%s size=%d via %s", req.FileName, len(content), c.endpoint)
 
-	mdContent, imagesB64, err := c.callFileParse(ctx, content)
+	mdContent, imagesB64, err := c.callFileParse(ctx, content, mineruUploadFilename(req.FileName, req.FileType))
 	if err != nil {
 		return nil, fmt.Errorf("MinerU file_parse: %w", err)
 	}
@@ -113,7 +113,7 @@ type mineruFileParseResponse struct {
 	} `json:"results"`
 }
 
-func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (string, map[string]string, error) {
+func (c *MinerUReader) callFileParse(ctx context.Context, content []byte, filename string) (string, map[string]string, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
@@ -143,7 +143,7 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 	}
 
 	// File part
-	part, err := writer.CreateFormFile("files", "document")
+	part, err := writer.CreateFormFile("files", filename)
 	if err != nil {
 		return "", nil, fmt.Errorf("create form file: %w", err)
 	}
@@ -212,6 +212,28 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 
 	logger.Errorf(context.Background(), "[MinerU] Response has no markdown/images under results.document or results.files")
 	return "", nil, nil
+}
+
+func mineruUploadFilename(filename, fileType string) string {
+	filename = strings.TrimSpace(strings.ReplaceAll(filename, "\\", "/"))
+	filename = filepath.Base(filename)
+	filename = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, filename)
+	filename = strings.TrimSpace(filename)
+	if filename == "" || filename == "." || filename == "/" {
+		filename = "document"
+	}
+	if filepath.Ext(filename) == "" {
+		fileType = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileType)), ".")
+		if fileType != "" {
+			filename += "." + fileType
+		}
+	}
+	return filename
 }
 
 // processImages decodes base64 images from MinerU response and returns ImageRef list.

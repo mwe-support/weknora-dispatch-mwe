@@ -45,6 +45,7 @@ type ParserEngineInfo struct {
 	Name              string
 	Description       string
 	FileTypes         []string
+	DefaultFileTypes  []string `json:"DefaultFileTypes,omitempty"`
 	Available         bool
 	UnavailableReason string
 }
