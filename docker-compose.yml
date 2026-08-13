@@ -304,6 +304,13 @@ services:
       - WEKNORA_DOCUMENT_PROCESS_TIMEOUT=${WEKNORA_DOCUMENT_PROCESS_TIMEOUT:-}
       # 单次 DocReader RPC 超时（默认 30m，须小于上一项）
       - WEKNORA_DOCREADER_CALL_TIMEOUT=${WEKNORA_DOCREADER_CALL_TIMEOUT:-}
+      # 部署级模型默认。API/MCP 创建知识库或智能体时，省略模型字段将继承这些 ID；
+      # 显式模型设置始终优先。只配置一部分会触发 400 而不是创建不可运行的对象。
+      - WEKNORA_DEFAULT_EMBEDDING_MODEL_ID=${WEKNORA_DEFAULT_EMBEDDING_MODEL_ID:-}
+      - WEKNORA_DEFAULT_RERANK_MODEL_ID=${WEKNORA_DEFAULT_RERANK_MODEL_ID:-}
+      - WEKNORA_DEFAULT_LLM_MODEL_ID=${WEKNORA_DEFAULT_LLM_MODEL_ID:-}
+      - WEKNORA_DEFAULT_VLM_MODEL_ID=${WEKNORA_DEFAULT_VLM_MODEL_ID:-}
+      - WEKNORA_DEFAULT_MULTIMODAL_ENABLED=${WEKNORA_DEFAULT_MULTIMODAL_ENABLED:-}
       # 部署级本地 MinerU 默认。设置 endpoint 后，所有空间继承连接参数；
       # 新知识库默认将 PDF/图片/PPTX 交给 MinerU；旧 PPT 由 MarkItDown/
       # LibreOffice 兼容解析，XLS/XLSX 保持 builtin。

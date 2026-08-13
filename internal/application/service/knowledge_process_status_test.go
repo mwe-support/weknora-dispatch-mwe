@@ -1,11 +1,24 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+type recordingProcessingFailureRepo struct {
+	interfaces.KnowledgeRepository
+	updated *types.Knowledge
+}
+
+func (r *recordingProcessingFailureRepo) UpdateKnowledge(_ context.Context, knowledge *types.Knowledge) error {
+	r.updated = knowledge
+	return nil
+}
 
 func TestFinalizeIndexedKnowledgeState(t *testing.T) {
 	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
@@ -77,6 +90,41 @@ func TestFinalizeIndexedKnowledgeState(t *testing.T) {
 				t.Fatalf("UpdatedAt = %v, want %v", knowledge.UpdatedAt, now)
 			}
 		})
+	}
+}
+
+func TestMarkKnowledgeProcessingFailedRecordsTerminalError(t *testing.T) {
+	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	knowledge := &types.Knowledge{
+		ParseStatus:  types.ParseStatusProcessing,
+		ErrorMessage: "",
+	}
+
+	markKnowledgeProcessingFailed(knowledge, errors.New("model ID cannot be empty"), now)
+
+	if knowledge.ParseStatus != types.ParseStatusFailed {
+		t.Fatalf("ParseStatus = %q, want %q", knowledge.ParseStatus, types.ParseStatusFailed)
+	}
+	if knowledge.ErrorMessage != "model ID cannot be empty" {
+		t.Fatalf("ErrorMessage = %q", knowledge.ErrorMessage)
+	}
+	if !knowledge.UpdatedAt.Equal(now) {
+		t.Fatalf("UpdatedAt = %v, want %v", knowledge.UpdatedAt, now)
+	}
+}
+
+func TestPersistKnowledgeProcessingFailureWritesTerminalState(t *testing.T) {
+	repo := &recordingProcessingFailureRepo{}
+	service := &knowledgeService{repo: repo}
+	knowledge := &types.Knowledge{ID: "knowledge-1", ParseStatus: types.ParseStatusProcessing}
+
+	service.persistKnowledgeProcessingFailure(context.Background(), knowledge, errors.New("model unavailable"))
+
+	if repo.updated != knowledge {
+		t.Fatal("UpdateKnowledge was not called with the failed knowledge")
+	}
+	if knowledge.ParseStatus != types.ParseStatusFailed || knowledge.ErrorMessage != "model unavailable" {
+		t.Fatalf("terminal state = %q / %q", knowledge.ParseStatus, knowledge.ErrorMessage)
 	}
 }
 

@@ -211,6 +211,29 @@ func markKnowledgeProcessing(knowledge *types.Knowledge, now time.Time) {
 	knowledge.UpdatedAt = now
 }
 
+func markKnowledgeProcessingFailed(knowledge *types.Knowledge, cause error, now time.Time) {
+	if knowledge == nil || cause == nil {
+		return
+	}
+	knowledge.ParseStatus = types.ParseStatusFailed
+	knowledge.ErrorMessage = cause.Error()
+	knowledge.UpdatedAt = now
+}
+
+func (s *knowledgeService) persistKnowledgeProcessingFailure(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	cause error,
+) {
+	markKnowledgeProcessingFailed(knowledge, cause, time.Now())
+	if s == nil || s.repo == nil || knowledge == nil || cause == nil {
+		return
+	}
+	if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
+		logger.GetLogger(ctx).WithField("error", updateErr).Errorf("persist knowledge processing failure failed")
+	}
+}
+
 // buildSplitterConfig creates a SplitterConfig with fallbacks from a KnowledgeBase.
 // Defaults mirror chunker.DefaultChunkSize / DefaultChunkOverlap so behavior is
 // identical whether callers come through this path or invoke the chunker
@@ -265,7 +288,11 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		var err error
 		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 		if err != nil {
-			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks get embedding model failed")
+			processingErr := fmt.Errorf("get embedding model %q: %w", kb.EmbeddingModelID, err)
+			logger.GetLogger(ctx).WithField("error", processingErr).Errorf("processChunks get embedding model failed")
+			s.persistKnowledgeProcessingFailure(ctx, knowledge, processingErr)
+			s.failStage(ctx, knowledge.ID, types.StageEmbedding,
+				werrors.ErrCodeEmbeddingProviderFail, "get embedding model failed", processingErr)
 			return
 		}
 	} else {

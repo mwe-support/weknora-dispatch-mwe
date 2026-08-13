@@ -107,6 +107,10 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 	createdAgent, err := h.service.CreateAgent(ctx, agent)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
 		if err == service.ErrAgentNameRequired {
 			c.Error(errors.NewBadRequestError(err.Error()))
 			return
@@ -353,6 +357,10 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"agent_id": id,
 		})
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
 		switch err {
 		case service.ErrAgentNotFound:
 			c.Error(errors.NewNotFoundError("Agent not found"))

@@ -134,6 +134,10 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 		kb.CreatorID = uid
 	}
 	kb.EnsureDefaults()
+	applyDeploymentKnowledgeBaseModelDefaults(kb)
+	if err := validateDeploymentKnowledgeBaseModels(kb); err != nil {
+		return nil, err
+	}
 	applyTenantDefaultStorageProvider(ctx, kb)
 	if err := s.applyAndValidateStorageBackend(ctx, kb); err != nil {
 		return nil, err
@@ -303,6 +307,7 @@ func (s *knowledgeBaseService) GetKnowledgeBaseByID(ctx context.Context, id stri
 	}
 
 	kb.EnsureDefaults()
+	applyDeploymentKnowledgeBaseModelDefaults(kb)
 	return kb, nil
 }
 
@@ -323,6 +328,7 @@ func (s *knowledgeBaseService) GetKnowledgeBaseByIDOnly(ctx context.Context, id 
 	}
 
 	kb.EnsureDefaults()
+	applyDeploymentKnowledgeBaseModelDefaults(kb)
 	return kb, nil
 }
 
@@ -338,6 +344,7 @@ func (s *knowledgeBaseService) GetKnowledgeBasesByIDsOnly(ctx context.Context, i
 	for _, kb := range kbs {
 		if kb != nil {
 			kb.EnsureDefaults()
+			applyDeploymentKnowledgeBaseModelDefaults(kb)
 		}
 	}
 	return kbs, nil
@@ -351,6 +358,7 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 	if err != nil {
 		for _, kb := range kbs {
 			kb.EnsureDefaults()
+			applyDeploymentKnowledgeBaseModelDefaults(kb)
 		}
 
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -362,6 +370,7 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 	// Query knowledge count and chunk count for each knowledge base
 	for _, kb := range kbs {
 		kb.EnsureDefaults()
+		applyDeploymentKnowledgeBaseModelDefaults(kb)
 
 		// Get knowledge count
 		switch kb.Type {
@@ -418,6 +427,7 @@ func (s *knowledgeBaseService) ListKnowledgeBasesByTenantID(ctx context.Context,
 	}
 	for _, kb := range kbs {
 		kb.EnsureDefaults()
+		applyDeploymentKnowledgeBaseModelDefaults(kb)
 		switch kb.Type {
 		case types.KnowledgeBaseTypeDocument:
 			if cnt, err := s.kgRepo.CountKnowledgeByKnowledgeBaseID(ctx, tenantID, kb.ID); err == nil {
@@ -552,6 +562,10 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	}
 	kb.UpdatedAt = time.Now()
 	kb.EnsureDefaults()
+	applyDeploymentKnowledgeBaseModelDefaults(kb)
+	if err := validateDeploymentKnowledgeBaseModels(kb); err != nil {
+		return nil, err
+	}
 
 	logger.Info(ctx, "Saving knowledge base update")
 	if err := s.repo.UpdateKnowledgeBase(ctx, kb); err != nil {
@@ -1192,6 +1206,10 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 			targetKB.CreatorID = uid
 		}
 		targetKB.EnsureDefaults()
+		applyDeploymentKnowledgeBaseModelDefaults(targetKB)
+		if err := validateDeploymentKnowledgeBaseModels(targetKB); err != nil {
+			return nil, nil, err
+		}
 		if err := s.repo.CreateKnowledgeBase(ctx, targetKB); err != nil {
 			return nil, nil, err
 		}
@@ -1218,6 +1236,7 @@ func (s *knowledgeBaseService) DuplicateKnowledgeBase(
 		return nil, err
 	}
 	sourceKB.EnsureDefaults()
+	applyDeploymentKnowledgeBaseModelDefaults(sourceKB)
 
 	targetKB, err := cloneKnowledgeBaseConfiguration(sourceKB)
 	if err != nil {
@@ -1245,6 +1264,10 @@ func (s *knowledgeBaseService) DuplicateKnowledgeBase(
 	targetKB.ShareCount = 0
 	targetKB.CreatorName = ""
 	targetKB.EnsureDefaults()
+	applyDeploymentKnowledgeBaseModelDefaults(targetKB)
+	if err := validateDeploymentKnowledgeBaseModels(targetKB); err != nil {
+		return nil, err
+	}
 	targetKB.Normalize()
 
 	if targetKB.HasVectorStore() {
