@@ -14,6 +14,13 @@ import { humanizeCron, relativeTime } from '@/utils/cronHumanize'
 import DataSourceEditorDialog from './DataSourceEditorDialog.vue'
 import DataSourceSyncLogs from './DataSourceSyncLogs.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
+import {
+  SYNC_LOG_VISIBILITY_GRACE_MS,
+  isDataSourceSyncRunning,
+  reconcilePendingSyncs,
+  shouldPollDataSources,
+  type PendingSync,
+} from './datasourceSyncPolling'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{ kbId: string }>()
@@ -34,6 +41,7 @@ const logsVisible = ref(false)
 const logsDsId = ref('')
 const logsDsName = ref('')
 const pollTimer = ref<number | null>(null)
+const pendingSyncs = ref<Map<string, PendingSync>>(new Map())
 
 function stopPolling() {
   if (pollTimer.value !== null) {
@@ -55,15 +63,16 @@ async function loadList(silent = false) {
     const res = await listDataSources(props.kbId)
     dataSources.value = res?.data || res || []
     emit('count', dataSources.value.length)
+    pendingSyncs.value = reconcilePendingSyncs(dataSources.value, pendingSyncs.value, Date.now())
 
-    const hasRunningSync = dataSources.value.some(ds => ds.latest_sync_log?.status === 'running')
-    if (hasRunningSync) {
+    if (shouldPollDataSources(dataSources.value, pendingSyncs.value)) {
       schedulePolling()
     } else {
       stopPolling()
     }
   } catch (e: any) {
     console.error(e)
+    if (pendingSyncs.value.size > 0) schedulePolling()
   } finally {
     if (!silent) loading.value = false
   }
@@ -96,11 +105,22 @@ async function removeDataSource(ds: DataSource) {
 }
 
 async function handleSync(ds: DataSource) {
+  const pending = new Map(pendingSyncs.value)
+  pending.set(ds.id, {
+    previousLogId: ds.latest_sync_log?.id,
+    deadlineAt: Date.now() + SYNC_LOG_VISIBILITY_GRACE_MS,
+  })
+  pendingSyncs.value = pending
+  schedulePolling()
+
   try {
     await triggerSync(ds.id)
     MessagePlugin.success(t('datasource.syncTriggered'))
     await loadList(true)
   } catch (e: any) {
+    const next = new Map(pendingSyncs.value)
+    next.delete(ds.id)
+    pendingSyncs.value = next
     MessagePlugin.error(e?.message || e?.error || t('datasource.syncFailed'))
   }
 }
@@ -169,7 +189,7 @@ function lastSyncStatusLabel(ds: DataSource) {
 }
 
 function isSyncRunning(ds: DataSource) {
-  return ds.latest_sync_log?.status === 'running'
+  return isDataSourceSyncRunning(ds, pendingSyncs.value)
 }
 
 function onEditorSaved() {
