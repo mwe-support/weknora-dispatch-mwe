@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && npm run verify-dist-assets",
     "build-with-types": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
-    "build-only": "vite build",
+    "build-only": "vite build && npm run verify-dist-assets",
+    "verify-dist-assets": "node ../scripts/verify_frontend_dist_assets.mjs",
     "type-check": "vue-tsc --build",
     "test": "tsx --test",
     "check-i18n": "tsx --test src/i18n/localeKeyAudit.test.ts",
