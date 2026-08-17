@@ -52,7 +52,7 @@ import BatchTagDialog from './components/BatchTagDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
-import { canEditKnowledgeBaseContent } from './knowledgeBasePermissions';
+import { canAccessOriginalKnowledgeFile, canEditKnowledgeBaseContent } from './knowledgeBasePermissions';
 import WikiBrowser from './wiki/WikiBrowser.vue';
 import { getWikiStats } from '@/api/wiki';
 import {
@@ -313,18 +313,14 @@ const canMutateKnowledge = computed(() => {
   return authStore.hasRole('contributor');
 });
 
-// Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
-const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
-
-// Downloading returns the original source file, which is intentionally more
-// restrictive than viewing parsed content or using the preview tab. A tenant
-// Viewer can never download; for cross-tenant KBs the effective share
-// permission must additionally be Editor or Admin.
-const canDownloadKnowledge = computed(() => {
-  if (!authStore.hasRole('contributor')) return false;
-  const permission = effectiveKBPermission.value;
-  return !permission || permission === 'owner' || permission === 'admin' || permission === 'editor';
-});
+// Raw preview and download expose identical original bytes, so both are limited
+// to the Owner of the source workspace. Editors continue to use parsed content.
+const canDownloadKnowledge = computed(() => canAccessOriginalKnowledgeFile({
+  isWorkspaceOwner: authStore.hasRole('owner'),
+  isViaShare: isViaShare.value,
+  activeTenantId: authStore.effectiveTenantId ? Number(authStore.effectiveTenantId) : null,
+  knowledgeTenantId: kbInfo.value?.tenant_id ? Number(kbInfo.value.tenant_id) : null,
+}));
 
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([]);
 let { cardList, total, moreIndex, details, getKnowled, delKnowledge, openMore, onVisibleChange: _onVisibleChange, getCardDetails, getfDetails } = useKnowledgeBase(kbId.value)

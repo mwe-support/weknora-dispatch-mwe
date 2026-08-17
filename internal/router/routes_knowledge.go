@@ -107,14 +107,13 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.PUT("/manual/:id", g.Contributor(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateManualKnowledge)
 		k.POST("/:id/reparse", g.Contributor(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.ReparseKnowledge)
 		k.POST("/:id/cancel-parse", g.Contributor(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.CancelKnowledgeParse)
-		// Downloading exposes the original source file, so it has a stricter
-		// boundary than viewing parsed content or previewing it: tenant Viewers
-		// cannot download from their own workspace, and org-shared Viewer access
-		// cannot download from the source workspace. API keys still follow the
-		// retrieve capability declared by kRead; role guards intentionally defer
-		// machine-principal authorization to the API-key gate.
-		kRead.GET("/:id/download", g.Contributor(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.DownloadKnowledgeFile)
-		kRead.GET("/:id/preview", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.PreviewKnowledgeFile)
+		// Original-file download is intentionally NOT registered through the
+		// apiKeyRouteGroup: all API keys remain default-denied, including keys
+		// created by the workspace owner. JWT callers must be the Owner of the
+		// document's home workspace; the handler repeats the tenant match so an
+		// Owner of a receiving workspace cannot download shared raw files.
+		kgrp.GET("/:id/download", g.Owner(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.DownloadKnowledgeFile)
+		kgrp.GET("/:id/preview", g.Owner(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.PreviewKnowledgeFile)
 		k.PUT("/image/:id/:chunk_id", g.Contributor(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateImageInfo)
 		kRead.GET("/search", g.Viewer(), handler.SearchKnowledge)
 		kRead.GET("/move/progress/:task_id", g.Viewer(), handler.GetKnowledgeMoveProgress)

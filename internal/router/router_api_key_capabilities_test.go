@@ -308,7 +308,6 @@ func TestKnowledgeReadRoutesDeclareRetrieveCapability(t *testing.T) {
 		{http.MethodPost, "/api/v1/knowledge-bases/:id/hybrid-search"},
 		{http.MethodGet, "/api/v1/knowledge-bases/:id/knowledge"},
 		{http.MethodGet, "/api/v1/knowledge/:id"},
-		{http.MethodGet, "/api/v1/knowledge/:id/download"},
 		{http.MethodPost, "/api/v1/knowledge-bases/:id/faq/search"},
 		{http.MethodGet, "/api/v1/knowledge-bases/:id/tags"},
 		{http.MethodPost, "/api/v1/knowledge-search"},
@@ -326,6 +325,15 @@ func TestKnowledgeReadRoutesDeclareRetrieveCapability(t *testing.T) {
 				t.Fatalf("policy capabilities = %#v, want retrieve", policy.Capabilities)
 			}
 		})
+	}
+
+	for _, path := range []string{
+		"/api/v1/knowledge/:id/download",
+		"/api/v1/knowledge/:id/preview",
+	} {
+		if _, ok := g.apiKeyAuthorizer.Lookup(http.MethodGet, path); ok {
+			t.Fatalf("original-file route %s must remain default-deny for API keys", path)
+		}
 	}
 }
 

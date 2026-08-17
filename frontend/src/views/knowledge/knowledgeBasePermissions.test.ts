@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { canAddKnowledgeToBase, canEditKnowledgeBaseContent } from './knowledgeBasePermissions'
+import {
+  canAccessOriginalKnowledgeFile,
+  canAddKnowledgeToBase,
+  canEditKnowledgeBaseContent,
+} from './knowledgeBasePermissions'
 
 test('an invited workspace Contributor can add content to an existing KB', () => {
   assert.equal(canAddKnowledgeToBase({
@@ -48,4 +52,25 @@ test('an organization share uses the explicit share permission', () => {
     isTenantContributor: false,
     sharedPermissionCanEdit: true,
   }), true)
+})
+
+test('only the source workspace Owner can access original file bytes', () => {
+  assert.equal(canAccessOriginalKnowledgeFile({
+    isWorkspaceOwner: true,
+    isViaShare: false,
+    activeTenantId: 10006,
+    knowledgeTenantId: 10006,
+  }), true)
+  assert.equal(canAccessOriginalKnowledgeFile({
+    isWorkspaceOwner: false,
+    isViaShare: false,
+    activeTenantId: 10006,
+    knowledgeTenantId: 10006,
+  }), false)
+  assert.equal(canAccessOriginalKnowledgeFile({
+    isWorkspaceOwner: true,
+    isViaShare: true,
+    activeTenantId: 10003,
+    knowledgeTenantId: 10006,
+  }), false)
 })

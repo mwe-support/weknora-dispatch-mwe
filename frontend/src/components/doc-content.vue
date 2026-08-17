@@ -764,10 +764,10 @@ watch(() => props.details?.id, (newId) => {
     audioBlobUrl.value = '';
   }
   if (!newId) return;
-  if (isAudioFile(props.details?.file_type)) {
-    viewMode.value = 'merged'; // 音频默认全文视图，播放器已内嵌
-    loadAudioPreview();
-  } else if (props.details?.type === 'file' && canPreview()) {
+  if (props.canDownloadKB && isAudioFile(props.details?.file_type)) {
+	viewMode.value = 'merged'; // 音频默认全文视图，播放器已内嵌
+	loadAudioPreview();
+  } else if (props.canDownloadKB && props.details?.type === 'file' && canPreview()) {
     viewMode.value = 'preview';
   } else {
     viewMode.value = 'merged';
@@ -795,7 +795,7 @@ const audioBlobUrl = ref('');
 const audioLoading = ref(false);
 
 const loadAudioPreview = async () => {
-  if (!props.details?.id || audioBlobUrl.value) return;
+  if (!props.canDownloadKB || !props.details?.id || audioBlobUrl.value) return;
   audioLoading.value = true;
   try {
     const blob = await previewKnowledgeFile(props.details.id);
@@ -1832,12 +1832,12 @@ const handleDetailsScroll = () => {
               </span>
             </div>
             <div class="view-mode-buttons">
-              <t-button v-if="canPreview()" size="small" :variant="viewMode === 'preview' ? 'base' : 'outline'"
+              <t-button v-if="canDownloadKB && canPreview()" size="small" :variant="viewMode === 'preview' ? 'base' : 'outline'"
                 :theme="viewMode === 'preview' ? 'primary' : 'default'" @click="viewMode = 'preview'"
                 class="view-mode-btn">
                 {{ $t('preview.tab') }}
               </t-button>
-              <t-button v-if="!canPreview()" size="small" :variant="viewMode === 'merged' ? 'base' : 'outline'"
+              <t-button v-if="!canDownloadKB || !canPreview()" size="small" :variant="viewMode === 'merged' ? 'base' : 'outline'"
                 :theme="viewMode === 'merged' ? 'primary' : 'default'" @click="viewMode = 'merged'"
                 class="view-mode-btn">
                 {{ $t('knowledgeBase.viewMerged') }}

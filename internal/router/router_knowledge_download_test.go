@@ -2,8 +2,10 @@ package router
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
@@ -17,6 +19,7 @@ import (
 )
 
 type downloadKnowledgeLookup struct {
+	interfaces.KnowledgeService
 	knowledge *types.Knowledge
 }
 
@@ -25,6 +28,31 @@ func (s *downloadKnowledgeLookup) GetKnowledgeByIDOnly(_ context.Context, id str
 		return s.knowledge, nil
 	}
 	return nil, apprepo.ErrKnowledgeNotFound
+}
+
+func (s *downloadKnowledgeLookup) GetKnowledgeFile(
+	_ context.Context,
+	id string,
+) (io.ReadCloser, string, error) {
+	if s.knowledge != nil && s.knowledge.ID == id {
+		return io.NopCloser(strings.NewReader("original-file")), "original.txt", nil
+	}
+	return nil, "", apprepo.ErrKnowledgeNotFound
+}
+
+type downloadKBLookup struct {
+	interfaces.KnowledgeBaseService
+	kb *types.KnowledgeBase
+}
+
+func (s *downloadKBLookup) GetKnowledgeBaseByID(
+	_ context.Context,
+	id string,
+) (*types.KnowledgeBase, error) {
+	if s.kb != nil && s.kb.ID == id {
+		return s.kb, nil
+	}
+	return nil, apprepo.ErrKnowledgeBaseNotFound
 }
 
 type downloadKBShareStub struct {
@@ -57,10 +85,13 @@ func newKnowledgeDownloadRouteTestEngine(
 	gin.SetMode(gin.TestMode)
 
 	enabled := true
+	cfg := &config.Config{Tenant: &config.TenantConfig{EnableRBAC: &enabled}}
+	knowledgeService := &downloadKnowledgeLookup{knowledge: knowledge}
+	kbService := &downloadKBLookup{kb: kb}
 	guards := &rbacGuards{
-		cfg:              &config.Config{Tenant: &config.TenantConfig{EnableRBAC: &enabled}},
-		knowledgeService: &downloadKnowledgeLookup{knowledge: knowledge},
-		kbService:        &stubWikiKBLookup{kbs: map[string]*types.KnowledgeBase{kb.ID: kb}},
+		cfg:              cfg,
+		knowledgeService: knowledgeService,
+		kbService:        kbService,
 		kbShareService:   share,
 	}
 
@@ -73,8 +104,71 @@ func newKnowledgeDownloadRouteTestEngine(
 		c.Set(types.TenantIDContextKey.String(), uint64(1))
 		c.Next()
 	})
-	RegisterKnowledgeRoutes(r.Group("/api/v1"), &handler.KnowledgeHandler{}, guards)
+	RegisterKnowledgeRoutes(r.Group("/api/v1"), handler.NewKnowledgeHandler(
+		cfg,
+		knowledgeService,
+		kbService,
+		share,
+		nil,
+		nil,
+		nil,
+	), guards)
 	return r
+}
+
+type downloadResponseRecorder struct {
+	*httptest.ResponseRecorder
+}
+
+func (r *downloadResponseRecorder) CloseNotify() <-chan bool {
+	return make(chan bool)
+}
+
+func performKnowledgeDownload(engine *gin.Engine, id string) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/knowledge/"+id+"/download", nil)
+	engine.ServeHTTP(&downloadResponseRecorder{ResponseRecorder: rec}, req)
+	return rec
+}
+
+func TestKnowledgeDownloadAllowsHomeWorkspaceOwner(t *testing.T) {
+	engine := newKnowledgeDownloadRouteTestEngine(
+		t,
+		types.TenantRoleOwner,
+		&types.Knowledge{ID: "knowledge-own", KnowledgeBaseID: "kb-own", TenantID: 1},
+		&types.KnowledgeBase{ID: "kb-own", TenantID: 1},
+		nil,
+	)
+
+	rec := performKnowledgeDownload(engine, "knowledge-own")
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	require.Equal(t, "original-file", rec.Body.String())
+}
+
+func TestKnowledgeDownloadRejectsTenantAdmin(t *testing.T) {
+	engine := newKnowledgeDownloadRouteTestEngine(
+		t,
+		types.TenantRoleAdmin,
+		&types.Knowledge{ID: "knowledge-own", KnowledgeBaseID: "kb-own", TenantID: 1},
+		&types.KnowledgeBase{ID: "kb-own", TenantID: 1},
+		nil,
+	)
+
+	rec := performKnowledgeDownload(engine, "knowledge-own")
+	require.Equal(t, http.StatusForbidden, rec.Code, "body=%s", rec.Body.String())
+}
+
+func TestKnowledgeDownloadRejectsTenantContributor(t *testing.T) {
+	engine := newKnowledgeDownloadRouteTestEngine(
+		t,
+		types.TenantRoleContributor,
+		&types.Knowledge{ID: "knowledge-own", KnowledgeBaseID: "kb-own", TenantID: 1},
+		&types.KnowledgeBase{ID: "kb-own", TenantID: 1},
+		nil,
+	)
+
+	rec := performKnowledgeDownload(engine, "knowledge-own")
+	require.Equal(t, http.StatusForbidden, rec.Code, "body=%s", rec.Body.String())
 }
 
 func TestKnowledgeDownloadRejectsTenantViewer(t *testing.T) {
@@ -86,9 +180,7 @@ func TestKnowledgeDownloadRejectsTenantViewer(t *testing.T) {
 		nil,
 	)
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/knowledge/knowledge-own/download", nil)
-	engine.ServeHTTP(rec, req)
+	rec := performKnowledgeDownload(engine, "knowledge-own")
 
 	require.Equal(t, http.StatusForbidden, rec.Code, "body=%s", rec.Body.String())
 }
@@ -106,5 +198,33 @@ func TestKnowledgeDownloadRejectsReadOnlySharedKB(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/knowledge/knowledge-shared/download", nil)
 	engine.ServeHTTP(rec, req)
 
+	require.Equal(t, http.StatusForbidden, rec.Code, "body=%s", rec.Body.String())
+}
+
+func TestKnowledgeDownloadRejectsOwnerOfReceivingWorkspace(t *testing.T) {
+	engine := newKnowledgeDownloadRouteTestEngine(
+		t,
+		types.TenantRoleOwner,
+		&types.Knowledge{ID: "knowledge-shared", KnowledgeBaseID: "kb-shared", TenantID: 2},
+		&types.KnowledgeBase{ID: "kb-shared", TenantID: 2},
+		&downloadKBShareStub{permission: types.OrgRoleEditor, source: 2},
+	)
+
+	rec := performKnowledgeDownload(engine, "knowledge-shared")
+	require.Equal(t, http.StatusForbidden, rec.Code, "body=%s", rec.Body.String())
+}
+
+func TestKnowledgePreviewRejectsTenantContributor(t *testing.T) {
+	engine := newKnowledgeDownloadRouteTestEngine(
+		t,
+		types.TenantRoleContributor,
+		&types.Knowledge{ID: "knowledge-own", KnowledgeBaseID: "kb-own", TenantID: 1},
+		&types.KnowledgeBase{ID: "kb-own", TenantID: 1},
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/knowledge/knowledge-own/preview", nil)
+	engine.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusForbidden, rec.Code, "body=%s", rec.Body.String())
 }

@@ -24,3 +24,18 @@ export function canEditKnowledgeBaseContent(input: KnowledgeContentPermissionInp
 // operations. Keep the alias so upload-specific callers remain intention-
 // revealing without drifting into a second permission matrix.
 export const canAddKnowledgeToBase = canEditKnowledgeBaseContent
+
+export interface OriginalFileAccessInput {
+  isWorkspaceOwner: boolean
+  isViaShare: boolean
+  activeTenantId: number | null
+  knowledgeTenantId: number | null
+}
+
+/** Raw preview and download expose the same original bytes. */
+export function canAccessOriginalKnowledgeFile(input: OriginalFileAccessInput): boolean {
+  return input.isWorkspaceOwner
+    && !input.isViaShare
+    && input.activeTenantId !== null
+    && input.knowledgeTenantId === input.activeTenantId
+}

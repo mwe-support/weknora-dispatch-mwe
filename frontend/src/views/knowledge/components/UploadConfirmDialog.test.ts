@@ -6,6 +6,7 @@ const dialog = readFileSync(new URL('./UploadConfirmDialog.vue', import.meta.url
 const host = readFileSync(new URL('../../../components/UploadConfirmHost.vue', import.meta.url), 'utf8')
 const knowledgeBase = readFileSync(new URL('../KnowledgeBase.vue', import.meta.url), 'utf8')
 const platform = readFileSync(new URL('../../platform/index.vue', import.meta.url), 'utf8')
+const docContent = readFileSync(new URL('../../../components/doc-content.vue', import.meta.url), 'utf8')
 
 test('selects multiple document tags and returns them with the confirmation result', () => {
   assert.match(host, /:tag-ids="uploadConfirmStore\.tagIds"/)
@@ -74,6 +75,13 @@ test('uses the add-content permission for upload entry points without unlocking 
   assert.match(knowledgeBase, /<div v-if="canAddKnowledge" class="doc-filter-actions">/)
   assert.match(knowledgeBase, /const handleUploadSourceFiles = \(files: File\[\]\) => \{\s+if \(!canAddKnowledge\.value\) return;/)
   assert.match(knowledgeBase, /<t-tooltip v-if="canManage" :content="\$t\('knowledgeBase\.settings'\)"/)
+})
+
+test('limits raw preview and download UI to the source workspace Owner', () => {
+  assert.match(knowledgeBase, /canAccessOriginalKnowledgeFile/)
+  assert.match(knowledgeBase, /isWorkspaceOwner: authStore\.hasRole\('owner'\)/)
+  assert.match(docContent, /v-if="canDownloadKB && canPreview\(\)"/)
+  assert.match(docContent, /if \(!props\.canDownloadKB \|\| !props\.details\?\.id/)
 })
 
 test('uses section navigation with inline chunking controls and advanced options grouped', () => {

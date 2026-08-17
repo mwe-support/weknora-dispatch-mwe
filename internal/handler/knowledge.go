@@ -1476,6 +1476,38 @@ func (h *KnowledgeHandler) ClearKnowledgeBaseContents(c *gin.Context) {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge/{id}/download [get]
+func (h *KnowledgeHandler) originalFileOwnerContext(
+	c *gin.Context,
+	id string,
+) (context.Context, error) {
+	ctx := c.Request.Context()
+	// Raw source bytes are restricted to the Owner of the document's home
+	// workspace. API keys are denied even when full-access/retrieve capable;
+	// they may retrieve indexed content but never bulk-exfiltrate originals.
+	if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+		return ctx, errors.NewForbiddenError("Only the workspace owner can access original files")
+	}
+	if types.TenantRoleFromContext(ctx) != types.TenantRoleOwner {
+		return ctx, errors.NewForbiddenError("Only the workspace owner can access original files")
+	}
+	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if callerTenantID == 0 {
+		return ctx, errors.NewUnauthorizedError("Unauthorized")
+	}
+	knowledge, err := h.kgService.GetKnowledgeByIDOnly(ctx, id)
+	if err != nil {
+		if goerrors.Is(err, repository.ErrKnowledgeNotFound) {
+			return ctx, errors.NewNotFoundError("Knowledge not found")
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"knowledge_id": id})
+		return ctx, errors.NewInternalServerError("Failed to verify original file ownership")
+	}
+	if knowledge.TenantID != callerTenantID {
+		return ctx, errors.NewForbiddenError("Only the source workspace owner can access original files")
+	}
+	return context.WithValue(ctx, types.TenantIDContextKey, callerTenantID), nil
+}
+
 func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -1487,11 +1519,7 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
 		return
 	}
-
-	// Keep a handler-level Editor check in addition to the route guard. The
-	// original file is more sensitive than parsed-content reads and must not
-	// be downloadable through a read-only organization share.
-	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	effCtx, err := h.originalFileOwnerContext(c, id)
 	if err != nil {
 		c.Error(err)
 		return
@@ -1561,7 +1589,7 @@ func (h *KnowledgeHandler) PreviewKnowledgeFile(c *gin.Context) {
 		return
 	}
 
-	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	effCtx, err := h.originalFileOwnerContext(c, id)
 	if err != nil {
 		c.Error(err)
 		return
