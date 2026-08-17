@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
+	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,8 +36,41 @@ func (s *uploadKnowledgeBaseServiceStub) GetKnowledgeBaseByID(
 
 type uploadKnowledgeServiceStub struct {
 	interfaces.KnowledgeService
-	called   bool
-	tenantID uint64
+	called            bool
+	tenantID          uint64
+	existingKnowledge *types.Knowledge
+	reparseCalled     bool
+	moveFolderCalled  bool
+}
+
+func (s *uploadKnowledgeServiceStub) GetKnowledgeBatch(
+	_ context.Context,
+	_ uint64,
+	ids []string,
+) ([]*types.Knowledge, error) {
+	if s.existingKnowledge != nil && len(ids) == 1 && ids[0] == s.existingKnowledge.ID {
+		return []*types.Knowledge{s.existingKnowledge}, nil
+	}
+	return nil, nil
+}
+
+func (s *uploadKnowledgeServiceStub) MoveKnowledgeToFolder(
+	_ context.Context,
+	_ string,
+	_ []string,
+	_ string,
+) (int64, error) {
+	s.moveFolderCalled = true
+	return 1, nil
+}
+
+func (s *uploadKnowledgeServiceStub) ReparseKnowledge(
+	_ context.Context,
+	_ string,
+	_ *types.KnowledgeProcessOverrides,
+) (*types.Knowledge, error) {
+	s.reparseCalled = true
+	return s.existingKnowledge, nil
 }
 
 func (s *uploadKnowledgeServiceStub) CreateKnowledgeFromFile(
@@ -60,10 +94,42 @@ func (s *uploadKnowledgeServiceStub) CreateKnowledgeFromFile(
 	}, nil
 }
 
+func (s *uploadKnowledgeServiceStub) GetKnowledgeByIDOnly(
+	_ context.Context,
+	id string,
+) (*types.Knowledge, error) {
+	if s.existingKnowledge != nil && s.existingKnowledge.ID == id {
+		return s.existingKnowledge, nil
+	}
+	return nil, apprepo.ErrKnowledgeNotFound
+}
+
+func (s *uploadKnowledgeServiceStub) GetOwningKBCreatorID(
+	_ context.Context,
+	knowledgeID string,
+) (string, error) {
+	if s.existingKnowledge != nil && s.existingKnowledge.ID == knowledgeID {
+		return "support-user", nil
+	}
+	return "", apprepo.ErrKnowledgeNotFound
+}
+
+type uploadTaskEnqueuerStub struct {
+	called bool
+}
+
+func (s *uploadTaskEnqueuerStub) Enqueue(
+	_ *asynq.Task,
+	_ ...asynq.Option,
+) (*asynq.TaskInfo, error) {
+	s.called = true
+	return &asynq.TaskInfo{ID: "content-task"}, nil
+}
+
 func newKnowledgeUploadTestEngine(
 	t *testing.T,
 	role types.TenantRole,
-) (*gin.Engine, *uploadKnowledgeServiceStub) {
+) (*gin.Engine, *uploadKnowledgeServiceStub, *uploadTaskEnqueuerStub) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -81,20 +147,31 @@ func newKnowledgeUploadTestEngine(
 		CreatorID: ownerUserID,
 	}
 	kbService := &uploadKnowledgeBaseServiceStub{kb: kb}
-	knowledgeService := &uploadKnowledgeServiceStub{}
+	knowledgeService := &uploadKnowledgeServiceStub{
+		existingKnowledge: &types.Knowledge{
+			ID:              "existing-document",
+			KnowledgeBaseID: kbID,
+			TenantID:        tenantID,
+		},
+	}
+	taskEnqueuer := &uploadTaskEnqueuerStub{}
 	knowledgeHandler := handler.NewKnowledgeHandler(
 		cfg,
 		knowledgeService,
 		kbService,
 		nil,
 		nil,
-		nil,
+		taskEnqueuer,
 		nil,
 	)
 	guards := &rbacGuards{
-		cfg:       cfg,
-		kbService: kbService,
+		cfg:              cfg,
+		kbService:        kbService,
+		knowledgeService: knowledgeService,
 		kbCreator: func(_ *gin.Context) (string, error) {
+			return ownerUserID, nil
+		},
+		knowledgeKBCreator: func(_ *gin.Context) (string, error) {
 			return ownerUserID, nil
 		},
 	}
@@ -111,7 +188,7 @@ func newKnowledgeUploadTestEngine(
 		c.Next()
 	})
 	RegisterKnowledgeRoutes(engine.Group("/api/v1"), knowledgeHandler, guards)
-	return engine, knowledgeService
+	return engine, knowledgeService, taskEnqueuer
 }
 
 func performKnowledgeUpload(t *testing.T, engine *gin.Engine) *httptest.ResponseRecorder {
@@ -140,7 +217,7 @@ func performKnowledgeUpload(t *testing.T, engine *gin.Engine) *httptest.Response
 
 func TestInvitedContributorCanUploadFileToExistingKnowledgeBase(t *testing.T) {
 	const tenantID = uint64(10001)
-	engine, knowledgeService := newKnowledgeUploadTestEngine(t, types.TenantRoleContributor)
+	engine, knowledgeService, _ := newKnowledgeUploadTestEngine(t, types.TenantRoleContributor)
 	recorder := performKnowledgeUpload(t, engine)
 
 	require.Equal(t, http.StatusOK, recorder.Code, "body=%s", recorder.Body.String())
@@ -149,9 +226,63 @@ func TestInvitedContributorCanUploadFileToExistingKnowledgeBase(t *testing.T) {
 }
 
 func TestWorkspaceViewerCannotUploadFileToExistingKnowledgeBase(t *testing.T) {
-	engine, knowledgeService := newKnowledgeUploadTestEngine(t, types.TenantRoleViewer)
+	engine, knowledgeService, _ := newKnowledgeUploadTestEngine(t, types.TenantRoleViewer)
 	recorder := performKnowledgeUpload(t, engine)
 
 	require.Equal(t, http.StatusForbidden, recorder.Code, "body=%s", recorder.Body.String())
 	require.False(t, knowledgeService.called, "viewer upload must stop before the knowledge service")
+}
+
+func TestInvitedContributorCanDeleteExistingKnowledgeDocument(t *testing.T) {
+	engine, _, taskEnqueuer := newKnowledgeUploadTestEngine(t, types.TenantRoleContributor)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/knowledge/existing-document", nil)
+	engine.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, "body=%s", recorder.Body.String())
+	require.True(t, taskEnqueuer.called, "document delete must reach the content task queue")
+}
+
+func TestInvitedContributorCanReparseExistingKnowledgeDocument(t *testing.T) {
+	engine, knowledgeService, _ := newKnowledgeUploadTestEngine(t, types.TenantRoleContributor)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/knowledge/existing-document/reparse", nil)
+	engine.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, "body=%s", recorder.Body.String())
+	require.True(t, knowledgeService.reparseCalled, "reparse must reach the knowledge service")
+}
+
+func TestInvitedContributorCanBatchDeleteKnowledgeDocuments(t *testing.T) {
+	engine, _, taskEnqueuer := newKnowledgeUploadTestEngine(t, types.TenantRoleContributor)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/knowledge/batch-delete",
+		bytes.NewBufferString(`{"kb_id":"existing-kb","ids":["existing-document"]}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	engine.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, "body=%s", recorder.Body.String())
+	require.True(t, taskEnqueuer.called, "batch delete must reach the content task queue")
+}
+
+func TestInvitedContributorCanMoveKnowledgeDocumentToFolder(t *testing.T) {
+	engine, knowledgeService, _ := newKnowledgeUploadTestEngine(t, types.TenantRoleContributor)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/knowledge/folder",
+		bytes.NewBufferString(`{"kb_id":"existing-kb","knowledge_ids":["existing-document"],"folder_path":"归档"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	engine.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, "body=%s", recorder.Body.String())
+	require.True(t, knowledgeService.moveFolderCalled, "folder move must reach the knowledge service")
 }

@@ -68,7 +68,8 @@ test('routes global knowledge file drops through the upload confirmation flow', 
 })
 
 test('uses the add-content permission for upload entry points without unlocking KB management', () => {
-  assert.match(knowledgeBase, /const canAddKnowledge = computed/)
+  assert.match(knowledgeBase, /const canEdit = computed\(\(\) => canEditKnowledgeBaseContent/)
+  assert.match(knowledgeBase, /const canAddKnowledge = canEdit;/)
   assert.match(knowledgeBase, /isTenantContributor: authStore\.hasRole\('contributor'\)/)
   assert.match(knowledgeBase, /<div v-if="canAddKnowledge" class="doc-filter-actions">/)
   assert.match(knowledgeBase, /const handleUploadSourceFiles = \(files: File\[\]\) => \{\s+if \(!canAddKnowledge\.value\) return;/)

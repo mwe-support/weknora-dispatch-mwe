@@ -27,15 +27,19 @@ import (
 // shared-agents/disabled all wired against the wrong axis). Two
 // questions decide it:
 //
-// Q1. Does the resource have a creator?
+// Q1. Is this a top-level resource lifecycle operation or KB content?
 //
-//	YES — KB, Agent, Knowledge document, Chunk, WikiPage, FAQ entry,
-//	      KB tag, anything stamped with creator_id / created_by.
+//	LIFECYCLE — KB / Agent settings, sharing, deletion and other operations
+//	      on the top-level object itself.
 //	      => Mutating routes use OwnedXxxOrAdmin.
 //	      The creator passes regardless of role; everyone else needs
-//	      Admin+. This is what makes "Contributor in my own KB acts
-//	      like Owner; Contributor in someone else's KB acts like
-//	      Viewer" hold uniformly.
+//	      Admin+.
+//
+//	KB CONTENT — Knowledge documents, chunks, wiki pages, FAQ entries,
+//	      document folders and KB-local content tags.
+//	      => Mutating routes use Contributor() plus KBAccessWrite.
+//	      An invited editor may operate on content without gaining authority
+//	      over KB settings, sharing or deletion.
 //
 //	NO  — Tenant-wide infrastructure: Model, VectorStore, IM channel,
 //	      WebSearchProvider, DataSource, MCPService, WeKnoraCloud
@@ -72,28 +76,24 @@ import (
 // The user never sees the guard names. They see this:
 //
 //   - As Owner / Admin: I can manage everything in my tenant.
-//   - As Contributor: I can manage what I created. Other people's
-//     resources behave like read-only, regardless of which UI tab.
+//   - As Contributor: I can manage KB content in my workspace, but can only
+//     change/delete/share top-level KBs and agents that I created.
 //   - As Viewer: read everything, mutate nothing.
 //   - Creating new resources (KB, agent, chat session) requires being
 //     at least Contributor.
 //   - Configuring tenant infrastructure (models, vector stores, IM,
 //     etc.) requires Admin+.
 //
-// If a route makes a Contributor surprised that they CAN'T do
-// something they own, the gate is too tight (probably Admin where it
-// should be OwnedXxxOrAdmin). If a route makes a Contributor surprised
-// they CAN do something to someone else's resource, the gate is too
-// loose (Contributor where it should be OwnedXxxOrAdmin). Both
-// surprises are bugs.
+// If a content route makes a valid Editor prove KB ownership, the gate is too
+// tight. If a lifecycle/settings route lets a non-owner Contributor mutate the
+// top-level object, the gate is too loose. Both surprises are bugs.
 //
 // Sub-resources must align with their parent
 // ------------------------------------------
-// Chunks/wiki pages/FAQ entries/tags inherit their parent KB's gate.
-// The KBCreatorLookupFromKnowledgeID / KBCreatorLookupFromKBPath /
-// etc. lookups walk the URL param up to the KB and reuse its
-// creator_id. Don't add a new sub-resource with a freshly-invented
-// gate (a recurring source of "Contributor everywhere" drift).
+// Chunks/wiki pages/FAQ entries/tags inherit their parent KB's write access:
+// Contributor() establishes the workspace role floor and KBAccessWrite walks
+// the URL back to the parent KB. Do not apply OwnedXxxOrAdmin to child content;
+// that would silently collapse Editor into Owner/Admin again.
 //
 // rbacGuards is the centralised role-matrix bundle for tenant-level RBAC
 // (issue #1303 PR 2). NewRouter constructs it once and threads it into

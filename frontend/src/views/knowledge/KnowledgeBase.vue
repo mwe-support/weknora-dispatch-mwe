@@ -52,7 +52,7 @@ import BatchTagDialog from './components/BatchTagDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
-import { canAddKnowledgeToBase } from './knowledgeBasePermissions';
+import { canEditKnowledgeBaseContent } from './knowledgeBasePermissions';
 import WikiBrowser from './wiki/WikiBrowser.vue';
 import { getWikiStats } from '@/api/wiki';
 import {
@@ -273,33 +273,17 @@ const currentSharedKb = computed(() =>
 // in the share list is the authoritative signal.
 const isViaShare = computed(() => !!currentSharedKb.value);
 
-// Can edit: when accessed via an organization share, ONLY the share grant
-// counts — even if the current user happens to be the original creator of
-// the KB. The backend's RBAC middleware authorizes based on the active
-// tenant, not on creator_id, so a creator viewing their own KB from a
-// different tenant context will be 403'd on write. Otherwise: KB creator
-// (any role) or tenant Admin+ in the home tenant.
-//
-// hasRole('contributor') is intentionally NOT here — being a Contributor
-// in a tenant does not by itself grant edit on someone else's KB.
-const canEdit = computed(() => {
-  if (isViaShare.value) return orgStore.canEditKB(kbId.value, false);
-  if (isOwner.value) return true;
-  if (authStore.hasRole('admin')) return true;
-  return orgStore.canEditKB(kbId.value, false);
-});
-
-// Adding new documents is intentionally less privileged than changing KB
-// settings or mutating existing documents. Invited Contributors can add file,
-// URL and manual content to an existing KB; ownership/admin remains required
-// for KB lifecycle and destructive operations.
-const canAddKnowledge = computed(() => canAddKnowledgeToBase({
+// KB content follows the Editor boundary: an invited Contributor can upload,
+// rebuild, inspect traces, move, batch-manage and delete documents. This does
+// not grant KB lifecycle/settings authority; canManage below stays owner/admin.
+const canEdit = computed(() => canEditKnowledgeBaseContent({
   isViaShare: isViaShare.value,
   isCreator: isOwner.value,
   isTenantAdmin: authStore.hasRole('admin'),
   isTenantContributor: authStore.hasRole('contributor'),
   sharedPermissionCanEdit: orgStore.canEditKB(kbId.value, false),
 }));
+const canAddKnowledge = canEdit;
 
 // Can manage (delete, settings, etc.): same isViaShare-first rule. For
 // shared KBs only an 'admin' share grant qualifies — editor/viewer (and
