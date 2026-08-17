@@ -6,7 +6,7 @@
 - 上游版本：WeKnora `v0.7.2`
 - 目标仓库：`mwe-support/weknora-dispatch-mwe`
 - 目标分支：`weknora-v0.7.2`
-- 当前状态：完整内容权限修复已部署生产环境；待受邀 Contributor 完成业务操作验收。
+- 当前状态：完整内容权限修复已部署生产环境，并通过受邀 Contributor 业务操作验收。
 
 ## 根因
 
