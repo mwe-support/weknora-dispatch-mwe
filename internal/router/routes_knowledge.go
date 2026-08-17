@@ -60,8 +60,10 @@ func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler, g *r
 // #1303): the URL :id is a knowledge id, OwnedKnowledgeKBOrAdmin
 // walks it back to KB.CreatorID so a Contributor who owns the KB can
 // edit/delete any of its documents while a non-owner Contributor gets
-// 403. KB-scoped upload routes (`/knowledge-bases/:id/knowledge/...`)
-// reuse OwnedKBOrAdmin because the URL :id is the KB id directly.
+// 403. Creating new child content under an existing KB is different from
+// mutating the KB itself: an invited Contributor / org-shared Editor may add
+// documents, while KBAccessWrite still binds the write to an own/shared KB.
+// Destructive or metadata mutations keep their ownership/admin guards.
 // Cross-:id batch operations stay Contributor-gated — they don't have
 // a single owning KB to check against.
 func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandler, g *rbacGuards) {
@@ -70,9 +72,12 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 	kb := g.apiKeyGroup(r.Group("/knowledge-bases/:id/knowledge"), apiKeyIngest(apiKeyFullAccess()))
 	kbRead := kb.With(apiKeyRetrieve(apiKeyFullAccess()))
 	{
-		kb.POST("/file", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromFile)
-		kb.POST("/url", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromURL)
-		kb.POST("/manual", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateManualKnowledge)
+		// Adding content is an editor operation, not a KB ownership operation.
+		// The former OwnedKBOrAdmin guard rejected invited Contributors before
+		// KBAccessWrite could resolve their valid write access to the KB.
+		kb.POST("/file", g.Contributor(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromFile)
+		kb.POST("/url", g.Contributor(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromURL)
+		kb.POST("/manual", g.Contributor(), g.KBAccessWrite("id"), handler.CreateManualKnowledge)
 		kbRead.GET("", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledge)
 		kbRead.GET("/folders", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledgeFolders)
 		kb.PUT("/folders", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.RenameKnowledgeFolder)

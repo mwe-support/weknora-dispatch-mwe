@@ -52,6 +52,7 @@ import BatchTagDialog from './components/BatchTagDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
+import { canAddKnowledgeToBase } from './knowledgeBasePermissions';
 import WikiBrowser from './wiki/WikiBrowser.vue';
 import { getWikiStats } from '@/api/wiki';
 import {
@@ -288,6 +289,18 @@ const canEdit = computed(() => {
   return orgStore.canEditKB(kbId.value, false);
 });
 
+// Adding new documents is intentionally less privileged than changing KB
+// settings or mutating existing documents. Invited Contributors can add file,
+// URL and manual content to an existing KB; ownership/admin remains required
+// for KB lifecycle and destructive operations.
+const canAddKnowledge = computed(() => canAddKnowledgeToBase({
+  isViaShare: isViaShare.value,
+  isCreator: isOwner.value,
+  isTenantAdmin: authStore.hasRole('admin'),
+  isTenantContributor: authStore.hasRole('contributor'),
+  sharedPermissionCanEdit: orgStore.canEditKB(kbId.value, false),
+}));
+
 // Can manage (delete, settings, etc.): same isViaShare-first rule. For
 // shared KBs only an 'admin' share grant qualifies — editor/viewer (and
 // even being the creator viewed via share) never grant delete/settings.
@@ -335,7 +348,7 @@ let { cardList, total, moreIndex, details, getKnowled, delKnowledge, openMore, o
 const showKbDetailContextualGuide = computed(() => {
   return Boolean(kbId.value)
     && !isFAQ.value
-    && canEdit.value
+    && canAddKnowledge.value
     && !docListLoading.value
     && cardList.value.length === 0;
 });
@@ -1194,7 +1207,7 @@ const handleFileUploaded = (event: CustomEvent) => {
 const handleOpenURLImportDialog = (event: CustomEvent) => {
   const eventKbId = event.detail.kbId;
   console.log('接收到URL导入对话框打开事件，知识库ID:', eventKbId, '当前知识库ID:', kbId.value);
-  if (eventKbId && eventKbId === kbId.value && !isFAQ.value) {
+  if (eventKbId && eventKbId === kbId.value && !isFAQ.value && canAddKnowledge.value) {
     if (ensureDocumentKbReady()) {
       uploadSourceRef.value?.openUrlDialog();
     }
@@ -1797,17 +1810,20 @@ const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
 };
 
 const handleUploadSourceFiles = (files: File[]) => {
+  if (!canAddKnowledge.value) return;
   if (!ensureDocumentKbReady()) return;
   if (files.length === 0) return;
   openUploadConfirmDialog(files);
 };
 
 const handleUploadSourceUrl = (url: string) => {
+  if (!canAddKnowledge.value) return;
   if (!ensureDocumentKbReady()) return;
   openUploadConfirmDialog([], [url]);
 };
 
 const handleManualCreate = () => {
+  if (!canAddKnowledge.value) return;
   if (!ensureDocumentKbReady()) return;
   uiStore.openManualEditor({
     mode: 'create',
@@ -2529,7 +2545,7 @@ async function createNewSession(value: string): Promise<void> {
                       </button>
                     </t-tooltip>
                   </div>
-                  <div v-if="canEdit" class="doc-filter-actions">
+                  <div v-if="canAddKnowledge" class="doc-filter-actions">
                     <KbUploadSourceDropdown ref="uploadSourceRef" :accept-file-types="acceptFileTypes"
                       :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="file-add"
                       trigger-class="content-bar-icon-btn" data-guide="kb-detail-add-doc"

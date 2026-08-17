@@ -67,6 +67,14 @@ test('routes global knowledge file drops through the upload confirmation flow', 
   assert.match(knowledgeBase, /handleUploadSourceFiles\(files\)/)
 })
 
+test('uses the add-content permission for upload entry points without unlocking KB management', () => {
+  assert.match(knowledgeBase, /const canAddKnowledge = computed/)
+  assert.match(knowledgeBase, /isTenantContributor: authStore\.hasRole\('contributor'\)/)
+  assert.match(knowledgeBase, /<div v-if="canAddKnowledge" class="doc-filter-actions">/)
+  assert.match(knowledgeBase, /const handleUploadSourceFiles = \(files: File\[\]\) => \{\s+if \(!canAddKnowledge\.value\) return;/)
+  assert.match(knowledgeBase, /<t-tooltip v-if="canManage" :content="\$t\('knowledgeBase\.settings'\)"/)
+})
+
 test('uses section navigation with inline chunking controls and advanced options grouped', () => {
   assert.match(dialog, /v-model="uiState\.chunkingConfig\.strategy"/)
   assert.match(dialog, /v-model="uiState\.chunkingConfig\.chunkSize"/)
