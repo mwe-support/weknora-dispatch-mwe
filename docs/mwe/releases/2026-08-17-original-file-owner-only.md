@@ -6,7 +6,7 @@
 - 上游版本：WeKnora `v0.7.2`
 - 目标仓库：`mwe-support/weknora-dispatch-mwe`
 - 目标分支：`weknora-v0.7.2`
-- 当前状态：代码与隔离测试通过，待部署生产环境。
+- 当前状态：代码与隔离测试通过，已部署生产环境；API Key 生产拒绝测试通过。
 
 ## 安全不变量
 
@@ -35,11 +35,15 @@
 - router/handler/middleware 全包测试：通过；目标 race 通过，vet 无诊断输出。
 - 前端类型检查：通过；测试 358/358 通过。
 - 前端生产构建：通过；资源检查统计 359 个文件、225 个 JS、45 个 CSS。
+- 生产 API Key 实测：同一有效 Key 列知识库/文档返回 200/200；download/preview 返回 403/403。
+- 生产 app/frontend：均 healthy、重启次数 0；容器内 `/health` 返回 `{"status":"ok"}`。
 
 ## 部署与回滚
 
-- 应用镜像：待部署后补充。
-- 前端镜像：待部署后补充。
+- 应用镜像：`marvel/weknora-app:v0.7.2-owner-original-file-20260817`
+- 前端镜像：`marvel/weknora-ui:v0.7.2-owner-original-file-20260817`
+- 部署提交：`84ef372f346a4b24c3d430e6fcf748858ef18d24`
+- 配置备份：`/public/knowledgebase/weknora/override.yml.bak-owner-original-file-20260817-093251`
 - 直接回滚点：`marvel/weknora-app:v0.7.2-editor-content-20260817`、
   `marvel/weknora-ui:v0.7.2-editor-content-20260817`。
 - 生产验收：Owner 下载/预览测试文件成功；Editor 页面无下载/raw preview，直接请求返回 403；
