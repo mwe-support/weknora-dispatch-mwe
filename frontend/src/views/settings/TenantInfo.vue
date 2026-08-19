@@ -566,6 +566,14 @@ const saveTenantName = async () => {
         )
         authStore.setMemberships(next)
       }
+      // UserMenu/currentTenantName prefer selectedTenantName while a tenant
+      // override is active. Updating tenant + memberships alone leaves that
+      // cache (and localStorage) stale until the user switches workspaces.
+      // Reusing the same selected id updates only its display name: the store
+      // sees tenantChanged=false, so tenant-scoped caches are not cleared.
+      if (Number(authStore.selectedTenantId) === Number(tenantInfo.value.id)) {
+        authStore.setSelectedTenant(Number(tenantInfo.value.id), newName)
+      }
       MessagePlugin.success(t('tenant.details.editNameSuccess'))
       editing.value = false
     } else {
