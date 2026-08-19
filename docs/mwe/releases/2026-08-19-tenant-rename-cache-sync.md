@@ -5,7 +5,7 @@
 - 上游版本：WeKnora `v0.7.2`
 - 目标仓库：`mwe-support/weknora-dispatch-mwe`
 - 目标分支：`weknora-v0.7.2`
-- 当前状态：代码与自动化测试通过，待部署和真实页面验收。
+- 当前状态：代码与自动化测试通过，已部署生产环境；待真实页面验收。
 
 ## 现象与根因
 
@@ -31,10 +31,14 @@
 - 前端测试：359/359 通过。
 - 前端生产构建：通过；资源检查统计 370 个文件、235 个 JS、46 个 CSS。
 - Browser 插件自动化因当前插件文件未在 Node 运行时受信任路径中而无法建立会话；未绕过该安全限制。
+- 生产 Frontend：healthy、重启次数 0；App/MCP 容器未重建。
+- `https://kb.mwexk.com/` 与抽样静态资源均返回 200，Content-Type 正确。
 
 ## 部署与回滚
 
-- 前端镜像：待部署后补充。
+- 前端镜像：`marvel/weknora-ui:v0.7.2-tenant-rename-cache-20260819`
+- 部署提交：`43712c03d4d7cf08770a2200352d85b98c30ff07`
+- 配置备份：`/public/knowledgebase/weknora/override.yml.bak-tenant-rename-cache-20260819-085153`
 - 直接回滚点：`marvel/weknora-ui:v0.7.2-owner-original-file-20260817`。
 - 生产验收：当前空间改名后不切换空间，确认侧栏、底部账户区、空间切换列表同步显示新名称；
   再刷新页面确认持久化名称一致。
