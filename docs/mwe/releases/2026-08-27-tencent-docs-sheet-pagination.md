@@ -26,7 +26,7 @@ The Tencent Docs connector used one generic get_content call for every online do
 
 ## Follow-up hardening
 
-Status: implemented and test-verified in the follow-up commit, but not yet rebuilt or deployed. The production acceptance section below applies to the initial range-pagination image; the compaction and additional metrics require a new image acceptance.
+Status: deployed and production-verified on 2026-08-27 in marvel/weknora-app:v0.7.2-tencentdocs-sheet-pagination-v2-20260827.
 
 The targeted production repair exposed two additional edge cases, now covered in the same implementation:
 
@@ -64,10 +64,17 @@ Only WeKnora-app was recreated. Database, frontend, object storage, model servic
 Configuration backup:
 - /public/knowledgebase/weknora/override.yml.bak.20260827T094437Z-sheet-pagination
 
+Follow-up image:
+- marvel/weknora-app:v0.7.2-tencentdocs-sheet-pagination-v2-20260827
+- Code commit: 6e4a2d876f965e7f47d6e962e2ee5cd23a709706
+- Configuration backup: /public/knowledgebase/weknora/override.yml.bak.20260827T145552Z-sheet-pagination-v2
+
+Only WeKnora-app was recreated for the follow-up; all other container IDs were unchanged.
+
 ## Rollback
 
-1. Restore the backup override file or replace the app image with:
-   marvel/weknora-app:v0.7.2-sync-skipped-details-20260821
+1. Restore the follow-up backup override or replace the app image with:
+   marvel/weknora-app:v0.7.2-tencentdocs-sheet-pagination-20260827
 2. Run:
    docker compose --profile minio -f docker-compose.yml -f ../override.yml up -d --no-deps app
 3. Confirm WeKnora-app is healthy.
@@ -94,9 +101,12 @@ Accepted on 2026-08-27 after a targeted repair of the affected production invent
 - Row mismatches: 0.
 - Reported file PMJIUYDBGCPD: 191/191 rows, completed, and two indexed chunks contain the row-119 sentinel supplier name.
 - Production image: marvel/weknora-app:v0.7.2-tencentdocs-sheet-pagination-20260827; WeKnora-app healthy.
+- Follow-up image: marvel/weknora-app:v0.7.2-tencentdocs-sheet-pagination-v2-20260827; code commit 6e4a2d87; container health endpoint returned `{"status":"ok"}`; restart count 0.
+- Follow-up deployment recreated only WeKnora-app; no other container ID changed; startup logs contained no panic/fatal/startup failure.
+- Post-deployment active knowledge processing: 0; running/pending data-source syncs: 0.
 - Final audit: /public/knowledgebase/results/tencent-sheet-repair-scan/20260827T100149Z/final-acceptance.json
 - Exclusion audit: /public/knowledgebase/results/tencent-sheet-repair-scan/20260827T100149Z/repair-plan-exclusions.json
 
-## Push status
+## Push target
 
-Not pushed. Production behavior and the targeted repair are accepted; pushing still requires the normal repository review and release-record workflow.
+Repository: mwe-support/weknora-dispatch-mwe; branch: weknora-v0.7.2. This release record is included in the deployment push batch.
