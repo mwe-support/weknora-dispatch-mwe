@@ -18,4 +18,13 @@ type Client interface {
 	Close() error
 }
 
+// SheetClient exposes range-based Sheet reads. It is optional so non-Sheet
+// connector test doubles and future Open API clients can implement it separately.
+type SheetClient interface {
+	GetSheetInfo(ctx context.Context, fileID string) ([]SheetInfo, error)
+	GetSheetCells(ctx context.Context, fileID, sheetID string,
+		startRow, endRow, startCol, endCol int) ([]SheetCell, error)
+}
+
 var _ Client = (*TencentDocsMCPClient)(nil)
+var _ SheetClient = (*TencentDocsMCPClient)(nil)

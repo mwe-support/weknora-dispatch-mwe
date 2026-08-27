@@ -28,6 +28,8 @@ const (
 	toolManageFolderList = "manage.folder_list"
 	toolQueryFileInfo    = "manage.query_file_info"
 	toolGetContent       = "get_content"
+	toolSheetGetInfo     = "sheet.get_sheet_info"
+	toolSheetGetCells    = "sheet.get_cell_data"
 	toolExportFile       = "manage.export_file"
 	toolExportProgress   = "manage.export_progress"
 
@@ -292,6 +294,59 @@ func (c *TencentDocsMCPClient) GetContent(ctx context.Context, fileID string) (*
 		return nil, err
 	}
 	return &content, nil
+}
+
+// GetSheetInfo returns every worksheet and its physical dimensions.
+func (c *TencentDocsMCPClient) GetSheetInfo(
+	ctx context.Context,
+	fileID string,
+) ([]SheetInfo, error) {
+	if err := requireID("file ID", fileID); err != nil {
+		return nil, err
+	}
+	if err := c.ensureReady(ctx); err != nil {
+		return nil, err
+	}
+	var response sheetInfoResponse
+	if err := c.callToolJSON(
+		ctx, toolSheetGetInfo,
+		map[string]interface{}{"file_id": fileID},
+		&response,
+	); err != nil {
+		return nil, err
+	}
+	return append([]SheetInfo(nil), response.Sheets...), nil
+}
+
+// GetSheetCells reads one explicit inclusive Sheet range as structured cells.
+func (c *TencentDocsMCPClient) GetSheetCells(
+	ctx context.Context,
+	fileID, sheetID string,
+	startRow, endRow, startCol, endCol int,
+) ([]SheetCell, error) {
+	if err := requireID("file ID", fileID); err != nil {
+		return nil, err
+	}
+	if err := requireID("sheet ID", sheetID); err != nil {
+		return nil, err
+	}
+	if startRow < 0 || startCol < 0 || endRow < startRow || endCol < startCol {
+		return nil, fmt.Errorf("invalid Sheet cell range")
+	}
+	if err := c.ensureReady(ctx); err != nil {
+		return nil, err
+	}
+	args := map[string]interface{}{
+		"file_id": fileID, "sheet_id": sheetID,
+		"start_row": startRow, "end_row": endRow,
+		"start_col": startCol, "end_col": endCol,
+		"return_csv": false,
+	}
+	var response sheetCellsResponse
+	if err := c.callToolJSON(ctx, toolSheetGetCells, args, &response); err != nil {
+		return nil, err
+	}
+	return append([]SheetCell(nil), response.Cells...), nil
 }
 
 // StartExport starts Tencent Docs' asynchronous original-format export.

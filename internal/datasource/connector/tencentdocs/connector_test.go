@@ -136,7 +136,7 @@ func TestConnectorTypeAndValidate(t *testing.T) {
 func TestTencentDocsOnlineTypeCompatibilityMatrix(t *testing.T) {
 	for _, documentType := range []string{
 		"word", "excel", "form", "slide", "smartcanvas", "smartsheet", "mind", "flowchart",
-		"doc", "sheet",
+		"doc", "sheet", "tencentsheet",
 	} {
 		if !isTencentDocsOnlineType(documentType) {
 			t.Errorf("isTencentDocsOnlineType(%q) = false, want true", documentType)
@@ -149,9 +149,9 @@ func TestTencentDocsOnlineTypeCompatibilityMatrix(t *testing.T) {
 	}
 }
 
-func TestConnectorFetchAllUsesContentPathForEveryOnlineDocumentType(t *testing.T) {
+func TestConnectorFetchAllUsesContentPathForNonSheetOnlineDocumentTypes(t *testing.T) {
 	for _, documentType := range []string{
-		"word", "excel", "form", "slide", "smartcanvas", "smartsheet", "mind", "flowchart",
+		"word", "form", "slide", "smartcanvas", "smartsheet", "mind", "flowchart",
 	} {
 		t.Run(documentType, func(t *testing.T) {
 			client := &fakeConnectorClient{

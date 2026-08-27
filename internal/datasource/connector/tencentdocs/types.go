@@ -118,6 +118,34 @@ func (v *flexibleUint64) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// SheetInfo describes one worksheet returned by sheet.get_sheet_info.
+type SheetInfo struct {
+	ID       string `json:"sheet_id"`
+	Name     string `json:"sheet_name"`
+	Type     string `json:"sheet_type"`
+	RowCount int    `json:"row_count"`
+	ColCount int    `json:"col_count"`
+}
+
+// SheetCell is one non-empty cell returned by sheet.get_cell_data.
+type SheetCell struct {
+	Row         int     `json:"row"`
+	Col         int     `json:"col"`
+	ValueType   string  `json:"value_type"`
+	NumberValue float64 `json:"number_value,omitempty"`
+	StringValue string  `json:"string_value,omitempty"`
+	BoolValue   bool    `json:"bool_value,omitempty"`
+	Formula     string  `json:"formula,omitempty"`
+}
+
+type sheetInfoResponse struct {
+	Sheets []SheetInfo `json:"sheets"`
+}
+
+type sheetCellsResponse struct {
+	Cells []SheetCell `json:"cells"`
+}
+
 // DocumentContent is the text representation returned by get_content.
 type DocumentContent struct {
 	Text    string `json:"content"`

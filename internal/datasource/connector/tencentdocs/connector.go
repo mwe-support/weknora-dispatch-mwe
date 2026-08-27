@@ -771,7 +771,7 @@ func isLinkNode(node Node) bool {
 
 func isTencentDocsOnlineType(value string) bool {
 	switch strings.ToLower(value) {
-	case "doc", "word", "excel", "form", "slide", "smartcanvas", "smartsheet", "mind", "flowchart", "sheet":
+	case "doc", "word", "excel", "form", "slide", "smartcanvas", "smartsheet", "mind", "flowchart", "sheet", "tencentsheet":
 		return true
 	default:
 		return false
@@ -907,7 +907,10 @@ func (s *fetchState) fetchDocument(
 		return s.checkpoint(ctx)
 	}
 
-	content, err := s.client.GetContent(ctx, node.ID)
+	documentType := firstNonEmpty(node.DocumentType, info.Type)
+	contentText, contentMetadata, err := fetchOnlineDocumentContent(
+		ctx, s.client, node.ID, documentType,
+	)
 	if err != nil {
 		title := firstNonEmpty(info.Title, node.Title)
 		if s.previous != nil {
@@ -935,7 +938,10 @@ func (s *fetchState) fetchDocument(
 		"space_id":      spaceID,
 		"file_id":       node.ID,
 		"node_type":     node.Type,
-		"document_type": firstNonEmpty(node.DocumentType, info.Type),
+		"document_type": documentType,
+	}
+	for key, value := range contentMetadata {
+		metadata[key] = value
 	}
 	if spaceID == "" {
 		metadata["location"] = "personal_home"
@@ -943,7 +949,7 @@ func (s *fetchState) fetchDocument(
 	return s.emit(ctx, types.FetchedItem{
 		ExternalID:       externalID,
 		Title:            title,
-		Content:          []byte(content.Text),
+		Content:          []byte(contentText),
 		ContentType:      "text/markdown",
 		FileName:         sanitizeTencentDocsFileName(title) + ".md",
 		URL:              url,
