@@ -3,6 +3,7 @@ package docparser
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -279,5 +280,36 @@ func TestProcessImagesMatchesPathsWithSpaces(t *testing.T) {
 	}
 	if refs[0].OriginalRef != "images/第 1 页.jpg" {
 		t.Fatalf("unexpected OriginalRef: %q", refs[0].OriginalRef)
+	}
+}
+
+func TestMinerUReadClassifiesCUDAUnavailableAsTransient(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseMultipartForm(1<<20))
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"status":"failed","error":"CUDA error: CUDA-capable device(s) is/are busy or unavailable"}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	utils.ResetSSRFWhitelistForTest()
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+
+	reader := NewMinerUReader(map[string]string{"mineru_endpoint": server.URL})
+	_, err := reader.Read(t.Context(), &types.ReadRequest{
+		FileName: "failed.pdf", FileType: "pdf", FileContent: []byte("pdf"),
+	})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrMinerUTransient), "error=%v", err)
+}
+
+func TestTransientMinerUMessagesIncludeQueueAndNVMLFailures(t *testing.T) {
+	for _, message := range []string{
+		"queue is full",
+		"maximum concurrent requests reached",
+		"NVML: Unknown Error",
+		"service temporarily unavailable",
+	} {
+		require.True(t, isTransientMinerUMessage(message), "message=%q", message)
 	}
 }

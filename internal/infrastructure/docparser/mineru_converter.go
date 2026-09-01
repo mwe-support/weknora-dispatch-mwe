@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -24,6 +25,35 @@ import (
 const mineruTimeout = 1000 * time.Second // large docs can take a while
 
 var b64DataURIPattern = regexp.MustCompile(`^data:image/(\w+);base64,(.+)$`)
+
+// ErrMinerUTransient marks service, queue, or GPU availability failures that
+// may safely fall back to another parser without treating the file as invalid.
+var ErrMinerUTransient = errors.New("MinerU temporarily unavailable")
+
+func isTransientMinerUMessage(message string) bool {
+	message = strings.ToLower(message)
+	for _, marker := range []string{
+		"cuda-capable device(s) is/are busy or unavailable",
+		"no cuda gpus are available",
+		"cuda out of memory",
+		"outofmemoryerror",
+		"failed to initialize nvml",
+		"nvml",
+		"queue is full",
+		"queue full",
+		"too many pending",
+		"maximum concurrent",
+		"server busy",
+		"service unavailable",
+		"temporarily unavailable",
+		"resource exhausted",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
 
 // MinerUReader calls a self-hosted MinerU API to read/convert documents.
 type MinerUReader struct {
@@ -58,7 +88,7 @@ func NewMinerUReader(overrides map[string]string) *MinerUReader {
 
 func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
 	if c.endpoint == "" {
-		return &types.ReadResult{Error: "MinerU endpoint is not configured"}, nil
+		return nil, fmt.Errorf("%w: endpoint is not configured", ErrMinerUTransient)
 	}
 	if err := validateMinerUOutboundURL(c.endpoint); err != nil {
 		return &types.ReadResult{Error: err.Error()}, nil
@@ -170,18 +200,22 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte, filena
 	})
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return "", nil, fmt.Errorf("HTTP request: %w", err)
+		return "", nil, fmt.Errorf("%w: HTTP request: %v", ErrMinerUTransient, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return "", nil, fmt.Errorf("MinerU API status %d: %s", resp.StatusCode, string(respBody))
+		err := fmt.Errorf("MinerU API status %d: %s", resp.StatusCode, string(respBody))
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 || isTransientMinerUMessage(string(respBody)) {
+			return "", nil, fmt.Errorf("%w: %v", ErrMinerUTransient, err)
+		}
+		return "", nil, err
 	}
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", nil, fmt.Errorf("read response body: %w", err)
+		return "", nil, fmt.Errorf("%w: read response body: %v", ErrMinerUTransient, err)
 	}
 
 	// Dump raw response for debugging (truncate if too large)

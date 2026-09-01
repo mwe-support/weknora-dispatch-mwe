@@ -3682,7 +3682,16 @@ func (s *knowledgeService) convert(
 		req.FileType = fileType
 	}
 
-	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
+	originalParserEngine := parserEngine
+	var fallbackReader interfaces.DocReader
+	if parserEngine == "mineru" && !isURL {
+		fallbackReader = s.resolveDocReader(ctx, "builtin", fileType, false, mergedOverrides)
+	}
+	result, parserEngine, err := s.callDocReaderWithMinerUFallback(ctx, reader, fallbackReader, req)
+	if originalParserEngine != parserEngine {
+		logger.Warnf(ctx, "[convert] parser fallback knowledge=%s file=%q from=%s to=%s",
+			knowledge.ID, req.FileName, originalParserEngine, parserEngine)
+	}
 	if err != nil {
 		// Distinguish DocReader timeout (a knowable user-facing
 		// failure) from generic read errors so the UI can suggest
@@ -3707,9 +3716,13 @@ func (s *knowledgeService) convert(
 		return nil, nil
 	}
 	docOutput := types.JSONMap{
-		"text_length":  len(result.MarkdownContent),
-		"images_found": len(result.ImageRefs),
-		"is_audio":     result.IsAudio,
+		"text_length":   len(result.MarkdownContent),
+		"images_found":  len(result.ImageRefs),
+		"is_audio":      result.IsAudio,
+		"parser_engine": parserEngine,
+	}
+	if originalParserEngine != parserEngine {
+		docOutput["parser_fallback_from"] = originalParserEngine
 	}
 	if pages := result.Metadata["pages"]; pages != "" {
 		docOutput["pages"] = pages
@@ -3718,14 +3731,29 @@ func (s *knowledgeService) convert(
 	return result, nil
 }
 
-// callDocReaderWithTimeout wraps the DocReader RPC in a child context whose
-// deadline is min(parent_deadline, DocReaderCallTimeout). Without this cap,
-// a hung docreader (network partition, GC pause, OCR runaway) silently
-// burns the whole DocumentProcessTimeout budget and pins a worker for hours
-// — the #1 cause of "knowledge stuck in processing" reports.
-//
-// On timeout we annotate the error so retries / dead-letter consumers can
-// distinguish "docreader was slow" from "docreader returned an error".
+// callDocReaderWithMinerUFallback retries the same content with the built-in
+// parser only when MinerU reports a service, queue, or GPU availability fault.
+// Content and validation errors remain failures from the selected engine.
+func (s *knowledgeService) callDocReaderWithMinerUFallback(
+	ctx context.Context,
+	primary interfaces.DocReader,
+	fallback interfaces.DocReader,
+	req *types.ReadRequest,
+) (*types.ReadResult, string, error) {
+	result, err := s.callDocReaderWithTimeout(ctx, primary, req)
+	if err == nil || fallback == nil || !errors.Is(err, docparser.ErrMinerUTransient) {
+		return result, req.ParserEngine, err
+	}
+	fallbackReq := *req
+	fallbackReq.ParserEngine = "builtin"
+	logger.Warnf(ctx, "[convert] MinerU transient failure; falling back to builtin: %v", err)
+	result, err = s.callDocReaderWithTimeout(ctx, fallback, &fallbackReq)
+	return result, "builtin", err
+}
+
+// callDocReaderWithTimeout caps one parser call so a stalled backend cannot
+// consume the full document-processing task timeout.
+
 func (s *knowledgeService) callDocReaderWithTimeout(
 	ctx context.Context, reader interfaces.DocReader, req *types.ReadRequest,
 ) (*types.ReadResult, error) {
