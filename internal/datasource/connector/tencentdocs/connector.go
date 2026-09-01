@@ -511,14 +511,15 @@ func (c *Connector) fetch(
 	defer client.Close()
 
 	state := &fetchState{
-		client:       client,
-		handler:      handler,
-		previous:     previous,
-		incremental:  incremental,
-		seenDocs:     make(map[string]bool),
-		seenFileIDs:  make(map[string]bool),
-		visitedNodes: make(map[string]bool),
-		next:         copyTencentDocsCursor(previous),
+		client:            client,
+		handler:           handler,
+		previous:          previous,
+		incremental:       incremental,
+		traversalComplete: true,
+		seenDocs:          make(map[string]bool),
+		seenFileIDs:       make(map[string]bool),
+		visitedNodes:      make(map[string]bool),
+		next:              copyTencentDocsCursor(previous),
 	}
 	for _, selectedID := range resourceIDs {
 		ref, err := decodeResourceID(selectedID)
@@ -603,7 +604,7 @@ func (c *Connector) fetch(
 		}
 	}
 
-	if incremental && previous != nil {
+	if incremental && previous != nil && state.traversalComplete {
 		for externalID := range previous.DocumentTimes {
 			if !state.seenDocs[externalID] {
 				delete(state.next.DocumentTimes, externalID)
@@ -649,15 +650,16 @@ func nodeFromFileInfo(info *FileInfo) Node {
 }
 
 type fetchState struct {
-	client       Client
-	handler      datasource.StreamHandler
-	previous     *tencentDocsCursor
-	incremental  bool
-	seenDocs     map[string]bool
-	seenFileIDs  map[string]bool
-	visitedNodes map[string]bool
-	next         *tencentDocsCursor
-	items        []types.FetchedItem
+	client            Client
+	handler           datasource.StreamHandler
+	previous          *tencentDocsCursor
+	incremental       bool
+	traversalComplete bool
+	seenDocs          map[string]bool
+	seenFileIDs       map[string]bool
+	visitedNodes      map[string]bool
+	next              *tencentDocsCursor
+	items             []types.FetchedItem
 }
 
 func (s *fetchState) walkHomeNodes(ctx context.Context, nodes []HomeNode, sourceResourceID string) error {
@@ -671,6 +673,7 @@ func (s *fetchState) walkHomeNodes(ctx context.Context, nodes []HomeNode, source
 		if homeNode.IsFolder {
 			children, err := s.client.ListHomeNodes(ctx, homeNode.ID)
 			if err != nil {
+				s.traversalComplete = false
 				failureNode := Node{ID: homeNode.ID, Title: homeNode.Title, URL: homeNode.URL, Type: "folder", HasChildren: true}
 				failure := failedFetchedItem(
 					encodeHomeNodeResourceID(homeNode.ID), homeNode.Title, "", failureNode, sourceResourceID,
@@ -729,6 +732,7 @@ func (s *fetchState) walkNodes(ctx context.Context, spaceID string, nodes []Node
 		if node.HasChildren {
 			children, err := s.client.ListNodes(ctx, spaceID, node.ID)
 			if err != nil {
+				s.traversalComplete = false
 				failure := failedFetchedItem(
 					encodeNodeResourceID(spaceID, node.ID), node.Title, spaceID, node, sourceResourceID,
 					fmt.Errorf("list Tencent Docs children: %w", err),

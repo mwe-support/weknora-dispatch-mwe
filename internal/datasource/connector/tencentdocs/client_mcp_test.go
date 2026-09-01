@@ -596,3 +596,75 @@ func TestValidateExportURLRejectsUntrustedOrInsecureHosts(t *testing.T) {
 		}
 	}
 }
+
+func TestClientRetriesTransientHTTP429(t *testing.T) {
+	calls := 0
+	transport := &fakeMCPClient{}
+	transport.callTool = func(name string, _ map[string]interface{}) (*internalmcp.CallToolResult, error) {
+		calls++
+		if calls < 3 {
+			return nil, errors.New("transport error: request failed with status 429:")
+		}
+		return toolJSON(t, map[string]interface{}{
+			"spaces":   []map[string]interface{}{{"space_id": "s1", "title": "Space"}},
+			"has_next": false,
+		}), nil
+	}
+	client := newTestClient(t, transport)
+	var delays []time.Duration
+	client.retrySleep = func(_ context.Context, delay time.Duration) error {
+		delays = append(delays, delay)
+		return nil
+	}
+
+	spaces, err := client.ListSpaces(context.Background())
+	if err != nil {
+		t.Fatalf("ListSpaces() error: %v", err)
+	}
+	if calls != 3 || len(spaces) != 1 {
+		t.Fatalf("calls/spaces=%d/%+v, want 3/1", calls, spaces)
+	}
+	wantDelays := []time.Duration{2 * time.Second, 4 * time.Second}
+	if !reflect.DeepEqual(delays, wantDelays) {
+		t.Fatalf("retry delays=%v, want %v", delays, wantDelays)
+	}
+}
+
+func TestClientDoesNotRetryAmbiguousExportBusinessError(t *testing.T) {
+	calls := 0
+	transport := &fakeMCPClient{}
+	transport.callTool = func(name string, _ map[string]interface{}) (*internalmcp.CallToolResult, error) {
+		calls++
+		return nil, errors.New("request failed (tool: manage.export_file): type:business, code:10012, msg:service error")
+	}
+	client := newTestClient(t, transport)
+	client.retrySleep = func(context.Context, time.Duration) error { return nil }
+
+	_, err := client.StartExport(context.Background(), "file-1")
+	if err == nil || calls != 1 {
+		t.Fatalf("error/calls=%v/%d, want error/1", err, calls)
+	}
+}
+
+func TestClientReconnectsBeforeRetryingDisconnectedTransport(t *testing.T) {
+	calls := 0
+	transport := &fakeMCPClient{}
+	transport.callTool = func(name string, _ map[string]interface{}) (*internalmcp.CallToolResult, error) {
+		calls++
+		if calls == 1 {
+			transport.connected = false
+			return nil, errors.New("connection reset by peer")
+		}
+		if !transport.connected {
+			return nil, errors.New("transport not connected")
+		}
+		return toolJSON(t, map[string]interface{}{"spaces": []interface{}{}, "has_next": false}), nil
+	}
+	client := newTestClient(t, transport)
+	client.retrySleep = func(context.Context, time.Duration) error { return nil }
+
+	_, err := client.ListSpaces(context.Background())
+	if err != nil || calls != 2 || transport.connectCalls != 2 {
+		t.Fatalf("error/calls/connects=%v/%d/%d, want nil/2/2", err, calls, transport.connectCalls)
+	}
+}

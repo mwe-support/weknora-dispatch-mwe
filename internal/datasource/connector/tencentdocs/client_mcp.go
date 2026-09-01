@@ -33,9 +33,11 @@ const (
 	toolExportFile       = "manage.export_file"
 	toolExportProgress   = "manage.export_progress"
 
-	defaultMCPTimeout = 30 * time.Second
-	maxMCPPagination  = 10000
-	maxExportBytes    = 100 << 20
+	defaultMCPTimeout      = 30 * time.Second
+	maxMCPTransientRetries = 4
+	initialMCPRetryDelay   = 2 * time.Second
+	maxMCPPagination       = 10000
+	maxExportBytes         = 100 << 20
 )
 
 // MCPClientConfig configures access to the official Tencent Docs MCP service.
@@ -59,6 +61,7 @@ type TencentDocsMCPClient struct {
 	ready        bool
 	needsRebuild bool
 	generation   uint64
+	retrySleep   func(context.Context, time.Duration) error
 }
 
 // MCPToolError is returned when the MCP call succeeds but the Tencent Docs tool
@@ -112,6 +115,7 @@ func newTencentDocsMCPClient(
 		factory:    factory,
 		client:     transportClient,
 		generation: 1,
+		retrySleep: sleepWithContext,
 	}, nil
 }
 
@@ -482,6 +486,26 @@ func (c *TencentDocsMCPClient) callToolJSON(
 	args map[string]interface{},
 	out interface{},
 ) error {
+	for attempt := 0; ; attempt++ {
+		err := c.callToolJSONOnce(ctx, tool, args, out)
+		if err == nil || attempt >= maxMCPTransientRetries || !isRetryableTencentDocsMCPError(tool, err) {
+			return err
+		}
+		if err := c.retrySleep(ctx, initialMCPRetryDelay<<attempt); err != nil {
+			return err
+		}
+		if err := c.ensureReady(ctx); err != nil {
+			return err
+		}
+	}
+}
+
+func (c *TencentDocsMCPClient) callToolJSONOnce(
+	ctx context.Context,
+	tool string,
+	args map[string]interface{},
+	out interface{},
+) error {
 	client, generation := c.currentTransport()
 	result, err := client.CallTool(ctx, tool, args)
 	if err != nil {
@@ -526,6 +550,37 @@ func (c *TencentDocsMCPClient) callToolJSON(
 		return fmt.Errorf("decode JSON response from Tencent Docs MCP tool %s: %w", tool, decodeErr)
 	}
 	return fmt.Errorf("Tencent Docs MCP tool %s returned no JSON text content", tool)
+}
+
+func sleepWithContext(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func isRetryableTencentDocsMCPError(tool string, err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "status 429") {
+		return true
+	}
+	if tool == toolExportFile {
+		return false
+	}
+	var toolErr *MCPToolError
+	if errors.As(err, &toolErr) && toolErr.Code == 10012 {
+		return true
+	}
+	return strings.Contains(message, "i/o timeout") ||
+		strings.Contains(message, "connection reset") ||
+		strings.Contains(message, "temporarily unavailable")
 }
 
 // parseTransportBusinessError normalizes the structured diagnostic currently

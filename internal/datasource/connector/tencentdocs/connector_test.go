@@ -1017,3 +1017,36 @@ func TestConnectorChildListingFailureIsPartialNotFatal(t *testing.T) {
 		t.Fatalf("items = %+v, want subtree failure + successful sibling", items)
 	}
 }
+
+func TestConnectorFetchIncrementalDoesNotDeleteWhenSubtreeListingFails(t *testing.T) {
+	spaceID := encodeSpaceResourceID("space-1")
+	childExternalID := encodeNodeResourceID("space-1", "doc-in-failed-folder")
+	client := &fakeConnectorClient{
+		nodes: map[string][]Node{"space-1/": {{
+			ID: "folder-1", Title: "Folder", Type: "folder", HasChildren: true,
+		}}},
+		nodeErrs: map[string]error{"space-1/folder-1": errors.New("rate limited")},
+	}
+	cursor := &types.SyncCursor{ConnectorCursor: map[string]interface{}{
+		"document_times": map[string]interface{}{childExternalID: float64(100)},
+	}}
+
+	items, next, err := testConnector(client).FetchIncremental(
+		context.Background(), testDataSourceConfig(spaceID), cursor,
+	)
+	if err != nil {
+		t.Fatalf("FetchIncremental() error: %v", err)
+	}
+	for _, item := range items {
+		if item.IsDeleted {
+			t.Fatalf("unexpected deletion after incomplete traversal: %+v", item)
+		}
+	}
+	if len(items) != 1 || items[0].Metadata["error"] == "" {
+		t.Fatalf("items=%+v, want one folder-list failure", items)
+	}
+	documentTimes, ok := next.ConnectorCursor["document_times"].(map[string]interface{})
+	if !ok || documentTimes[childExternalID] == nil {
+		t.Fatalf("next cursor lost unseen child after incomplete traversal: %#v", next.ConnectorCursor)
+	}
+}
