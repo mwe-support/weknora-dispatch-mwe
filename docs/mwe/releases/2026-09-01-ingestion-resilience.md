@@ -51,6 +51,16 @@ Commands:
 - Package tests: Tencent Docs connector, docparser, and application service.
 - Live recovery: MinerU health returned healthy, CUDA tensor allocation succeeded, and seven production parsing jobs completed with zero failures after recreation.
 
+## Production rollout
+
+- App image deployed: `marvel/weknora-app:v0.7.2-ingestion-resilience-20260901`.
+- App override backup: `/public/knowledgebase/weknora/override.yml.bak.20260901T115409Z-ingestion-resilience`.
+- Startup confirmed `asynq core-pool server starting with concurrency=2`; health endpoint returned `{"status":"ok"}` and restart count remained 0.
+- MinerU VLM preload was disabled using backup `/public/knowledgebase/gpu/compose.yml.bak.20260901T112107Z-mineru-capacity`; GPU 0 idle/preload usage dropped from about 14.1 GiB to 9.5 GiB.
+- MinerU recovered with CUDA available and completed 15 production parsing jobs with zero failures during rollout verification.
+- 222 CUDA-failed knowledge rows were grouped into six tenant-scoped batch-reparse tasks. Audit: `/public/knowledgebase/results/ingestion-recovery/20260901T120000Z/enqueue-report.json`.
+- The affected Tencent Docs data source was retried as sync log `de98374a-07c6-4b1e-ab9a-06b4001c2cdb`. Audit: `/public/knowledgebase/results/ingestion-recovery/20260901T120000Z/pm13-sync-retry.json`.
+
 ## Rollback
 
 1. Restore the previous WeKnora app image and set `WEKNORA_ASYNQ_CORE_CONCURRENCY=8` if required.
