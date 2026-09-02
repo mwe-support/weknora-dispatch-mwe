@@ -22,6 +22,7 @@ type fakeConnectorClient struct {
 	contentErrs  map[string]error
 	exportTasks  map[string]*ExportTask
 	exportStats  map[string]*ExportStatus
+	exportErrs   map[string]error
 	exportData   map[string][]byte
 	contentGets  int
 	exportStarts int
@@ -90,12 +91,42 @@ func (f *fakeConnectorClient) StartExport(context.Context, string) (*ExportTask,
 	return nil, errors.New("missing export task")
 }
 func (f *fakeConnectorClient) GetExportProgress(_ context.Context, taskID string) (*ExportStatus, error) {
+	if err := f.exportErrs[taskID]; err != nil {
+		return nil, err
+	}
 	status, ok := f.exportStats[taskID]
 	if !ok {
 		return nil, errors.New("missing export status")
 	}
 	copy := *status
 	return &copy, nil
+}
+
+func TestConnectorFetchAllSkipsUnsupportedExportProgress(t *testing.T) {
+	client := &fakeConnectorClient{
+		nodes: map[string][]Node{"space-1/": {{
+			ID: "unsupported-1", Title: "Unsupported", Type: "resource", DocumentType: "unknown",
+		}}},
+		infoErrs: map[string]error{"unsupported-1": &MCPToolError{
+			Tool: toolQueryFileInfo, Code: 400001, Message: "file type not support query",
+		}},
+		exportTasks: map[string]*ExportTask{"unsupported-1": {ID: "task-1"}},
+		exportErrs: map[string]error{"task-1": &MCPToolError{
+			Tool: toolExportProgress, Code: 323908, Message: "document type does not support export",
+		}},
+	}
+
+	items, err := testConnector(client).FetchAll(
+		context.Background(), testDataSourceConfig(encodeSpaceResourceID("space-1")),
+		[]string{encodeSpaceResourceID("space-1")},
+	)
+	if err != nil {
+		t.Fatalf("FetchAll() error: %v", err)
+	}
+	if len(items) != 1 || items[0].Metadata["skip_reason"] != "unsupported_file_type" ||
+		items[0].Metadata["error"] != "" {
+		t.Fatalf("items = %+v, want one unsupported-file skip", items)
+	}
 }
 func (f *fakeConnectorClient) DownloadExport(_ context.Context, fileURL string) ([]byte, error) {
 	f.downloads++

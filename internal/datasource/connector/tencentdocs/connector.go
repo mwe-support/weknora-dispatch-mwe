@@ -30,6 +30,7 @@ const (
 	exportTimeout                  = 2 * time.Minute
 	fileInfoUnsupportedTypeCode    = 400001
 	fileInfoUnsupportedTypeMessage = "file type not support query"
+	exportUnsupportedTypeCode      = 323908
 )
 
 type connectorClientFactory func(MCPClientConfig) (Client, error)
@@ -802,6 +803,13 @@ func shouldExportUnclassifiedNode(node Node, err error) bool {
 		strings.Contains(strings.ToLower(toolErr.Message), fileInfoUnsupportedTypeMessage)
 }
 
+func isUnsupportedResourceExportError(err error) bool {
+	var toolErr *MCPToolError
+	return errors.As(err, &toolErr) &&
+		toolErr.Tool == toolExportProgress &&
+		toolErr.Code == exportUnsupportedTypeCode
+}
+
 func exportFileNameFromURL(rawURL string) string {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -1004,6 +1012,21 @@ func (s *fetchState) fetchResource(
 	for {
 		status, err = s.client.GetExportProgress(exportCtx, task.ID)
 		if err != nil {
+			if isUnsupportedResourceExportError(err) {
+				title := firstNonEmpty(info.Title, node.Title)
+				extension := strings.ToLower(strings.TrimSpace(node.DocumentType))
+				fingerprint := resourceFingerprint(nil, "unsupported-export:"+extension, title)
+				s.next.ResourceFingerprints[externalID] = fingerprint
+				s.next.DocumentTimes[externalID] = info.ModifiedAt
+				if s.incremental && s.previous != nil &&
+					s.previous.ResourceFingerprints[externalID] == fingerprint {
+					return s.checkpoint(ctx)
+				}
+				return s.emit(ctx, skippedFetchedItem(
+					externalID, title, spaceID, node, sourceResourceID,
+					"unsupported_file_type", extension, title,
+				))
+			}
 			return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID,
 				fmt.Errorf("poll Tencent Docs resource export: %w", err))
 		}

@@ -646,6 +646,27 @@ func TestClientDoesNotRetryAmbiguousExportBusinessError(t *testing.T) {
 	}
 }
 
+func TestClientRetriesExportProgressServiceError10328(t *testing.T) {
+	calls := 0
+	transport := &fakeMCPClient{}
+	transport.callTool = func(name string, _ map[string]interface{}) (*internalmcp.CallToolResult, error) {
+		calls++
+		if calls < 3 {
+			return nil, errors.New(
+				"request failed (tool: manage.export_progress): type:business, code:10328, msg:service error",
+			)
+		}
+		return toolJSON(t, map[string]interface{}{"progress": 100, "status": "done"}), nil
+	}
+	client := newTestClient(t, transport)
+	client.retrySleep = func(context.Context, time.Duration) error { return nil }
+
+	status, err := client.GetExportProgress(context.Background(), "task-1")
+	if err != nil || calls != 3 || status.Progress != 100 {
+		t.Fatalf("status/error/calls=%+v/%v/%d, want progress 100/nil/3", status, err, calls)
+	}
+}
+
 func TestClientReconnectsBeforeRetryingDisconnectedTransport(t *testing.T) {
 	calls := 0
 	transport := &fakeMCPClient{}

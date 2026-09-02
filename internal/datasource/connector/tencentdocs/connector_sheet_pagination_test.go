@@ -17,9 +17,10 @@ type sheetRangeCall struct {
 
 type fakeSheetConnectorClient struct {
 	*fakeConnectorClient
-	sheets map[string][]SheetInfo
-	cells  map[string][]SheetCell
-	calls  []sheetRangeCall
+	sheets       map[string][]SheetInfo
+	cells        map[string][]SheetCell
+	calls        []sheetRangeCall
+	relativeRows bool
 }
 
 func (f *fakeSheetConnectorClient) GetSheetInfo(_ context.Context, fileID string) ([]SheetInfo, error) {
@@ -38,10 +39,50 @@ func (f *fakeSheetConnectorClient) GetSheetCells(
 	for _, cell := range f.cells[sheetID] {
 		if cell.Row >= startRow && cell.Row <= endRow &&
 			cell.Col >= startCol && cell.Col <= endCol {
+			if f.relativeRows {
+				cell.Row -= startRow
+			}
 			result = append(result, cell)
 		}
 	}
 	return result, nil
+}
+
+func TestConnectorFetchAllAcceptsPageRelativeSheetRows(t *testing.T) {
+	const fileID = "relative-sheet"
+	base := &fakeConnectorClient{
+		nodes: map[string][]Node{"space-1/": {{
+			ID: fileID, Title: "Relative", Type: "wiki_file", DocumentType: "sheet",
+		}}},
+		infos: map[string]*FileInfo{fileID: {
+			ID: fileID, Title: "Relative", Type: "sheet", ModifiedAt: 400,
+		}},
+	}
+	client := &fakeSheetConnectorClient{
+		fakeConnectorClient: base,
+		relativeRows:       true,
+		sheets: map[string][]SheetInfo{fileID: {{
+			ID: "sheet-1", Name: "Relative", RowCount: 191, ColCount: 2,
+		}}},
+		cells: map[string][]SheetCell{"sheet-1": {
+			{Row: 0, Col: 0, StringValue: "HEADER"},
+			{Row: 118, Col: 0, StringValue: "ROW-119"},
+		}},
+	}
+	connector := newConnectorWithClientFactory(func(MCPClientConfig) (Client, error) {
+		return client, nil
+	})
+
+	items, err := connector.FetchAll(
+		context.Background(), testDataSourceConfig(encodeSpaceResourceID("space-1")),
+		[]string{encodeSpaceResourceID("space-1")},
+	)
+	if err != nil {
+		t.Fatalf("FetchAll() error: %v", err)
+	}
+	if len(items) != 1 || !strings.Contains(string(items[0].Content), "| 119 | ROW-119 |") {
+		t.Fatalf("items = %+v, want page-relative row normalized to source row 119", items)
+	}
 }
 
 func TestConnectorFetchAllReadsEverySheetRowBeyondGenericContentLimit(t *testing.T) {

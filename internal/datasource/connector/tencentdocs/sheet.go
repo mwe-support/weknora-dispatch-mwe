@@ -146,15 +146,33 @@ func fetchSheetMarkdown(
 			for i := range rows {
 				rows[i] = make([]string, sheet.ColCount)
 			}
+			// Tencent's Sheet MCP has returned both absolute source-row indexes
+			// and page-relative indexes for ranges after the first page. Detect
+			// one mode per response and normalize before validating.
+			relativeRows := rowRange.start > 0 && len(cells) > 0
 			for _, cell := range cells {
-				if cell.Row < rowRange.start || cell.Row > rowRange.end ||
+				if cell.Row >= rowRange.start && cell.Row <= rowRange.end {
+					relativeRows = false
+					break
+				}
+				if cell.Row < 0 || cell.Row >= len(rows) {
+					relativeRows = false
+					break
+				}
+			}
+			for _, cell := range cells {
+				sourceRow := cell.Row
+				if relativeRows {
+					sourceRow += rowRange.start
+				}
+				if sourceRow < rowRange.start || sourceRow > rowRange.end ||
 					cell.Col < 0 || cell.Col >= sheet.ColCount {
 					return nil, fmt.Errorf(
 						"get Sheet cells %s returned out-of-range cell (%d,%d)",
 						sheet.ID, cell.Row, cell.Col,
 					)
 				}
-				rows[cell.Row-rowRange.start][cell.Col] = sheetCellText(cell)
+				rows[sourceRow-rowRange.start][cell.Col] = sheetCellText(cell)
 			}
 
 			for offset, row := range rows {

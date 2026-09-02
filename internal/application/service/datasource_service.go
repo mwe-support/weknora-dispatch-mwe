@@ -1064,13 +1064,13 @@ func (s *DataSourceService) updateSyncRunResult(
 		logger.Errorf(ctx, "failed to update sync log: %v", err)
 	}
 
-	if status == types.SyncLogStatusFailed {
-		if !wasPaused {
-			ds.Status = types.DataSourceStatusError
-		}
-	} else if wasPaused {
+	if wasPaused {
 		ds.Status = types.DataSourceStatusPaused
 	} else {
+		// A completed sync run — even a failed one — is an operational result,
+		// not a broken data-source configuration. Keep it schedulable so the
+		// next interval can recover from Tencent/transport outages. Permanent
+		// setup failures are rejected before a run reaches this helper.
 		ds.Status = types.DataSourceStatusActive
 	}
 	ds.ErrorMessage = errorMessage

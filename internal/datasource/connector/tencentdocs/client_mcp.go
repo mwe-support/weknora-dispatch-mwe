@@ -575,7 +575,7 @@ func isRetryableTencentDocsMCPError(tool string, err error) bool {
 		return false
 	}
 	var toolErr *MCPToolError
-	if errors.As(err, &toolErr) && toolErr.Code == 10012 {
+	if errors.As(err, &toolErr) && (toolErr.Code == 10012 || toolErr.Code == 10328) {
 		return true
 	}
 	return strings.Contains(message, "i/o timeout") ||

@@ -187,3 +187,22 @@ func TestAllFetchedItemsFailedErrorTruncatesLongDetail(t *testing.T) {
 	assert.LessOrEqual(t, len(err.Error()), 560)
 	assert.Contains(t, err.Error(), "...")
 }
+
+func TestUpdateSyncRunResultRuntimeFailureKeepsDataSourceActive(t *testing.T) {
+	dsRepo := &recordingDSRepo{}
+	syncLogRepo := &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{}}
+	svc := &DataSourceService{dsRepo: dsRepo, syncLogRepo: syncLogRepo}
+	ds := &types.DataSource{ID: "ds-1", Status: types.DataSourceStatusActive}
+	syncLog := &types.SyncLog{ID: "log-1", DataSourceID: ds.ID}
+	result := &types.SyncResult{Total: 1, Failed: 1}
+
+	svc.updateSyncRunResult(
+		context.Background(), ds, syncLog, result, nil,
+		types.SyncLogStatusFailed, "transient upstream failure", false,
+	)
+
+	assert.Equal(t, types.DataSourceStatusActive, ds.Status,
+		"runtime failures must remain schedulable for automatic recovery")
+	assert.Equal(t, "transient upstream failure", ds.ErrorMessage)
+	assert.Equal(t, types.SyncLogStatusFailed, syncLog.Status)
+}
