@@ -737,14 +737,15 @@ export async function listOrgAgentShares(orgId: string): Promise<ApiResponse<Lis
 }
 
 /**
- * Search candidate tenants for inviting to organization (excludes tenants
- * already in the org). The endpoint matches by tenant name, username, or
- * email and de-duplicates results by tenant_id.
+ * List/search candidate workspaces for inviting to an organization. An empty
+ * query returns the available workspace list; a non-empty query matches by
+ * workspace name. Existing members are excluded and rows are de-duplicated by
+ * tenant_id.
  */
 export async function searchTenantsForInvite(
   orgId: string,
   query: string,
-  limit: number = 10
+  limit: number = 200
 ): Promise<ApiResponse<TenantInviteCandidate[]>> {
   try {
     const response = await get(`/api/v1/organizations/${orgId}/search-tenants?q=${encodeURIComponent(query)}&limit=${limit}`)

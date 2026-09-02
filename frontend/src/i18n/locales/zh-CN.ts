@@ -1536,10 +1536,10 @@ export default {
     addMember: {
       button: '添加成员',
       dialogTitle: '添加成员',
-      tipTenant: '共享空间的成员单位是空间：选定一个空间后，其下全部用户都将获得访问权限。下方搜索结果按空间去重。',
+      tipTenant: '共享空间的成员单位是空间：选定一个或多个空间后，其下全部用户都将获得访问权限。',
       searchTenant: '选择空间',
       searchTenantPlaceholder: '输入空间名搜索...',
-      searchTenantHint: '输入至少 2 个字符开始搜索，按空间去重并自动过滤已加入的空间',
+      searchTenantHint: '可直接多选空间，也可输入任意字符搜索；已加入的空间会自动过滤',
       selectRole: '分配角色',
       confirmBtn: '添加',
       success: '成员添加成功',

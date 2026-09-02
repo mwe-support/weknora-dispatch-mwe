@@ -687,7 +687,8 @@ export const useOrganizationStore = defineStore('organization', () => {
 
   async function inviteOrganizationMember(
     organizationId: string,
-    request: InviteMemberRequest
+    request: InviteMemberRequest,
+    options: { refresh?: boolean } = {}
   ): Promise<ApiResponse<void>> {
     const response = await inviteMemberApi(organizationId, request)
     if (response.success) {
@@ -695,7 +696,9 @@ export const useOrganizationStore = defineStore('organization', () => {
       patchOrganization(organizationId, {
         member_count: (organization?.member_count ?? 0) + 1
       })
-      void fetchOrganizations({ force: true })
+      if (options.refresh !== false) {
+        void fetchOrganizations({ force: true })
+      }
     }
     return response
   }

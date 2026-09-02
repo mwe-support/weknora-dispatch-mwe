@@ -419,7 +419,7 @@
                               <t-form layout="vertical" class="member-invite-form">
                                 <t-form-item :label="$t('organization.addMember.searchTenant')">
                                   <div class="member-form-control">
-                                    <t-select v-model="selectedTenantId"
+                                    <t-select v-model="selectedTenantIds" multiple :min-collapsed-num="3"
                                       :placeholder="$t('organization.addMember.searchTenantPlaceholder')" filterable
                                       :filter="() => true" :loading="tenantSearchLoading" @search="handleTenantSearch"
                                       clearable :options="tenantSearchOptions" />
@@ -437,7 +437,7 @@
                                   {{ $t('common.cancel') }}
                                 </t-button>
                                 <t-button theme="primary" :loading="addMemberSubmitting"
-                                  :disabled="selectedTenantId == null" @click="handleAddMember">
+                                  :disabled="selectedTenantIds.length === 0" @click="handleAddMember">
                                   {{ $t('organization.addMember.confirmBtn') }}
                                 </t-button>
                               </div>
@@ -889,12 +889,13 @@ const upgradeForm = ref({
 
 // 添加成员（按空间邀请）相关状态。Plan 3 之后，邀请实际上是把
 // 一整个空间拉进空间；这里的「搜索结果」是空间候选列表，每条带一个
-// 代表用户用于展示。`selectedTenantId` 是真正提交给后端的 tenant_id。
+// 代表用户用于展示。`selectedTenantIds` 是真正提交给后端的 tenant_id 列表。
 const addMemberPopupVisible = ref(false)
 const addMemberSubmitting = ref(false)
 const tenantSearchLoading = ref(false)
 const tenantSearchResults = ref<TenantInviteCandidate[]>([])
-const selectedTenantId = ref<number | null>(null)
+const tenantCandidateCache = ref<Map<number, TenantInviteCandidate>>(new Map())
+const selectedTenantIds = ref<number[]>([])
 const addMemberRole = ref<'admin' | 'editor' | 'viewer'>('viewer')
 
 const formData = ref({
@@ -977,12 +978,20 @@ const addMemberRoleOptions = computed(() => [
 
 // 空间搜索结果选项。成员单位是空间，只按空间名搜索，因此直接展示空间名；
 // 空间名缺失时回退到空间 ID。
-const tenantSearchOptions = computed(() =>
-  tenantSearchResults.value.map((c) => ({
+const tenantSearchOptions = computed(() => {
+  const candidates = new Map<number, TenantInviteCandidate>()
+  for (const tenantId of selectedTenantIds.value) {
+    const cached = tenantCandidateCache.value.get(tenantId)
+    if (cached) candidates.set(tenantId, cached)
+  }
+  for (const candidate of tenantSearchResults.value) {
+    candidates.set(candidate.tenant_id, candidate)
+  }
+  return [...candidates.values()].map((c) => ({
     label: c.tenant_name || `tenant#${c.tenant_id}`,
     value: c.tenant_id,
   }))
-)
+})
 
 const modalTitle = computed(() => {
   if (isCreateMode.value) return t('organization.createOrg')
@@ -1606,55 +1615,93 @@ const handleSubmitUpgrade = async () => {
   }
 }
 
-// 添加成员：搜索空间（仅按空间名模糊匹配，按 tenant_id 去重）
+// 添加成员：默认列出全部可邀请空间；输入任意长度文本后按空间名筛选。
 let tenantSearchTimer: ReturnType<typeof setTimeout> | null = null
+let tenantSearchRequestSeq = 0
+const loadTenantCandidates = async (query: string) => {
+  if (!props.orgId) return
+  const requestSeq = ++tenantSearchRequestSeq
+  tenantSearchLoading.value = true
+  try {
+    const res = await searchTenantsForInvite(props.orgId, query.trim(), 200)
+    if (requestSeq !== tenantSearchRequestSeq) return
+    if (res.success && res.data) {
+      tenantSearchResults.value = res.data
+      const nextCache = new Map(tenantCandidateCache.value)
+      for (const candidate of res.data) {
+        nextCache.set(candidate.tenant_id, candidate)
+      }
+      tenantCandidateCache.value = nextCache
+    }
+  } catch (error) {
+    console.error('Failed to search tenants:', error)
+  } finally {
+    if (requestSeq === tenantSearchRequestSeq) {
+      tenantSearchLoading.value = false
+    }
+  }
+}
+
 const handleTenantSearch = (query: string) => {
   if (tenantSearchTimer) {
     clearTimeout(tenantSearchTimer)
   }
-  if (!query || query.length < 2) {
-    tenantSearchResults.value = []
-    return
-  }
-  tenantSearchTimer = setTimeout(async () => {
-    if (!props.orgId) return
-    tenantSearchLoading.value = true
-    try {
-      const res = await searchTenantsForInvite(props.orgId, query, 10)
-      if (res.success && res.data) {
-        tenantSearchResults.value = res.data
-      }
-    } catch (error) {
-      console.error('Failed to search tenants:', error)
-    } finally {
-      tenantSearchLoading.value = false
-    }
-  }, 300)
+  tenantSearchTimer = setTimeout(() => {
+    void loadTenantCandidates(query)
+  }, query.trim() ? 300 : 0)
 }
 
-// 添加成员：把选中的空间拉入空间。后端要求 tenant_id；representative_user_id
-// 仅做展示/审计用，所以把搜索结果中代表用户也一并带上。
+// 添加成员：复用单空间邀请接口，以小并发批量提交；成功后统一刷新，
+// 避免一次选择几十个空间时触发几十次列表刷新。
+const ADD_MEMBER_CONCURRENCY = 4
 const handleAddMember = async () => {
-  if (!props.orgId || selectedTenantId.value == null) return
+  if (!props.orgId || selectedTenantIds.value.length === 0) return
 
-  const candidate = tenantSearchResults.value.find(
-    (c) => c.tenant_id === selectedTenantId.value
-  )
+  const tenantIds = [...new Set(selectedTenantIds.value)]
+  const succeeded: number[] = []
+  const failed: number[] = []
+  let cursor = 0
 
   addMemberSubmitting.value = true
   try {
-    const res = await orgStore.inviteOrganizationMember(props.orgId, {
-      tenant_id: selectedTenantId.value,
-      representative_user_id: candidate?.representative_user_id,
-      role: addMemberRole.value,
-    })
-    if (res.success) {
-      MessagePlugin.success(t('organization.addMember.success'))
+    const worker = async () => {
+      while (cursor < tenantIds.length) {
+        const index = cursor++
+        const tenantId = tenantIds[index]
+        const candidate = tenantCandidateCache.value.get(tenantId)
+        try {
+          const res = await orgStore.inviteOrganizationMember(props.orgId!, {
+            tenant_id: tenantId,
+            representative_user_id: candidate?.representative_user_id,
+            role: addMemberRole.value,
+          }, { refresh: false })
+          ;(res.success ? succeeded : failed).push(tenantId)
+        } catch {
+          failed.push(tenantId)
+        }
+      }
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(ADD_MEMBER_CONCURRENCY, tenantIds.length) }, () => worker())
+    )
+
+    if (succeeded.length > 0) {
+      await Promise.all([
+        fetchMembers(),
+        orgStore.fetchOrganizations({ force: true }),
+      ])
+    }
+
+    if (failed.length === 0) {
+      MessagePlugin.success(`${t('organization.addMember.success')} (${succeeded.length}/${tenantIds.length})`)
       addMemberPopupVisible.value = false
       resetAddMemberDialog()
-      fetchMembers() // 刷新成员列表
+    } else if (succeeded.length > 0) {
+      MessagePlugin.warning(`${t('organization.addMember.failed')} (${failed.length}/${tenantIds.length})`)
+      selectedTenantIds.value = failed
+      tenantSearchResults.value = tenantSearchResults.value.filter(c => failed.includes(c.tenant_id))
     } else {
-      MessagePlugin.error(res.message || t('organization.addMember.failed'))
+      MessagePlugin.error(`${t('organization.addMember.failed')} (${failed.length}/${tenantIds.length})`)
     }
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('organization.addMember.failed'))
@@ -1665,9 +1712,10 @@ const handleAddMember = async () => {
 
 // 重置添加成员弹窗
 const resetAddMemberDialog = () => {
-  selectedTenantId.value = null
+  selectedTenantIds.value = []
   addMemberRole.value = 'viewer'
   tenantSearchResults.value = []
+  tenantCandidateCache.value = new Map()
 }
 
 const fallbackCopyText = (text: string) => {
@@ -1927,7 +1975,9 @@ onBeforeUnmount(() => {
 })
 
 watch(addMemberPopupVisible, (visible) => {
-  if (!visible) {
+  if (visible) {
+    handleTenantSearch('')
+  } else {
     resetAddMemberDialog()
   }
 })

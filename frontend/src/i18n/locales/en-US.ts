@@ -4401,10 +4401,10 @@ export default {
     addMember: {
       button: 'Add Member',
       dialogTitle: 'Add Member',
-      tipTenant: 'Membership is at the workspace level: once a workspace joins, all of its users share access to this space. Results below are deduplicated by workspace.',
+      tipTenant: 'Membership is at the workspace level: select one or more workspaces and all of their users will gain access to this space.',
       searchTenant: 'Select Workspace',
       searchTenantPlaceholder: 'Search by workspace name...',
-      searchTenantHint: 'Type at least 2 characters; results are deduplicated by workspace and exclude workspaces already in this space',
+      searchTenantHint: 'Select multiple workspaces directly or type any text to search; existing members are filtered automatically',
       selectRole: 'Assign Role',
       confirmBtn: 'Add',
       success: 'Member added successfully',

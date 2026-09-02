@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -1843,8 +1844,8 @@ func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Orga
 // @Tags         组织管理
 // @Produce      json
 // @Param        id     path   string  true   "组织ID"
-// @Param        q      query  string  true   "搜索关键词（空间名）"
-// @Param        limit  query  int     false  "返回数量限制" default(10)
+// @Param        q      query  string  false  "搜索关键词（空间名）；留空时列出全部可邀请空间"
+// @Param        limit  query  int     false  "返回数量限制" default(200)
 // @Success      200    {object}  map[string]interface{}
 // @Failure      403    {object}  apperrors.AppError
 // @Security     Bearer
@@ -1853,7 +1854,7 @@ func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	orgID := c.Param("id")
-	query := c.Query("q")
+	query := strings.TrimSpace(c.Query("q"))
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
 	// Check admin permission: caller's tenant must be org admin.
@@ -1863,17 +1864,12 @@ func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 		return
 	}
 
-	if query == "" {
-		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"data":    []types.TenantInviteCandidate{},
-		})
-		return
-	}
-
-	limit := 10
+	// The picker is also a browse surface: an empty query lists every
+	// available workspace so administrators do not need to know a name in
+	// advance. Keep a generous hard cap as a response-size safety valve.
+	limit := 200
 	if l := c.Query("limit"); l != "" {
-		if n, errConv := strconv.Atoi(l); errConv == nil && n > 0 && n <= 50 {
+		if n, errConv := strconv.Atoi(l); errConv == nil && n > 0 && n <= 500 {
 			limit = n
 		}
 	}
@@ -1888,9 +1884,10 @@ func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 	// Match tenants by name only. A single user may belong to multiple
 	// workspaces, so resolving a query to "the user's tenant" is ambiguous;
 	// the membership unit is the tenant, so we invite by workspace name.
-	// SearchTenants uses page/pageSize; pageSize=limit*2 is a safe ceiling
-	// given the soft cap of 50 above.
-	tenantsByName, _, err := h.tenantService.SearchTenants(ctx, query, 0, 1, limit*2)
+	// Fetch the complete matching set before excluding existing members. A
+	// page-limited DB query can otherwise return only already-joined tenants
+	// and hide valid candidates that occur on later pages.
+	tenantsByName, _, err := h.tenantService.SearchTenants(ctx, query, 0, 0, 0)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to search tenants: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to search candidates"))

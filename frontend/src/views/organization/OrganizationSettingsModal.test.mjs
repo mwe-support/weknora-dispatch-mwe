@@ -33,3 +33,18 @@ test('organization settings lock and restore background scrolling', () => {
   assert.match(source, /\.settings-overlay\s*\{[\s\S]*?overscroll-behavior: none;/)
   assert.match(source, /\.content-wrapper\s*\{[\s\S]*?overscroll-behavior: contain;/)
 })
+
+test('add-member picker loads all available workspaces and supports batch selection', () => {
+  assert.match(
+    source,
+    /<t-select v-model="selectedTenantIds"[\s\S]*?multiple[\s\S]*?:min-collapsed-num="3"/
+  )
+  assert.match(source, /const selectedTenantIds = ref<number\[\]>\(\[\]\)/)
+  assert.doesNotMatch(source, /query\.length < 2/)
+  assert.match(
+    source,
+    /watch\(addMemberPopupVisible,[\s\S]*?if \(visible\) \{[\s\S]*?handleTenantSearch\(''\)/
+  )
+  assert.match(source, /const ADD_MEMBER_CONCURRENCY = 4/)
+  assert.match(source, /selectedTenantIds\.value\.length === 0/)
+})
