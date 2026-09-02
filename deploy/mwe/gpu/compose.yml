@@ -167,9 +167,9 @@ services:
       - --port
       - "8000"
       - --enable-vlm-preload
-      - "false"
+      - "true"
       - --gpu-memory-utilization
-      - "0.18"
+      - "0.30"
       - --max-model-len
       - "4096"
     environment:
