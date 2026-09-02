@@ -1,0 +1,35 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+
+  - name: WeKnora PostgreSQL
+    uid: weknora-postgres
+    type: postgres
+    access: proxy
+    url: ${WEKNORA_DB_HOST}:${WEKNORA_DB_PORT}
+    user: ${WEKNORA_DB_USER}
+    secureJsonData:
+      password: ${WEKNORA_DB_PASSWORD}
+    jsonData:
+      database: ${WEKNORA_DB_NAME}
+      sslmode: disable
+      postgresVersion: 1700
+      timescaledb: false
+      maxOpenConns: 3
+      maxIdleConns: 1
+      connMaxLifetime: 300
+    editable: false

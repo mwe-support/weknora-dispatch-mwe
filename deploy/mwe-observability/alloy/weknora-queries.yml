@@ -1,0 +1,91 @@
+weknora_knowledge_status:
+  query: |
+    SELECT parse_status, COUNT(*)::bigint AS total
+    FROM knowledges
+    WHERE deleted_at IS NULL
+    GROUP BY parse_status
+  cache_seconds: 15
+  metrics:
+    - parse_status:
+        usage: LABEL
+        description: Current knowledge parse status
+    - total:
+        usage: GAUGE
+        description: Current number of knowledge rows in this status
+
+weknora_failed_knowledge_recent:
+  query: |
+    SELECT COUNT(*)::bigint AS total
+    FROM knowledges
+    WHERE parse_status = 'failed'
+      AND updated_at > NOW() - INTERVAL '5 minutes'
+  cache_seconds: 15
+  metrics:
+    - total:
+        usage: GAUGE
+        description: Knowledge rows entering failed state in the last five minutes
+
+weknora_processing_stale:
+  query: |
+    SELECT parse_status, COUNT(*)::bigint AS total
+    FROM knowledges
+    WHERE parse_status IN ('pending', 'processing', 'finalizing')
+      AND updated_at < NOW() - INTERVAL '70 minutes'
+      AND deleted_at IS NULL
+    GROUP BY parse_status
+  cache_seconds: 15
+  metrics:
+    - parse_status:
+        usage: LABEL
+        description: Non-terminal parse status
+    - total:
+        usage: GAUGE
+        description: Knowledge rows whose parent state has not changed for seventy minutes
+
+weknora_dead_letters_recent:
+  query: |
+    SELECT task_type, COUNT(*)::bigint AS total
+    FROM task_dead_letters
+    WHERE failed_at > NOW() - INTERVAL '5 minutes'
+    GROUP BY task_type
+  cache_seconds: 15
+  metrics:
+    - task_type:
+        usage: LABEL
+        description: Archived task type
+    - total:
+        usage: GAUGE
+        description: Dead letters created in the last five minutes
+
+weknora_pending_ops:
+  query: |
+    SELECT task_type, COUNT(*)::bigint AS total,
+           COALESCE(EXTRACT(EPOCH FROM NOW() - MIN(enqueued_at)), 0)::double precision AS oldest_seconds
+    FROM task_pending_ops
+    GROUP BY task_type
+  cache_seconds: 15
+  metrics:
+    - task_type:
+        usage: LABEL
+        description: Durable pending-operation task type
+    - total:
+        usage: GAUGE
+        description: Current durable pending-operation count
+    - oldest_seconds:
+        usage: GAUGE
+        description: Age of the oldest durable pending operation
+
+weknora_sync_status:
+  query: |
+    SELECT status, COUNT(*)::bigint AS total
+    FROM sync_logs
+    WHERE started_at > NOW() - INTERVAL '24 hours'
+    GROUP BY status
+  cache_seconds: 15
+  metrics:
+    - status:
+        usage: LABEL
+        description: Data-source sync status over the last twenty-four hours
+    - total:
+        usage: GAUGE
+        description: Data-source sync runs over the last twenty-four hours

@@ -1,0 +1,83 @@
+groups:
+  - name: knowledgebase-health
+    rules:
+      - alert: KnowledgeBaseEndpointDown
+        expr: probe_success{stack="mwe-knowledgebase",component=~"weknora-app|weknora-frontend|minio|qdrant|mineru|embedding|reranker|q4-gpu0|q4-gpu1|mcp-transport"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Knowledge-base component endpoint is unavailable"
+          description: "{{ $labels.component }} on {{ $labels.host }} has failed its functional endpoint probe for more than two minutes."
+
+      - alert: KnowledgeBaseContainerMissing
+        expr: kb_container_running == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Expected knowledge-base container is not running"
+          description: "{{ $labels.container }} on {{ $labels.host }} is missing or stopped."
+
+      - alert: KnowledgeBaseContainerOOMKilled
+        expr: kb_container_oom_killed == 1
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Knowledge-base container was OOM-killed"
+          description: "{{ $labels.container }} on {{ $labels.host }} reports OOMKilled=true."
+
+      - alert: MinerUCUDANotReady
+        expr: kb_component_capability_ready{component="mineru_cuda"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MinerU container cannot use CUDA"
+          description: "MinerU is running but its in-container CUDA capability probe has failed. Docker healthy alone is not sufficient."
+
+      - alert: KnowledgeBaseGPUProbeUnavailable
+        expr: kb_gpu_probe_ready == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GPU telemetry probe is unavailable"
+          description: "GPU {{ $labels.gpu }} telemetry could not be read through {{ $labels.container }} on {{ $labels.host }}."
+
+      - alert: KnowledgeBaseBlockingLogDetected
+        expr: kb_component_blocking_log == 1
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Blocking error found in recent component logs"
+          description: "{{ $labels.component }} matched {{ $labels.code }} in the recent log window. Open Loki before deciding whether a restart is appropriate."
+
+      - alert: KnowledgeBaseDiskPressure
+        expr: 100 * (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Knowledge-base host disk usage is above 80%"
+          description: "Root filesystem usage on {{ $labels.host }} has remained above 80% for ten minutes."
+
+      - alert: KnowledgeBaseRecentTaskFailures
+        expr: weknora_failed_knowledge_recent_total > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Knowledge processing failed recently"
+          description: "At least one knowledge item entered failed state during the last five minutes. Open the task failure table for account, data source, space, document and stage details."
+
+      - alert: KnowledgeBaseDeadLettersRecent
+        expr: sum(weknora_dead_letters_recent_total) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Task exhausted its retry budget"
+          description: "One or more task dead letters were created during the last five minutes."

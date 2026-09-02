@@ -1,0 +1,145 @@
+name: mwe-observability
+
+services:
+  prometheus:
+    profiles: [backend]
+    image: ${PROMETHEUS_IMAGE}
+    container_name: kb-observability-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+      - --web.enable-remote-write-receiver
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    ports:
+      - 127.0.0.1:${PROMETHEUS_PORT:-19090}:9090
+    networks: [monitoring]
+
+  loki:
+    profiles: [backend]
+    image: ${LOKI_IMAGE}
+    container_name: kb-observability-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/config.yml
+    volumes:
+      - ./loki/config.yml:/etc/loki/config.yml:ro
+      - loki-data:/loki
+    ports:
+      - 127.0.0.1:${LOKI_PORT:-13100}:3100
+    networks: [monitoring]
+
+  grafana:
+    profiles: [backend]
+    image: ${GRAFANA_IMAGE}
+    container_name: kb-observability-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:?set GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_PLUGINS_PREINSTALL_AUTO_UPDATE: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://192.168.18.25:13000}
+      WEKNORA_DB_HOST: ${WEKNORA_DB_HOST:-WeKnora-postgres}
+      WEKNORA_DB_PORT: ${WEKNORA_DB_PORT:-5432}
+      WEKNORA_DB_NAME: ${WEKNORA_DB_NAME:-weknora}
+      WEKNORA_DB_USER: ${WEKNORA_DB_USER:-weknora_observer}
+      WEKNORA_DB_PASSWORD: ${WEKNORA_DB_PASSWORD:?set WEKNORA_DB_PASSWORD}
+    volumes:
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - ${GRAFANA_BIND_ADDRESS:-192.168.18.25}:${GRAFANA_PORT:-13000}:3000
+    networks:
+      - monitoring
+      - weknora
+
+  alloy:
+    profiles: [agent]
+    image: ${ALLOY_IMAGE}
+    container_name: kb-observability-alloy
+    restart: unless-stopped
+    privileged: true
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    environment:
+      MONITORED_HOST: ${MONITORED_HOST:-marvel-kb}
+      PROMETHEUS_REMOTE_WRITE_URL: ${PROMETHEUS_REMOTE_WRITE_URL:-http://prometheus:9090/api/v1/write}
+      LOKI_WRITE_URL: ${LOKI_WRITE_URL:-http://loki:3100/loki/api/v1/push}
+      WEKNORA_DB_HOST: ${WEKNORA_DB_HOST:-WeKnora-postgres}
+      WEKNORA_DB_PORT: ${WEKNORA_DB_PORT:-5432}
+      WEKNORA_DB_NAME: ${WEKNORA_DB_NAME:-weknora}
+      WEKNORA_DB_USER: ${WEKNORA_DB_USER:-weknora_observer}
+      WEKNORA_DB_PASSWORD: ${WEKNORA_DB_PASSWORD:?set WEKNORA_DB_PASSWORD}
+      WEKNORA_REDIS_HOST: ${WEKNORA_REDIS_HOST:-WeKnora-redis}
+      WEKNORA_REDIS_PORT: ${WEKNORA_REDIS_PORT:-6379}
+      WEKNORA_REDIS_PASSWORD: ${WEKNORA_REDIS_PASSWORD:?set WEKNORA_REDIS_PASSWORD}
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - ./alloy/blackbox.yml:/etc/alloy/blackbox.yml:ro
+      - ./alloy/weknora-queries.yml:/etc/alloy/weknora-queries.yml:ro
+      - alloy-data:/var/lib/alloy/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /:/host/root:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /var/run:/var/run:rw
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    ports:
+      - 127.0.0.1:${ALLOY_PORT:-12345}:12345
+    networks:
+      - monitoring
+      - weknora
+      - kb-backplane
+
+  capability-probe:
+    profiles: [agent]
+    build: ./capability-probe
+    image: local/mwe-kb-capability-probe:v1
+    container_name: kb-observability-capability-probe
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      MONITORED_HOST: ${MONITORED_HOST:-marvel-kb}
+      EXPECTED_CONTAINERS: ${EXPECTED_CONTAINERS}
+      MINERU_CONTAINER: ${MINERU_CONTAINER:-kb-mineru-api}
+      MINERU_PYTHON: ${MINERU_PYTHON:-python3}
+      GPU_SOURCES: ${GPU_SOURCES:-0:kb-q4-gpu0,1:kb-q4-gpu1}
+      PROBE_INTERVAL_SECONDS: ${PROBE_INTERVAL_SECONDS:-30}
+      LOG_WINDOW_SECONDS: ${LOG_WINDOW_SECONDS:-120}
+    volumes:
+      # Docker API access is root-equivalent even with a read-only mount.
+      # This fixed-purpose image never accepts user-provided commands.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [monitoring]
+
+networks:
+  monitoring:
+    name: mwe-observability
+    driver: bridge
+  weknora:
+    external: true
+    name: ${WEKNORA_NETWORK_NAME:-src_WeKnora-network}
+  kb-backplane:
+    external: true
+    name: ${KB_BACKPLANE_NETWORK_NAME:-kb-backplane}
+
+volumes:
+  prometheus-data:
+  loki-data:
+  grafana-data:
+  alloy-data:

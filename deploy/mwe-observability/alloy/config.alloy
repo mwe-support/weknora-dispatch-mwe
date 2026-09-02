@@ -1,0 +1,226 @@
+prometheus.remote_write "backend" {
+  endpoint {
+    url = sys.env("PROMETHEUS_REMOTE_WRITE_URL")
+  }
+}
+
+prometheus.relabel "host" {
+  forward_to = [prometheus.remote_write.backend.receiver]
+  rule {
+    target_label = "host"
+    replacement  = sys.env("MONITORED_HOST")
+  }
+  rule {
+    target_label = "stack"
+    replacement  = "mwe-knowledgebase"
+  }
+}
+
+prometheus.exporter.unix "host" {
+  procfs_path = "/host/proc"
+  sysfs_path  = "/host/sys"
+  rootfs_path = "/host/root"
+}
+
+prometheus.scrape "host" {
+  targets         = prometheus.exporter.unix.host.targets
+  scrape_interval = "15s"
+  forward_to      = [prometheus.relabel.host.receiver]
+}
+
+prometheus.exporter.cadvisor "docker" {
+  docker_host        = "unix:///var/run/docker.sock"
+  docker_only        = true
+  storage_duration   = "2m"
+  store_container_labels = false
+  allowlisted_container_labels = [
+    "com.docker.compose.project",
+    "com.docker.compose.service",
+  ]
+}
+
+prometheus.scrape "docker" {
+  targets         = prometheus.exporter.cadvisor.docker.targets
+  scrape_interval = "15s"
+  forward_to      = [prometheus.relabel.host.receiver]
+}
+
+prometheus.exporter.postgres "weknora" {
+  data_source_names = [
+    "postgresql://" + sys.env("WEKNORA_DB_USER") + ":" +
+    encoding.url_encode(sys.env("WEKNORA_DB_PASSWORD")) + "@" +
+    sys.env("WEKNORA_DB_HOST") + ":" + sys.env("WEKNORA_DB_PORT") + "/" +
+    sys.env("WEKNORA_DB_NAME") + "?sslmode=disable",
+  ]
+  custom_queries_config_path = "/etc/alloy/weknora-queries.yml"
+  disable_default_metrics    = true
+  disable_settings_metrics   = true
+}
+
+prometheus.scrape "postgres" {
+  targets         = prometheus.exporter.postgres.weknora.targets
+  scrape_interval = "30s"
+  forward_to      = [prometheus.relabel.host.receiver]
+}
+
+prometheus.exporter.redis "weknora" {
+  redis_addr     = sys.env("WEKNORA_REDIS_HOST") + ":" + sys.env("WEKNORA_REDIS_PORT")
+  redis_password = sys.env("WEKNORA_REDIS_PASSWORD")
+}
+
+prometheus.scrape "redis" {
+  targets         = prometheus.exporter.redis.weknora.targets
+  scrape_interval = "30s"
+  forward_to      = [prometheus.relabel.host.receiver]
+}
+
+prometheus.exporter.blackbox "components" {
+  config_file = "/etc/alloy/blackbox.yml"
+  target {
+    name    = "weknora-app"
+    address = "http://WeKnora-app:8080/health"
+    module  = "http_2xx"
+    labels  = { component = "weknora-app" }
+  }
+  target {
+    name    = "weknora-frontend"
+    address = "http://WeKnora-frontend/api/v1/auth/config"
+    module  = "http_2xx"
+    labels  = { component = "weknora-frontend" }
+  }
+  target {
+    name    = "minio"
+    address = "http://WeKnora-minio:9000/minio/health/ready"
+    module  = "http_2xx"
+    labels  = { component = "minio" }
+  }
+  target {
+    name    = "qdrant"
+    address = "http://kb-qdrant:6333/healthz"
+    module  = "http_2xx"
+    labels  = { component = "qdrant" }
+  }
+  target {
+    name    = "mineru"
+    address = "http://kb-mineru-api:8000/health"
+    module  = "http_2xx"
+    labels  = { component = "mineru" }
+  }
+  target {
+    name    = "embedding"
+    address = "http://kb-embed-text:8000/health"
+    module  = "http_2xx"
+    labels  = { component = "embedding" }
+  }
+  target {
+    name    = "reranker"
+    address = "http://kb-rerank-text:8000/health"
+    module  = "http_2xx"
+    labels  = { component = "reranker" }
+  }
+  target {
+    name    = "q4-gpu0"
+    address = "http://kb-q4-gpu0:8000/health"
+    module  = "http_2xx"
+    labels  = { component = "q4-gpu0" }
+  }
+  target {
+    name    = "q4-gpu1"
+    address = "http://kb-q4-gpu1:8000/health"
+    module  = "http_2xx"
+    labels  = { component = "q4-gpu1" }
+  }
+  target {
+    name    = "mcp-transport"
+    address = "WeKnora-mcp:8000"
+    module  = "tcp_connect"
+    labels  = { component = "mcp-transport" }
+  }
+}
+
+prometheus.scrape "component_probes" {
+  targets         = prometheus.exporter.blackbox.components.targets
+  scrape_interval = "15s"
+  forward_to      = [prometheus.relabel.host.receiver]
+}
+
+prometheus.scrape "capability" {
+  targets = [{ "__address__" = "capability-probe:9477", "job" = "capability-probe" }]
+  scrape_interval = "15s"
+  forward_to      = [prometheus.relabel.host.receiver]
+}
+
+prometheus.scrape "qdrant" {
+  targets = [{ "__address__" = "kb-qdrant:6333", "job" = "qdrant" }]
+  metrics_path    = "/metrics"
+  scrape_interval = "30s"
+  forward_to      = [prometheus.relabel.host.receiver]
+}
+
+prometheus.scrape "models" {
+  targets = [
+    { "__address__" = "kb-embed-text:8000", "job" = "embedding" },
+    { "__address__" = "kb-rerank-text:8000", "job" = "reranker" },
+    { "__address__" = "kb-q4-gpu0:8000", "job" = "q4-gpu0" },
+    { "__address__" = "kb-q4-gpu1:8000", "job" = "q4-gpu1" },
+  ]
+  metrics_path    = "/metrics"
+  scrape_interval = "30s"
+  forward_to      = [prometheus.relabel.host.receiver]
+}
+
+prometheus.scrape "alloy" {
+  targets = [{ "__address__" = "127.0.0.1:12345", "job" = "alloy" }]
+  scrape_interval = "30s"
+  forward_to      = [prometheus.relabel.host.receiver]
+}
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "docker_logs" {
+  targets = discovery.docker.containers.targets
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+  rule {
+    target_label = "host"
+    replacement  = sys.env("MONITORED_HOST")
+  }
+  rule {
+    target_label = "stack"
+    replacement  = "mwe-knowledgebase"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.containers.targets
+  relabel_rules = discovery.relabel.docker_logs.rules
+  forward_to    = [loki.process.redact.receiver]
+}
+
+loki.process "redact" {
+  forward_to = [loki.write.backend.receiver]
+  stage.drop {
+    older_than          = "168h"
+    drop_counter_reason = "outside_retention"
+  }
+  stage.replace {
+    expression = "(?i)(authorization|api[_-]?key|token|password|secret)([=: ]+)([^ ,;\\\"']+)"
+    replace    = "${1}${2}***"
+  }
+}
+
+loki.write "backend" {
+  endpoint {
+    url = sys.env("LOKI_WRITE_URL")
+  }
+}

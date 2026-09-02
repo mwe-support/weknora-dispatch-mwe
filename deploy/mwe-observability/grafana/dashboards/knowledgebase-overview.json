@@ -1,0 +1,318 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "This is intentionally independent of Docker health. It executes torch.cuda.is_available() and device_count inside the running MinerU container.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "mappings": [
+            {"options": {"0": {"color": "red", "text": "故障"}, "1": {"color": "green", "text": "可用"}}, "type": "value"}
+          ],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 5, "w": 5, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "pluginVersion": "13.1.0",
+      "targets": [{"editorMode": "code", "expr": "kb_component_capability_ready{component=\"mineru_cuda\"}", "instant": true, "legendFormat": "MinerU CUDA", "range": false, "refId": "A"}],
+      "title": "MinerU CUDA 能力",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 5, "w": 5, "x": 5, "y": 0},
+      "id": 2,
+      "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "pluginVersion": "13.1.0",
+      "targets": [{"editorMode": "code", "expr": "sum(kb_component_blocking_log)", "instant": true, "legendFormat": "阻断日志", "range": false, "refId": "A"}],
+      "title": "近期阻断级日志",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 5, "w": 4, "x": 10, "y": 0},
+      "id": 3,
+      "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "pluginVersion": "13.1.0",
+      "targets": [{"editorMode": "code", "expr": "weknora_failed_knowledge_recent_total", "instant": true, "legendFormat": "5分钟失败", "range": false, "refId": "A"}],
+      "title": "最近5分钟任务失败",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 1}, {"color": "red", "value": 10}]}}, "overrides": []},
+      "gridPos": {"h": 5, "w": 5, "x": 14, "y": 0},
+      "id": 4,
+      "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "pluginVersion": "13.1.0",
+      "targets": [{"editorMode": "code", "expr": "sum(weknora_processing_stale_total)", "instant": true, "legendFormat": "疑似停滞", "range": false, "refId": "A"}],
+      "title": "状态超过70分钟未更新",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 1}, {"color": "red", "value": 5}]}}, "overrides": []},
+      "gridPos": {"h": 5, "w": 5, "x": 19, "y": 0},
+      "id": 5,
+      "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "pluginVersion": "13.1.0",
+      "targets": [{"editorMode": "code", "expr": "sum(weknora_dead_letters_recent_total) or vector(0)", "instant": true, "legendFormat": "死信", "range": false, "refId": "A"}],
+      "title": "最近5分钟死信",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"custom": {"align": "auto", "cellOptions": {"type": "auto"}, "inspect": false}},
+        "overrides": [{"matcher": {"id": "byRegexp", "options": "/^(Value|可用)$/"}, "properties": [{"id": "color", "value": {"mode": "thresholds"}}, {"id": "custom.cellOptions", "value": {"type": "color-background"}}, {"id": "mappings", "value": [{"options": {"0": {"color": "red", "text": "不可用"}, "1": {"color": "green", "text": "正常"}}, "type": "value"}]}, {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}]}]
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+      "id": 6,
+      "options": {"cellHeight": "sm", "footer": {"countRows": false, "enablePagination": false, "fields": "", "reducer": ["sum"], "show": false}, "showHeader": true, "sortBy": []},
+      "pluginVersion": "13.1.0",
+      "targets": [{"editorMode": "code", "exemplar": false, "expr": "probe_success{stack=\"mwe-knowledgebase\",component=~\"weknora-app|weknora-frontend|minio|qdrant|mineru|embedding|reranker|q4-gpu0|q4-gpu1|mcp-transport\"}", "format": "table", "instant": true, "legendFormat": "{{component}}", "range": false, "refId": "A"}],
+      "title": "组件端点可用性",
+      "transformations": [{"id": "organize", "options": {"excludeByName": {"Time": true, "__name__": true, "instance": true, "job": true, "stack": true}, "indexByName": {"component": 0, "Value": 1}, "renameByName": {"Value": "可用", "component": "组件"}}}],
+      "type": "table"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"custom": {"align": "auto", "cellOptions": {"type": "auto"}, "inspect": false}},
+        "overrides": [{"matcher": {"id": "byRegexp", "options": "/^(Value|运行状态)$/"}, "properties": [{"id": "color", "value": {"mode": "thresholds"}}, {"id": "custom.cellOptions", "value": {"type": "color-background"}}, {"id": "mappings", "value": [{"options": {"0": {"color": "red", "text": "停止/缺失"}, "1": {"color": "green", "text": "运行中"}}, "type": "value"}]}, {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}]}]
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "id": 7,
+      "options": {"cellHeight": "sm", "footer": {"countRows": false, "enablePagination": false, "fields": "", "reducer": ["sum"], "show": false}, "showHeader": true, "sortBy": []},
+      "pluginVersion": "13.1.0",
+      "targets": [{"editorMode": "code", "expr": "kb_container_running", "format": "table", "instant": true, "legendFormat": "{{container}}", "range": false, "refId": "A"}],
+      "title": "期望容器状态",
+      "transformations": [{"id": "organize", "options": {"excludeByName": {"Time": true, "__name__": true, "host": true, "job": true, "instance": true, "stack": true}, "indexByName": {"container": 0, "Value": 1}, "renameByName": {"Value": "运行状态", "container": "容器"}}}],
+      "type": "table"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "unit": "percent"}, "overrides": []},
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 13},
+      "id": 14,
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name", "wideLayout": true},
+      "pluginVersion": "13.1.0",
+      "targets": [{"editorMode": "code", "expr": "kb_gpu_utilization_percent", "instant": true, "legendFormat": "GPU {{gpu}}", "range": false, "refId": "A"}],
+      "title": "实时 GPU 占用",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "unit": "percent"}, "overrides": []},
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 13},
+      "id": 15,
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name", "wideLayout": true},
+      "pluginVersion": "13.1.0",
+      "targets": [{"editorMode": "code", "expr": "100 * kb_gpu_memory_used_bytes / kb_gpu_memory_total_bytes", "instant": true, "legendFormat": "GPU {{gpu}}", "range": false, "refId": "A"}],
+      "title": "实时 GPU 显存占用",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 75}, {"color": "red", "value": 85}]}, "unit": "celsius"}, "overrides": []},
+      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 13},
+      "id": 16,
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name", "wideLayout": true},
+      "pluginVersion": "13.1.0",
+      "targets": [{"editorMode": "code", "expr": "kb_gpu_temperature_celsius", "instant": true, "legendFormat": "GPU {{gpu}}", "range": false, "refId": "A"}],
+      "title": "实时 GPU 温度",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "unit": "watt"}, "overrides": []},
+      "gridPos": {"h": 6, "w": 6, "x": 18, "y": 13},
+      "id": 17,
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name", "wideLayout": true},
+      "pluginVersion": "13.1.0",
+      "targets": [{"editorMode": "code", "expr": "kb_gpu_power_watts", "instant": true, "legendFormat": "GPU {{gpu}}", "range": false, "refId": "A"}],
+      "title": "实时 GPU 功耗",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisBorderShow": false, "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 12, "gradientMode": "none", "hideFrom": {"legend": false, "tooltip": false, "viz": false}, "insertNulls": false, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 4, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}, "thresholdsStyle": {"mode": "off"}}, "min": 0, "max": 100, "unit": "percent"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 19},
+      "id": 18,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"hideZeros": false, "mode": "multi", "sort": "desc"}},
+      "pluginVersion": "13.1.0",
+      "targets": [
+        {"editorMode": "code", "expr": "kb_gpu_utilization_percent", "legendFormat": "GPU {{gpu}} 核心", "range": true, "refId": "A"},
+        {"editorMode": "code", "expr": "100 * kb_gpu_memory_used_bytes / kb_gpu_memory_total_bytes", "legendFormat": "GPU {{gpu}} 显存", "range": true, "refId": "B"}
+      ],
+      "title": "GPU 占用趋势",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisBorderShow": false, "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 12, "gradientMode": "none", "hideFrom": {"legend": false, "tooltip": false, "viz": false}, "insertNulls": false, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 4, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}, "thresholdsStyle": {"mode": "off"}}}, "overrides": [{"matcher": {"id": "byRegexp", "options": "/温度$/"}, "properties": [{"id": "unit", "value": "celsius"}]}, {"matcher": {"id": "byRegexp", "options": "/功耗$/"}, "properties": [{"id": "unit", "value": "watt"}, {"id": "custom.axisPlacement", "value": "right"}]}]},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 19},
+      "id": 19,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"hideZeros": false, "mode": "multi", "sort": "desc"}},
+      "pluginVersion": "13.1.0",
+      "targets": [
+        {"editorMode": "code", "expr": "kb_gpu_temperature_celsius", "legendFormat": "GPU {{gpu}} 温度", "range": true, "refId": "A"},
+        {"editorMode": "code", "expr": "kb_gpu_power_watts", "legendFormat": "GPU {{gpu}} 功耗", "range": true, "refId": "B"}
+      ],
+      "title": "GPU 温度与功耗趋势",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisBorderShow": false, "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": {"legend": false, "tooltip": false, "viz": false}, "insertNulls": false, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 4, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}, "thresholdsStyle": {"mode": "off"}}, "min": 0, "unit": "percent"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 27},
+      "id": 8,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"hideZeros": false, "mode": "multi", "sort": "desc"}},
+      "pluginVersion": "13.1.0",
+      "targets": [
+        {"editorMode": "code", "expr": "100 - avg by (host) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100", "legendFormat": "CPU 使用", "range": true, "refId": "A"},
+        {"editorMode": "code", "expr": "avg by (host) (rate(node_cpu_seconds_total{mode=\"iowait\"}[5m])) * 100", "legendFormat": "I/O 等待", "range": true, "refId": "B"}
+      ],
+      "title": "CPU 趋势",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisBorderShow": false, "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": {"legend": false, "tooltip": false, "viz": false}, "insertNulls": false, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 4, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}, "thresholdsStyle": {"mode": "off"}}, "min": 0, "unit": "percent"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 6, "x": 6, "y": 27},
+      "id": 20,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"hideZeros": false, "mode": "multi", "sort": "desc"}},
+      "pluginVersion": "13.1.0",
+      "targets": [
+        {"editorMode": "code", "expr": "100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)", "legendFormat": "内存使用", "range": true, "refId": "A"},
+        {"editorMode": "code", "expr": "100 * (1 - node_memory_SwapFree_bytes / clamp_min(node_memory_SwapTotal_bytes, 1))", "legendFormat": "Swap 使用", "range": true, "refId": "B"}
+      ],
+      "title": "内存趋势",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisBorderShow": false, "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": {"legend": false, "tooltip": false, "viz": false}, "insertNulls": false, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 4, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}, "thresholdsStyle": {"mode": "off"}}, "min": 0, "unit": "Bps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 27},
+      "id": 21,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"hideZeros": false, "mode": "multi", "sort": "desc"}},
+      "pluginVersion": "13.1.0",
+      "targets": [
+        {"editorMode": "code", "expr": "sum by (host) (rate(node_network_receive_bytes_total{device!~\"lo|veth.*|br-.*|docker.*\"}[5m]))", "legendFormat": "接收", "range": true, "refId": "A"},
+        {"editorMode": "code", "expr": "sum by (host) (rate(node_network_transmit_bytes_total{device!~\"lo|veth.*|br-.*|docker.*\"}[5m]))", "legendFormat": "发送", "range": true, "refId": "B"}
+      ],
+      "title": "网络吞吐趋势",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisBorderShow": false, "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": {"legend": false, "tooltip": false, "viz": false}, "insertNulls": false, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 4, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}, "thresholdsStyle": {"mode": "off"}}, "min": 0, "unit": "Bps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 27},
+      "id": 22,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"hideZeros": false, "mode": "multi", "sort": "desc"}},
+      "pluginVersion": "13.1.0",
+      "targets": [
+        {"editorMode": "code", "expr": "rate(node_disk_read_bytes_total{device=~\"md.*|nvme[0-9]+n[0-9]+|sd[a-z]+\"}[5m])", "legendFormat": "{{device}} 读", "range": true, "refId": "A"},
+        {"editorMode": "code", "expr": "rate(node_disk_written_bytes_total{device=~\"md.*|nvme[0-9]+n[0-9]+|sd[a-z]+\"}[5m])", "legendFormat": "{{device}} 写", "range": true, "refId": "B"}
+      ],
+      "title": "磁盘 I/O 趋势",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisBorderShow": false, "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 15, "gradientMode": "none", "hideFrom": {"legend": false, "tooltip": false, "viz": false}, "insertNulls": false, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 4, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "normal"}, "thresholdsStyle": {"mode": "off"}}, "min": 0}, "overrides": []},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 35},
+      "id": 9,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"hideZeros": false, "mode": "multi", "sort": "desc"}},
+      "pluginVersion": "13.1.0",
+      "targets": [{"editorMode": "code", "expr": "weknora_knowledge_status_total", "legendFormat": "{{parse_status}}", "range": true, "refId": "A"}],
+      "title": "知识处理状态趋势",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "postgres", "uid": "weknora-postgres"},
+      "description": "当前仍为 failed 的文档；使用顶部“文档失败页”切换，每页最多50条。重处理完成后自动剔除。space_name缺失时回退为space_id。",
+      "fieldConfig": {"defaults": {"custom": {"align": "auto", "cellOptions": {"type": "auto"}, "filterable": true, "inspect": false}}, "overrides": []},
+      "gridPos": {"h": 11, "w": 24, "x": 0, "y": 43},
+      "id": 10,
+      "options": {"cellHeight": "sm", "footer": {"countRows": false, "enablePagination": false, "fields": "", "reducer": ["sum"], "show": false}, "showHeader": true, "sortBy": [{"desc": true, "displayName": "失败时间"}]},
+      "pluginVersion": "13.1.0",
+      "targets": [{
+        "datasource": {"type": "postgres", "uid": "weknora-postgres"},
+        "editorMode": "code",
+        "format": "table",
+        "rawQuery": true,
+        "rawSql": "SELECT k.updated_at AS \"失败时间\", COALESCE(t.name, k.tenant_id::text) AS \"账号/工作空间\", COALESCE(ds.name, '手工/API上传') AS \"数据源\", COALESCE(NULLIF(k.metadata::jsonb->>'space_name',''), NULLIF(k.metadata::jsonb->>'space_id',''), '—') AS \"空间\", COALESCE(NULLIF(k.title,''), NULLIF(k.file_name,''), k.id) AS \"文档\", COALESCE(sp.name, 'knowledge_processing') AS \"失败阶段\", COALESCE(NULLIF(sp.error_code,''), 'UNKNOWN') AS \"错误码\", LEFT(COALESCE(NULLIF(sp.error_message,''), NULLIF(k.error_message,''), '未记录错误信息'), 600) AS \"异常信息\", k.id AS \"knowledge_id\", k.knowledge_base_id AS \"knowledge_base_id\", COALESCE(k.metadata::jsonb->>'datasource_id','') AS \"data_source_id\", COALESCE(k.metadata::jsonb->>'file_id', k.metadata::jsonb->>'external_id','') AS \"源文档ID\" FROM knowledges k LEFT JOIN tenants t ON t.id=k.tenant_id LEFT JOIN data_sources ds ON ds.id=k.metadata::jsonb->>'datasource_id' LEFT JOIN LATERAL (SELECT s.name,s.error_code,s.error_message FROM knowledge_processing_spans s WHERE s.knowledge_id=k.id AND s.status='failed' ORDER BY s.finished_at DESC NULLS LAST,s.updated_at DESC LIMIT 1) sp ON TRUE WHERE k.parse_status='failed' ORDER BY k.updated_at DESC LIMIT 50 OFFSET (GREATEST(${doc_page:sqlstring}::int,1)-1)*50",
+        "refId": "A",
+        "sql": {"columns": [{"parameters": [], "type": "function"}], "groupBy": [{"property": {"type": "string"}, "type": "groupBy"}], "limit": 50}
+      }],
+      "title": "未解决文档处理失败",
+      "type": "table"
+    },
+    {
+      "datasource": {"type": "postgres", "uid": "weknora-postgres"},
+      "description": "每个数据源仅保留最新一次失败或部分成功；使用顶部“数据源异常页”切换，每页最多50条。后续同步成功后自动剔除。",
+      "fieldConfig": {"defaults": {"custom": {"align": "auto", "cellOptions": {"type": "auto"}, "filterable": true, "inspect": false}}, "overrides": []},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 54},
+      "id": 11,
+      "options": {"cellHeight": "sm", "footer": {"countRows": false, "enablePagination": false, "fields": "", "reducer": ["sum"], "show": false}, "showHeader": true, "sortBy": []},
+      "pluginVersion": "13.1.0",
+      "targets": [{"datasource": {"type": "postgres", "uid": "weknora-postgres"}, "editorMode": "code", "format": "table", "rawQuery": true, "rawSql": "WITH latest AS (SELECT DISTINCT ON (data_source_id) * FROM sync_logs ORDER BY data_source_id, updated_at DESC, id DESC) SELECT sl.updated_at AS \"时间\", COALESCE(t.name, sl.tenant_id::text) AS \"账号/工作空间\", ds.name AS \"数据源\", ds.type AS \"类型\", sl.status AS \"状态\", sl.items_total AS \"总数\", sl.items_failed AS \"失败数\", LEFT(COALESCE(NULLIF(sl.error_message,''), sl.result::text, '未记录错误信息'), 600) AS \"异常信息\", sl.id AS \"sync_log_id\", sl.data_source_id AS \"data_source_id\" FROM latest sl JOIN data_sources ds ON ds.id=sl.data_source_id LEFT JOIN tenants t ON t.id=sl.tenant_id WHERE sl.status IN ('failed','partial') ORDER BY sl.updated_at DESC LIMIT 50 OFFSET (GREATEST(${sync_page:sqlstring}::int,1)-1)*50", "refId": "A"}],
+      "title": "未解决数据源同步异常",
+      "type": "table"
+    },
+    {
+      "datasource": {"type": "postgres", "uid": "weknora-postgres"},
+      "description": "按失败时间倒序；使用顶部“死信页”切换，每页最多50条。",
+      "fieldConfig": {"defaults": {"custom": {"align": "auto", "cellOptions": {"type": "auto"}, "filterable": true, "inspect": false}}, "overrides": []},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 54},
+      "id": 12,
+      "options": {"cellHeight": "sm", "footer": {"countRows": false, "enablePagination": false, "fields": "", "reducer": ["sum"], "show": false}, "showHeader": true, "sortBy": []},
+      "pluginVersion": "13.1.0",
+      "targets": [{"datasource": {"type": "postgres", "uid": "weknora-postgres"}, "editorMode": "code", "format": "table", "rawQuery": true, "rawSql": "SELECT dl.failed_at AS \"失败时间\", COALESCE(t.name, dl.tenant_id::text) AS \"账号/工作空间\", dl.task_type AS \"任务类型\", dl.scope AS \"范围\", dl.scope_id AS \"范围ID\", dl.related_id AS \"关联ID\", dl.fail_count AS \"失败次数\", LEFT(dl.last_error, 600) AS \"异常信息\" FROM task_dead_letters dl LEFT JOIN tenants t ON t.id=dl.tenant_id ORDER BY dl.failed_at DESC LIMIT 50 OFFSET (GREATEST(${dead_page:sqlstring}::int,1)-1)*50", "refId": "A"}],
+      "title": "任务死信",
+      "type": "table"
+    },
+    {"gridPos": {"h": 2, "w": 24, "x": 0, "y": 63}, "id": 23, "options": {"content": "<div style=\"display:flex;align-items:center;gap:8px;height:100%;overflow-x:auto;white-space:nowrap;padding:0 12px\"><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-app\">App</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-docreader\">DocReader</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-frontend\">Frontend</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-mcp\">MCP</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-postgres\">PostgreSQL</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-redis\">Redis</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-minio\">MinIO</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-qdrant\">Qdrant</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-mineru-api\">MinerU</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-embed-text\">Embedding</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-rerank-text\">Reranker</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-q4-gpu0\">Q4‑GPU0</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-q4-gpu1\">Q4‑GPU1</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-q4-router\">Q4‑Router</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-alloy\">Alloy</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-grafana\">Grafana</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-loki\">Loki</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-prometheus\">Prometheus</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-capability-probe\">Probe</a></div>", "mode": "html"}, "pluginVersion": "13.1.0", "transparent": true, "type": "text"},
+    {
+      "datasource": {"type": "loki", "uid": "loki"},
+      "description": "使用上方容器导航条切换容器；每次只查询一个容器。",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 65},
+      "id": 13,
+      "options": {"dedupStrategy": "none", "enableInfiniteScrolling": false, "enableLogDetails": true, "prettifyLogMessage": false, "showCommonLabels": false, "showLabels": false, "showTime": true, "sortOrder": "Descending", "wrapLogMessage": true},
+      "pluginVersion": "13.1.0",
+      "targets": [{"datasource": {"type": "loki", "uid": "loki"}, "direction": "backward", "editorMode": "code", "expr": "{stack=\"mwe-knowledgebase\",container=\"$log_container\"} |~ \"(?i)(fatal|panic|traceback|out of memory|cuda.*(unavailable|not available|error|out of memory)|no cuda gpus|failed to initialize nvml|failed to load model|segmentation fault)\"", "queryType": "range", "refId": "A"}],
+      "title": "关联异常日志 · $log_container",
+      "type": "logs"
+    }
+  ],
+  "preload": false,
+  "refresh": "15s",
+  "schemaVersion": 42,
+  "tags": ["mwe", "weknora", "operations"],
+  "templating": {"list": [
+    {"current": {"selected": true, "text": "1", "value": "1"}, "datasource": {"type": "postgres", "uid": "weknora-postgres"}, "definition": "SELECT generate_series(1, GREATEST(CEIL(COUNT(*) / 50.0)::int, 1))::text AS __text, generate_series(1, GREATEST(CEIL(COUNT(*) / 50.0)::int, 1))::text AS __value FROM knowledges WHERE parse_status='failed' AND deleted_at IS NULL", "hide": 0, "includeAll": false, "label": "文档失败页", "multi": false, "name": "doc_page", "options": [], "query": "SELECT generate_series(1, GREATEST(CEIL(COUNT(*) / 50.0)::int, 1))::text AS __text, generate_series(1, GREATEST(CEIL(COUNT(*) / 50.0)::int, 1))::text AS __value FROM knowledges WHERE parse_status='failed' AND deleted_at IS NULL", "refresh": 1, "regex": "", "skipUrlSync": false, "sort": 3, "type": "query"},
+    {"current": {"selected": true, "text": "1", "value": "1"}, "datasource": {"type": "postgres", "uid": "weknora-postgres"}, "definition": "WITH latest AS (SELECT DISTINCT ON (data_source_id) * FROM sync_logs ORDER BY data_source_id,updated_at DESC,id DESC) SELECT generate_series(1, GREATEST(CEIL(COUNT(*) / 50.0)::int, 1))::text AS __text, generate_series(1, GREATEST(CEIL(COUNT(*) / 50.0)::int, 1))::text AS __value FROM latest WHERE status IN ('failed','partial')", "hide": 0, "includeAll": false, "label": "数据源异常页", "multi": false, "name": "sync_page", "options": [], "query": "WITH latest AS (SELECT DISTINCT ON (data_source_id) * FROM sync_logs ORDER BY data_source_id,updated_at DESC,id DESC) SELECT generate_series(1, GREATEST(CEIL(COUNT(*) / 50.0)::int, 1))::text AS __text, generate_series(1, GREATEST(CEIL(COUNT(*) / 50.0)::int, 1))::text AS __value FROM latest WHERE status IN ('failed','partial')", "refresh": 1, "regex": "", "skipUrlSync": false, "sort": 3, "type": "query"},
+    {"current": {"selected": true, "text": "1", "value": "1"}, "datasource": {"type": "postgres", "uid": "weknora-postgres"}, "definition": "SELECT generate_series(1, GREATEST(CEIL(COUNT(*) / 50.0)::int, 1))::text AS __text, generate_series(1, GREATEST(CEIL(COUNT(*) / 50.0)::int, 1))::text AS __value FROM task_dead_letters", "hide": 0, "includeAll": false, "label": "死信页", "multi": false, "name": "dead_page", "options": [], "query": "SELECT generate_series(1, GREATEST(CEIL(COUNT(*) / 50.0)::int, 1))::text AS __text, generate_series(1, GREATEST(CEIL(COUNT(*) / 50.0)::int, 1))::text AS __value FROM task_dead_letters", "refresh": 1, "regex": "", "skipUrlSync": false, "sort": 3, "type": "query"},
+    {"current": {"selected": true, "text": "WeKnora-app", "value": "WeKnora-app"}, "datasource": {"type": "loki", "uid": "loki"}, "definition": "", "hide": 2, "includeAll": false, "label": "关联日志容器", "multi": false, "name": "log_container", "options": [], "query": {"label": "container", "refId": "LokiVariableQueryEditor-VariableQuery", "stream": "{stack=\"mwe-knowledgebase\"}", "type": 1}, "refresh": 2, "regex": "/^(WeKnora.*|kb-.*)$/", "skipUrlSync": false, "sort": 1, "type": "query"}
+  ]},
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "MWE 知识库运行与任务异常",
+  "uid": "mwe-kb-observability-v1",
+  "version": 3,
+  "weekStart": "monday"
+}
