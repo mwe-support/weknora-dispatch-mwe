@@ -1,0 +1,204 @@
+name: kb-gpu-production
+
+x-q4-common: &q4-common
+  image: ghcr.io/ggml-org/llama.cpp:server-cuda
+  restart: unless-stopped
+  command:
+    - -m
+    - /models/Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf
+    - --mmproj
+    - /models/mmproj-Qwythos-9B-Claude-Mythos-5-1M-F16.gguf
+    - --alias
+    - Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M
+    - --host
+    - 0.0.0.0
+    - --port
+    - "8000"
+    - --api-key
+    - ${QWYTHOS_API_KEY:?set QWYTHOS_API_KEY}
+    - --n-gpu-layers
+    - "999"
+    - --ctx-size
+    - "131072"
+    - --parallel
+    - "4"
+    - --batch-size
+    - "2048"
+    - --ubatch-size
+    - "1024"
+    - --cache-type-k
+    - q8_0
+    - --cache-type-v
+    - q8_0
+    - --cont-batching
+    - --metrics
+    - --jinja
+  volumes:
+    - /public/qwythos-runtime/models:/models:ro
+  mem_limit: 20g
+  cpus: 12.0
+  ipc: host
+  healthcheck:
+    test: [CMD-SHELL, "curl -fsS http://127.0.0.1:8000/health >/dev/null || exit 1"]
+    interval: 15s
+    timeout: 5s
+    retries: 40
+    start_period: 150s
+  networks: [kb-backplane]
+
+services:
+  q4-gpu0:
+    <<: *q4-common
+    container_name: kb-q4-gpu0
+    ports: ["127.0.0.1:18083:8000"]
+    devices: ["nvidia.com/gpu=0"]
+
+  q4-gpu1:
+    <<: *q4-common
+    container_name: kb-q4-gpu1
+    ports: ["127.0.0.1:18084:8000"]
+    devices: ["nvidia.com/gpu=1"]
+
+  q4-router:
+    image: nginx:1.27-alpine
+    container_name: kb-q4-router
+    restart: unless-stopped
+    depends_on:
+      q4-gpu0:
+        condition: service_healthy
+      q4-gpu1:
+        condition: service_healthy
+    volumes:
+      - /public/knowledgebase/gpu/q4-router.conf:/etc/nginx/conf.d/default.conf:ro
+    ports: ["127.0.0.1:18085:8000"]
+    healthcheck:
+      test: [CMD-SHELL, "wget -qO- http://127.0.0.1:8000/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    networks:
+      kb-backplane:
+        aliases: [chat-local-q4]
+
+  embed-text:
+    image: ${VLLM_IMAGE:?set VLLM_IMAGE}
+    container_name: kb-embed-text
+    restart: unless-stopped
+    entrypoint: [vllm, serve]
+    command:
+      - /models/Qwen3-Embedding-4B
+      - --runner
+      - pooling
+      - --served-model-name
+      - Qwen3-Embedding-4B
+      - --max-model-len
+      - "4096"
+      - --kv-cache-memory-bytes
+      - "1073741824"
+      - --gpu-memory-utilization
+      - "0.48"
+      - --enforce-eager
+    volumes:
+      - /public/models/Qwen3-Embedding-4B:/models/Qwen3-Embedding-4B:ro
+    ports: ["127.0.0.1:18080:8000"]
+    mem_limit: 12g
+    cpus: 10.0
+    ipc: host
+    devices: ["nvidia.com/gpu=1"]
+    healthcheck:
+      test: [CMD-SHELL, "curl -fsS http://127.0.0.1:8000/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 40
+      start_period: 240s
+    networks:
+      kb-backplane:
+        aliases: [embed-text]
+
+  rerank-text:
+    image: ${VLLM_IMAGE:?set VLLM_IMAGE}
+    container_name: kb-rerank-text
+    restart: unless-stopped
+    entrypoint: [vllm, serve]
+    command:
+      - /models/Qwen3-Reranker-0.6B
+      - --runner
+      - pooling
+      - --served-model-name
+      - Qwen3-Reranker-0.6B
+      - --hf-overrides
+      - '{"architectures":["Qwen3ForSequenceClassification"],"classifier_from_token":["no","yes"],"is_original_qwen3_reranker":true}'
+      - --chat-template
+      - /config/qwen3_reranker.jinja
+      - --max-model-len
+      - "2048"
+      - --kv-cache-memory-bytes
+      - "268435456"
+      - --gpu-memory-utilization
+      - "0.15"
+      - --enforce-eager
+    volumes:
+      - /public/models/Qwen3-Reranker-0.6B:/models/Qwen3-Reranker-0.6B:ro
+      - /public/knowledgebase/config/vllm:/config:ro
+    ports: ["127.0.0.1:18081:8000"]
+    mem_limit: 6g
+    cpus: 6.0
+    ipc: host
+    devices: ["nvidia.com/gpu=1"]
+    healthcheck:
+      test: [CMD-SHELL, "curl -fsS http://127.0.0.1:8000/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 40
+      start_period: 240s
+    networks:
+      kb-backplane:
+        aliases: [rerank-text]
+
+  mineru-api:
+    image: mineru-test:3.4.4-pipeline
+    container_name: kb-mineru-api
+    restart: unless-stopped
+    entrypoint: mineru-api
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --enable-vlm-preload
+      - "false"
+      - --gpu-memory-utilization
+      - "0.18"
+      - --max-model-len
+      - "4096"
+    environment:
+      MINERU_TOOLS_CONFIG_JSON: /root/.mineru/mineru.json
+      MINERU_API_MAX_CONCURRENT_REQUESTS: "2"
+    volumes:
+      - /public/models/MinerU2.5-Pro-2605-1.2B:/models/MinerU2.5-Pro-2605-1.2B:ro
+      - /public/models/PDF-Extract-Kit-1.0:/root/.cache/modelscope/hub/models/OpenDataLab/PDF-Extract-Kit-1___0:ro
+      - /public/knowledgebase/config/mineru:/root/.mineru:ro
+      - /public/knowledgebase/data/parsed:/data/parsed
+    ports: ["127.0.0.1:18000:8000"]
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    mem_limit: 16g
+    cpus: 16.0
+    devices: ["nvidia.com/gpu=0"]
+    healthcheck:
+      test: [CMD-SHELL, "curl -fsS http://127.0.0.1:8000/health >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 40
+      start_period: 240s
+    networks:
+      kb-backplane:
+        aliases: [mineru-api]
+
+networks:
+  kb-backplane:
+    external: true
+    name: kb-backplane

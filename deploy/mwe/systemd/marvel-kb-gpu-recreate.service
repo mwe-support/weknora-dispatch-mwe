@@ -1,0 +1,18 @@
+[Unit]
+Description=Recreate marvel-kb GPU containers after boot
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionPathExists=/public/knowledgebase/gpu/compose.yml
+StartLimitIntervalSec=1800
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/marvel-kb-gpu-recreate
+TimeoutStartSec=900
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target

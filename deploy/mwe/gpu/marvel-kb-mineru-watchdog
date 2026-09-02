@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+state_dir=/run/marvel-kb-mineru-watchdog
+failure_file=$state_dir/failures
+restart_file=$state_dir/last_restart
+compose_dir=/public/knowledgebase/gpu
+
+exec 9>/run/marvel-kb-mineru-watchdog.lock
+flock -n 9 || exit 0
+mkdir -p "$state_dir"
+
+probe() {
+  docker inspect -f '{{.State.Running}}' kb-mineru-api 2>/dev/null | grep -qx true &&
+    curl -fsS --max-time 10 http://127.0.0.1:18000/health >/dev/null &&
+    docker exec kb-mineru-api nvidia-smi -L >/dev/null 2>&1 &&
+    docker exec kb-mineru-api python3 -c 'import torch; assert torch.cuda.is_available() and torch.cuda.device_count() > 0' >/dev/null 2>&1
+}
+
+if ! nvidia-smi -L >/dev/null 2>&1; then
+  echo "Host NVIDIA is unavailable; skipping container recreation." >&2
+  exit 1
+fi
+
+if [[ ${1:-} == --check-only ]]; then
+  probe
+  echo "MinerU HTTP, NVML, and CUDA probes passed."
+  exit 0
+fi
+
+if probe; then
+  echo 0 >"$failure_file"
+  exit 0
+fi
+
+failures=0
+[[ -r $failure_file ]] && read -r failures <"$failure_file"
+[[ $failures =~ ^[0-9]+$ ]] || failures=0
+failures=$((failures + 1))
+echo "$failures" >"$failure_file"
+echo "MinerU GPU probe failed ($failures/2)." >&2
+(( failures >= 2 )) || exit 1
+
+now=$(date +%s)
+last_restart=0
+[[ -r $restart_file ]] && read -r last_restart <"$restart_file"
+[[ $last_restart =~ ^[0-9]+$ ]] || last_restart=0
+if (( now - last_restart < 600 )); then
+  echo "MinerU recreation is in the 10-minute cooldown." >&2
+  exit 1
+fi
+
+echo "$now" >"$restart_file"
+cd "$compose_dir"
+docker compose -f compose.yml up -d --no-deps --force-recreate mineru-api
+for _ in {1..150}; do
+  [[ $(docker inspect -f '{{.State.Health.Status}}' kb-mineru-api 2>/dev/null || true) == healthy ]] && probe && {
+    echo 0 >"$failure_file"
+    echo "MinerU was recreated and passed HTTP, NVML, and CUDA probes."
+    exit 0
+  }
+  sleep 2
+done
+
+echo "MinerU recreation did not restore GPU health." >&2
+exit 1

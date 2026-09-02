@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+compose_dir=/public/knowledgebase/gpu
+containers=(kb-q4-gpu0 kb-q4-gpu1 kb-embed-text kb-rerank-text kb-mineru-api)
+
+exec 9>/run/marvel-kb-gpu-recreate.lock
+flock -n 9 || exit 0
+
+for _ in {1..90}; do
+  systemctl is-active --quiet docker && nvidia-smi -L >/dev/null 2>&1 && break
+  sleep 2
+done
+systemctl is-active --quiet docker
+nvidia-smi -L >/dev/null
+
+if [[ ${1:-} == --check-only ]]; then
+  echo "GPU host and Docker are ready; boot recreation is armed."
+  exit 0
+fi
+
+cd "$compose_dir"
+docker compose -f compose.yml up -d --force-recreate --wait --wait-timeout 600
+for container in "${containers[@]}"; do
+  docker exec "$container" nvidia-smi -L >/dev/null
+done

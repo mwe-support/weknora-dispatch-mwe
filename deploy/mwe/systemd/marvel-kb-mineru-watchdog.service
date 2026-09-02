@@ -1,0 +1,10 @@
+[Unit]
+Description=Check and recover marvel-kb MinerU GPU access
+Requires=docker.service
+After=docker.service marvel-kb-gpu-recreate.service
+ConditionPathExists=/public/knowledgebase/gpu/compose.yml
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/marvel-kb-mineru-watchdog
+TimeoutStartSec=360
