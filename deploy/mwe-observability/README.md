@@ -24,8 +24,11 @@ deployment. It deliberately treats Docker health as only one signal.
 - Failure tables are unresolved queues, not time-window views: a document row
   leaves only when its current parse status is no longer failed; a data-source
   row leaves only after that source's latest sync completes successfully.
-- Document failures, latest data-source failures and dead letters use separate
-  top navigation page selectors with a hard SQL limit of 50 rows per page.
+- Document failures, latest data-source failures and dead letters use hidden
+  server-side page variables with 50-row SQL limits. Each table has its own
+  bottom pager with previous/next controls and an Enter-to-jump page input.
+- The pager input uses the signed Grafana Labs Business Text panel pinned at
+  `marcusolsson-dynamictext-panel@6.3.0` in Compose.
 - The related-error log panel reads one Loki container stream at a time; use
   the horizontal container navigation bar directly above the panel to switch.
 
