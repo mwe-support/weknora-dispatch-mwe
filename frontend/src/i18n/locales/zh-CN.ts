@@ -634,6 +634,8 @@ export default {
     schedule6h: '每 6 小时',
     schedule12h: '每 12 小时',
     schedule24h: '每天',
+    scheduleWeekly: '每周（周日 02:00）',
+    scheduleMonthly: '每月（1 日 02:00）',
     neverSynced: '未同步',
     justNow: '刚刚',
     minutesAgo: '{n} 分钟前',
@@ -650,7 +652,9 @@ export default {
       '1h': '每小时',
       '6h': '每 6 小时',
       '12h': '每 12 小时',
-      '24h': '每天'
+      '24h': '每天',
+      weekly: '每周（周日 02:00）',
+      monthly: '每月（1 日 02:00）'
     },
     field: {
       appId: 'App ID',

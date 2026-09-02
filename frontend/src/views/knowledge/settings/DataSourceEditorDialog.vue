@@ -459,6 +459,8 @@ const schedulePresets = computed(() => [
   { label: t('datasource.schedule6h'), value: '0 0 */6 * * *' },
   { label: t('datasource.schedule12h'), value: '0 0 */12 * * *' },
   { label: t('datasource.schedule24h'), value: '0 0 2 * * *' },
+  { label: t('datasource.scheduleWeekly'), value: '0 0 2 * * 0' },
+  { label: t('datasource.scheduleMonthly'), value: '0 0 2 1 * *' },
 ])
 
 // --- Connector definitions ---

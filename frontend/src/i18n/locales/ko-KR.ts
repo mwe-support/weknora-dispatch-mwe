@@ -634,6 +634,8 @@ export default {
     schedule6h: '6시간마다',
     schedule12h: '12시간마다',
     schedule24h: '매일',
+    scheduleWeekly: '매주 (일요일 02:00)',
+    scheduleMonthly: '매월 (1일 02:00)',
     neverSynced: '동기화되지 않음',
     justNow: '방금',
     minutesAgo: '{n}분 전',
@@ -650,7 +652,9 @@ export default {
       '1h': '매시간',
       '6h': '6시간마다',
       '12h': '12시간마다',
-      '24h': '매일'
+      '24h': '매일',
+      weekly: '매주 (일요일 02:00)',
+      monthly: '매월 (1일 02:00)'
     },
     field: {
       appId: 'App ID',

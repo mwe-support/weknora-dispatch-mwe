@@ -5349,12 +5349,16 @@ export default {
     schedule6h: 'Every 6 hours',
     schedule12h: 'Every 12 hours',
     schedule24h: 'Daily',
+    scheduleWeekly: 'Weekly (Sun 02:00)',
+    scheduleMonthly: 'Monthly (1st 02:00)',
     scheduleHuman: {
       '30min': 'Every 30 min',
       '1h': 'Hourly',
       '6h': 'Every 6 hours',
       '12h': 'Every 12 hours',
-      '24h': 'Daily'
+      '24h': 'Daily',
+      weekly: 'Weekly (Sun 02:00)',
+      monthly: 'Monthly (1st 02:00)'
     },
     resourceType: {
       wikiSpace: 'Wiki Space',

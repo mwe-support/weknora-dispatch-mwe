@@ -7,6 +7,8 @@ const CRON_PRESET_MAP: Record<string, string> = {
   '0 0 */6 * * *': 'datasource.scheduleHuman.6h',
   '0 0 */12 * * *': 'datasource.scheduleHuman.12h',
   '0 0 2 * * *': 'datasource.scheduleHuman.24h',
+  '0 0 2 * * 0': 'datasource.scheduleHuman.weekly',
+  '0 0 2 1 * *': 'datasource.scheduleHuman.monthly',
 }
 
 /**
