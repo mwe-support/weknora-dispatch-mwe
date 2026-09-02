@@ -214,6 +214,54 @@ func TestFinalizeSubtask_DecrementClampedAtZero(t *testing.T) {
 	assert.Equal(t, 0, count, "pending_subtasks_count must be clamped at zero")
 }
 
+func TestFinalizeSubtask_LateHousekeepingCompletionPromotes(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	id := insertProcessingKnowledge(t, db)
+	_, err := repo.SetFinalizing(ctx, id, 2)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&types.Knowledge{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"parse_status":  types.ParseStatusFailed,
+		"error_message": "task stuck in processing > 2h10m0s, recovered by housekeeping",
+	}).Error)
+
+	_, promoted, err := repo.FinalizeSubtask(ctx, id)
+	require.NoError(t, err)
+	assert.False(t, promoted)
+	_, promoted, err = repo.FinalizeSubtask(ctx, id)
+	require.NoError(t, err)
+	assert.True(t, promoted,
+		"the last late subtask must heal a housekeeping-only failure")
+
+	status, pending := reloadKnowledgeRow(t, db, id)
+	assert.Equal(t, types.ParseStatusCompleted, status)
+	assert.Equal(t, 0, pending)
+	assert.Empty(t, reloadKnowledgeErrorMessage(t, db, id))
+}
+
+func TestFinalizeSubtask_RealFailureNeverPromotes(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	id := insertProcessingKnowledge(t, db)
+	_, err := repo.SetFinalizing(ctx, id, 1)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&types.Knowledge{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"parse_status":  types.ParseStatusFailed,
+		"error_message": "real parser failure",
+	}).Error)
+
+	_, promoted, err := repo.FinalizeSubtask(ctx, id)
+	require.NoError(t, err)
+	assert.False(t, promoted)
+	status, pending := reloadKnowledgeRow(t, db, id)
+	assert.Equal(t, types.ParseStatusFailed, status)
+	assert.Equal(t, 0, pending)
+}
+
 // TestSetFinalizingAndFinalizeSubtask_ClearStaleErrorMessage is the
 // regression test for stale error_message: a row that failed once keeps
 // error_message set, and both entering finalizing (a new attempt) and

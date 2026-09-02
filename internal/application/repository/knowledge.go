@@ -555,10 +555,11 @@ func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(
 // FinalizeSubtask atomically decrements pending_subtasks_count and, when
 // the counter reaches zero while parse_status is still 'finalizing',
 // flips the row to 'completed' in the same statement so concurrent
-// subtask completions can't race the promotion. Both this promotion and
-// SetFinalizing clear error_message: a row that re-enters processing or
-// finishes successfully must not keep displaying a failure from a
-// previous attempt.
+// subtask completions can't race the promotion. A late subtask may also
+// heal a row failed only by housekeeping: housekeeping preserves the durable
+// counter, so this is safe only when the last subtask drains it to zero.
+// Real parser failures remain terminal. Both successful paths clear
+// error_message.
 //
 // Returns (newCount, promoted, error). promoted is true iff this caller
 // was the one whose UPDATE flipped 'finalizing'→'completed'.
@@ -599,8 +600,11 @@ func (r *knowledgeRepository) FinalizeSubtask(
 	//    caller whose decrement actually brought the counter to zero matches,
 	//    and cancel/delete cannot be clobbered by a late promote.
 	promoteRes := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("id = ? AND parse_status = ? AND pending_subtasks_count = 0",
-			id, types.ParseStatusFinalizing).
+		Where(`id = ? AND pending_subtasks_count = 0 AND (
+			parse_status = ? OR
+			(parse_status = ? AND error_message LIKE ?)
+		)`, id, types.ParseStatusFinalizing, types.ParseStatusFailed,
+			"%"+types.HousekeepingRecoveryErrorSuffix).
 		Updates(map[string]interface{}{
 			"parse_status":  types.ParseStatusCompleted,
 			"error_message": "",

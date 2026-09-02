@@ -270,6 +270,29 @@ func TestHousekeeping_NoFalseKill_TasksStillQueued(t *testing.T) {
 		"finalizing row with tasks still queued must NOT be flipped to failed")
 }
 
+func TestHousekeeping_StuckFinalizingPreservesPendingCounter(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledge(t, db, "kid-late-subtasks", types.ParseStatusFinalizing, stale)
+	require.NoError(t, db.Exec(
+		`UPDATE knowledges SET pending_subtasks_count = ?, updated_at = ? WHERE id = ?`,
+		2, stale, "kid-late-subtasks",
+	).Error)
+
+	svc.runSweep(context.Background())
+
+	var status string
+	var pending int
+	require.NoError(t, db.Raw(
+		`SELECT parse_status, pending_subtasks_count FROM knowledges WHERE id = ?`,
+		"kid-late-subtasks",
+	).Row().Scan(&status, &pending))
+	assert.Equal(t, types.ParseStatusFailed, status)
+	assert.Equal(t, 2, pending,
+		"housekeeping must preserve the durable counter so late subtasks can drain it")
+}
+
 // TestHousekeeping_QueueProbeError_FailsSafe confirms the fail-safe
 // direction: when the queue probe errors we still recover the row rather
 // than leaving it stranded forever.

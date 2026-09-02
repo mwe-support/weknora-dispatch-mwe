@@ -166,9 +166,8 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 			Where("id IN ? AND parse_status IN ?", stuckIDs,
 				[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing}).
 			Updates(map[string]interface{}{
-				"parse_status":           types.ParseStatusFailed,
-				"error_message":          "task stuck in processing > " + threshold.String() + ", recovered by housekeeping",
-				"pending_subtasks_count": 0,
+				"parse_status":  types.ParseStatusFailed,
+				"error_message": "task stuck in processing > " + threshold.String() + types.HousekeepingRecoveryErrorSuffix,
 			})
 		if res.Error != nil {
 			logger.Warnf(ctx, "[Housekeeping] knowledge sweep update failed: %v", res.Error)

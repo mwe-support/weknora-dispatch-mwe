@@ -67,6 +67,10 @@ const (
 	// queued downstream tasks, but the knowledge row and any already-written
 	// chunks/index are kept so the user can re-trigger parsing via reparse.
 	ParseStatusCancelled = "cancelled"
+	// HousekeepingRecoveryErrorSuffix identifies failures created only by the
+	// stale-task safety sweep. Late successful subtasks may heal this state;
+	// real parser failures must remain terminal.
+	HousekeepingRecoveryErrorSuffix = ", recovered by housekeeping"
 )
 
 // Summary status constants for async summary generation
