@@ -24,6 +24,9 @@ deployment. It deliberately treats Docker health as only one signal.
 - Failure tables are unresolved queues, not time-window views: a document row
   leaves only when its current parse status is no longer failed; a data-source
   row leaves only after that source's latest sync completes successfully.
+- Dead letters remain as a permanent audit archive in PostgreSQL, while the
+  dashboard shows only the newest dead letter for each business object whose
+  current document or data-source state is still unresolved.
 - Document failures, latest data-source failures and dead letters use hidden
   server-side page variables with 50-row SQL limits. Each table has its own
   bottom pager with previous/next controls and an Enter-to-jump page input.
