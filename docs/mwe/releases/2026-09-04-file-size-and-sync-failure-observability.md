@@ -4,7 +4,7 @@
 
 - 上游：WeKnora v0.7.2；主仓库 `mwe-support/weknora-dispatch-mwe`，目标分支 `weknora-v0.7.2`。
 - Dashboard revision 9 已备份热加载到公司自有 marvel-kb (`192.168.18.25`, hostname `test`)。
-- 后端日志增强代码及测试完成，**尚未部署后端**；无 GitHub 推送。
+- 后端日志增强代码及测试完成，后续已随 `v0.7.2-file-compensation-20260904` 部署；本批提交/发布状态见 `2026-09-04-production-publish-batch.md`。下文观测数据为该Dashboard变更当时的验证快照。
 - 生产应用仍为 `marvel/weknora-app:v0.7.2-sheet-empty-placeholder-20260904`，启动时间 `2026-09-04T03:15:25.819858533Z`，最终核对 healthy。本次没有重启应用或 Grafana。
 - 未触发/重复入队/取消同步或重试，未修改游标、凭证、范围或暂停的恢复自动化。未修改其他任务拥有的 Sheet 空占位源码、测试、数据集、脚本或发布记录。
 
