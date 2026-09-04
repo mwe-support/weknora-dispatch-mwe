@@ -69,6 +69,7 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 	if ds == nil {
 		return nil, datasource.ErrDataSourceInvalid
 	}
+	ds.LastSyncCursor, ds.LastSyncResult, ds.LastSyncAt = nil, nil, nil
 
 	// Validate knowledge base exists
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, ds.KnowledgeBaseID)
@@ -585,13 +586,23 @@ func (s *DataSourceService) GetSyncLog(ctx context.Context, syncLogID string) (*
 }
 
 // ProcessSync handles the actual sync operation (called by asynq task)
-func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) error {
+func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) (retErr error) {
+	defer func() {
+		if errors.Is(retErr, datasource.ErrInvalidCredentials) || errors.Is(retErr, datasource.ErrInvalidConfig) {
+			retErr = fmt.Errorf("%w: %w", retErr, asynq.SkipRetry)
+		}
+	}()
 	var payload types.DataSourceSyncPayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		logger.Errorf(ctx, "failed to unmarshal sync payload: %v", err)
 		return err
 	}
 	ctx = payload.Initiator.Apply(ctx)
+	release, lockErr := acquireDataSourceSync(ctx, payload.DataSourceID)
+	if lockErr != nil {
+		return lockErr
+	}
+	defer release()
 	taskID, _ := asynq.GetTaskID(ctx)
 	ctx = withKBActivityTask(ctx, taskID, payload.Trigger)
 
@@ -614,6 +625,17 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	syncLog, err := s.syncLogRepo.FindByID(ctx, payload.SyncLogID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get sync log: %v", err)
+		return nil
+	}
+	if ds.TenantID != payload.TenantID || syncLog.TenantID != ds.TenantID || syncLog.DataSourceID != ds.ID {
+		return fmt.Errorf("sync tenant/source mismatch: %w", asynq.SkipRetry)
+	}
+	if payload.FileRetryOnly && (ds.Status == types.DataSourceStatusPaused || syncLog.Status == types.SyncLogStatusSuccess || syncLog.Status == types.SyncLogStatusCanceled) {
+		if ds.Status == types.DataSourceStatusPaused {
+			syncLog.Status = types.SyncLogStatusCanceled
+			syncLog.FinishedAt = timePtr(time.Now().UTC())
+			_ = s.syncLogRepo.UpdateResult(ctx, syncLog)
+		}
 		return nil
 	}
 
@@ -834,6 +856,15 @@ func fetchFailureSyncError(item *types.FetchedItem, rawMsg string) types.SyncIte
 }
 
 func syncItemIdentity(item *types.FetchedItem) types.SyncItemError {
+	category := item.Metadata["error_category"]
+	if retryCategory := item.Metadata["retry_category"]; retryCategory != "" {
+		category = retryCategory
+	}
+	retryAttempt, _ := strconv.Atoi(item.Metadata["retry_attempt"])
+	var retryAt *time.Time
+	if at, err := time.Parse(time.RFC3339Nano, item.Metadata["next_retry_at"]); err == nil {
+		retryAt = &at
+	}
 	parseBytes := func(key string) *int64 {
 		v, err := strconv.ParseInt(item.Metadata[key], 10, 64)
 		if err != nil || v < 0 {
@@ -842,11 +873,12 @@ func syncItemIdentity(item *types.FetchedItem) types.SyncItemError {
 		return &v
 	}
 	return types.SyncItemError{
+		RetryState: item.Metadata["retry_state"], RetryAttempt: retryAttempt, NextRetryAt: retryAt,
 		Title: item.Title, ExternalID: item.ExternalID,
 		FileID: item.Metadata["file_id"], SourceResourceID: item.SourceResourceID,
 		SpaceID: item.Metadata["space_id"],
 		Source:  item.Metadata["channel"], Stage: item.Metadata["error_stage"],
-		Category: item.Metadata["error_category"], OccurredAt: timePtr(time.Now()),
+		Category: category, OccurredAt: timePtr(time.Now()),
 		LimitBytes: parseBytes("limit_bytes"), ActualBytes: parseBytes("actual_bytes"),
 		ObservedAtLeastBytes: parseBytes("observed_at_least_bytes"),
 	}
@@ -975,6 +1007,7 @@ func (h *streamSyncHandler) Checkpoint(ctx context.Context, cursor *types.SyncCu
 	h.syncLog.ItemsDeleted = h.result.Deleted
 	h.syncLog.ItemsSkipped = h.result.Skipped
 	h.syncLog.ItemsFailed = h.result.Failed
+	h.syncLog.Result, _ = h.result.ToJSON()
 	if err := h.svc.syncLogRepo.UpdateResult(ctx, h.syncLog); err != nil {
 		logger.Warnf(ctx, "failed to persist sync log progress at checkpoint: %v", err)
 	}
@@ -1003,7 +1036,7 @@ func (s *DataSourceService) processSyncStreaming(
 
 	autoTagIDs := s.resolveAutoTagIDs(ctx, ds)
 
-	forceFull := payload.ForceFull || ds.SyncMode == types.SyncModeFull
+	forceFull := !payload.FileRetryOnly && (payload.ForceFull || ds.SyncMode == types.SyncModeFull)
 	attempt, _ := asynq.GetRetryCount(ctx)
 	startCursor, err := streamStartCursor(ds, forceFull, attempt)
 	if err != nil {
@@ -1013,10 +1046,27 @@ func (s *DataSourceService) processSyncStreaming(
 		return err
 	}
 
-	result := &types.SyncResult{}
+	result := &types.SyncResult{RetryRound: payload.FileRetryRound, RetryOf: payload.RetryOf}
+	if payload.FileRetryOnly {
+		result.RetryState = "running"
+		syncLog.Result, _ = result.ToJSON()
+		if err := s.syncLogRepo.UpdateResult(ctx, syncLog); err != nil {
+			return err
+		}
+	}
 	handler := &streamSyncHandler{svc: s, ds: ds, tagIDs: autoTagIDs, result: result, syncLog: syncLog}
 
-	nextCursor, fetchErr := sc.FetchStream(ctx, config, startCursor, handler)
+	var nextCursor *types.SyncCursor
+	var fetchErr error
+	if payload.FileRetryOnly {
+		fc, ok := sc.(datasource.FileRetryConnector)
+		if !ok {
+			return fmt.Errorf("file retry unsupported: %w", asynq.SkipRetry)
+		}
+		nextCursor, fetchErr = fc.FetchRetryStream(ctx, config, startCursor, handler)
+	} else {
+		nextCursor, fetchErr = sc.FetchStream(ctx, config, startCursor, handler)
+	}
 	if fetchErr != nil {
 		// Progress so far is already checkpointed onto ds.LastSyncCursor; leave
 		// it in place so the Asynq retry resumes from there. Persist counts.
@@ -1027,10 +1077,28 @@ func (s *DataSourceService) processSyncStreaming(
 		return fetchErr
 	}
 
+	if fc, ok := sc.(datasource.FileRetryConnector); ok {
+		if nextCursor != nil {
+			blob, err := nextCursor.ToJSON()
+			if err != nil {
+				return err
+			}
+			ds.LastSyncCursor = blob
+			if err = s.dsRepo.UpdateSyncState(ctx, ds); err != nil {
+				return err
+			}
+		}
+		if err := s.scheduleFileRetry(ctx, fc, ds, syncLog, payload, nextCursor, result); err != nil {
+			return err
+		}
+	}
 	resultJSON, _ := result.ToJSON()
 	if err := allFetchedItemsFailedError(result); err != nil {
 		logger.Errorf(ctx, "streaming sync failed while processing fetched items: %v", err)
 		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused)
+		if _, ok := sc.(datasource.FileRetryConnector); ok {
+			return nil
+		}
 		return err
 	}
 

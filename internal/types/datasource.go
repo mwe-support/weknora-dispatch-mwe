@@ -414,6 +414,10 @@ type SyncCursor struct {
 
 // SyncResult summarizes the outcome of a sync operation
 type SyncResult struct {
+	RetryState  string     `json:"retry_state,omitempty"`
+	RetryRound  int        `json:"retry_round,omitempty"`
+	RetryOf     string     `json:"retry_of,omitempty"`
+	NextRetryAt *time.Time `json:"next_retry_at,omitempty"`
 	// Total items processed
 	Total int `json:"total"`
 
@@ -444,6 +448,9 @@ type SyncResult struct {
 // language, plus a Message fallback for clients without the key. The raw API
 // status/body/log_id is never stored here — that stays in the server logs.
 type SyncItemError struct {
+	RetryState   string     `json:"retry_state,omitempty"`
+	RetryAttempt int        `json:"retry_attempt,omitempty"`
+	NextRetryAt  *time.Time `json:"next_retry_at,omitempty"`
 	// Optional correlation fields keep old title/message-only logs readable.
 	ExternalID           string     `json:"external_id,omitempty"`
 	FileID               string     `json:"file_id,omitempty"`
@@ -500,6 +507,9 @@ func (e *SyncItemError) UnmarshalJSON(b []byte) error {
 
 // DataSourceSyncPayload represents the asynq task payload for data source sync
 type DataSourceSyncPayload struct {
+	FileRetryOnly  bool   `json:"file_retry_only,omitempty"`
+	FileRetryRound int    `json:"file_retry_round,omitempty"`
+	RetryOf        string `json:"retry_of,omitempty"`
 	TracingContext
 	Initiator TaskInitiator `json:"initiator,omitempty"`
 	// Trigger distinguishes a user-requested run from a scheduler-created run.

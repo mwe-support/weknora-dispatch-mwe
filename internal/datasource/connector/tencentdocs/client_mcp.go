@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -127,7 +128,7 @@ func buildMCPTransport(
 	transportClient, err := factory(&internalmcp.ClientConfig{
 		HTTPClient: &http.Client{
 			Timeout:   config.Timeout,
-			Transport: preserveForbiddenTransport{base: http.DefaultTransport},
+			Transport: withCredentialBudget(config.Token, preserveForbiddenTransport{base: http.DefaultTransport}),
 		},
 		Service: &types.MCPService{
 			ID:            "tencent-docs-datasource",
@@ -480,7 +481,8 @@ func (c *TencentDocsMCPClient) callToolJSON(
 		if err == nil || attempt >= maxMCPTransientRetries || !isRetryableTencentDocsMCPError(tool, err) {
 			return err
 		}
-		if err := c.retrySleep(ctx, initialMCPRetryDelay<<attempt); err != nil {
+		delay := initialMCPRetryDelay << attempt
+		if err := c.retrySleep(ctx, delay+time.Duration(rand.Int64N(int64(delay/4)))); err != nil {
 			return err
 		}
 		if err := c.ensureReady(ctx); err != nil {
@@ -557,7 +559,7 @@ func isRetryableTencentDocsMCPError(tool string, err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
-	if strings.Contains(message, "status 429") {
+	if isRateLimited(message) {
 		return true
 	}
 	if tool == toolExportFile {

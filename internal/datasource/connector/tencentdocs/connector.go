@@ -419,8 +419,10 @@ func (c *Connector) FetchAll(
 }
 
 type tencentDocsCursor struct {
-	DocumentTimes        map[string]uint64 `json:"document_times"`
-	ResourceFingerprints map[string]string `json:"resource_fingerprints,omitempty"`
+	DocumentTimes        map[string]uint64    `json:"document_times"`
+	ResourceFingerprints map[string]string    `json:"resource_fingerprints,omitempty"`
+	FileRetries          map[string]fileRetry `json:"file_retries,omitempty"`
+	RetryScope           string               `json:"retry_scope,omitempty"`
 }
 
 func (c *Connector) FetchIncremental(
@@ -522,6 +524,10 @@ func (c *Connector) fetch(
 		visitedNodes:      make(map[string]bool),
 		next:              copyTencentDocsCursor(previous),
 	}
+	if state.next.RetryScope != "" && state.next.RetryScope != retryScope(config) {
+		state.next.FileRetries = map[string]fileRetry{}
+	}
+	state.next.RetryScope = retryScope(config)
 	for _, selectedID := range resourceIDs {
 		ref, err := decodeResourceID(selectedID)
 		if err != nil {
@@ -623,8 +629,13 @@ func copyTencentDocsCursor(previous *tencentDocsCursor) *tencentDocsCursor {
 	next := &tencentDocsCursor{
 		DocumentTimes:        make(map[string]uint64),
 		ResourceFingerprints: make(map[string]string),
+		FileRetries:          make(map[string]fileRetry),
 	}
 	if previous != nil {
+		next.RetryScope = previous.RetryScope
+		for id, retry := range previous.FileRetries {
+			next.FileRetries[id] = retry
+		}
 		for externalID, modifiedAt := range previous.DocumentTimes {
 			next.DocumentTimes[externalID] = modifiedAt
 		}
@@ -700,6 +711,7 @@ func (s *fetchState) walkHomeNodes(ctx context.Context, nodes []HomeNode, source
 }
 
 func (s *fetchState) emit(ctx context.Context, item types.FetchedItem) error {
+	s.trackFileRetry(&item)
 	if s.handler == nil {
 		s.items = append(s.items, item)
 		return nil
@@ -1001,10 +1013,36 @@ func (s *fetchState) fetchResource(
 		return s.checkpoint(ctx)
 	}
 
-	task, err := s.client.StartExport(ctx, node.ID)
+	var task *ExportTask
+	if pending := s.next.FileRetries[externalID]; pending.ExportTaskID != "" {
+		task = &ExportTask{ID: pending.ExportTaskID}
+	} else {
+		if pending.ExportStartUncertain {
+			return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID, withFileStage("export_start", errors.New("previous export start outcome unknown; manual review required")))
+		}
+		// Persist intent before a non-idempotent call. If the worker dies before
+		// saving its returned task ID, never blindly issue a second export.
+		pending.Node, pending.SpaceID, pending.SourceResourceID = node, spaceID, sourceResourceID
+		pending.ExportStartUncertain = true
+		s.next.FileRetries[externalID] = pending
+		if err = s.checkpoint(ctx); err != nil {
+			return err
+		}
+		task, err = s.client.StartExport(ctx, node.ID)
+	}
 	if err != nil {
 		return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID,
-			withFileStage("export", fmt.Errorf("start Tencent Docs resource export: %w", err)))
+			withFileStage("export_start", fmt.Errorf("start Tencent Docs resource export: %w", err)))
+	}
+	if task == nil || task.ID == "" {
+		return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID, withFileStage("export_start", errors.New("empty export task ID")))
+	}
+	pending := s.next.FileRetries[externalID]
+	pending.Node, pending.SpaceID, pending.SourceResourceID, pending.ExportTaskID = node, spaceID, sourceResourceID, task.ID
+	pending.ExportStartUncertain = false
+	s.next.FileRetries[externalID] = pending
+	if err = s.checkpoint(ctx); err != nil {
+		return err
 	}
 	exportCtx, cancel := context.WithTimeout(ctx, exportTimeout)
 	defer cancel()
@@ -1020,6 +1058,7 @@ func (s *fetchState) fetchResource(
 				s.next.DocumentTimes[externalID] = info.ModifiedAt
 				if s.incremental && s.previous != nil &&
 					s.previous.ResourceFingerprints[externalID] == fingerprint {
+					delete(s.next.FileRetries, externalID)
 					return s.checkpoint(ctx)
 				}
 				return s.emit(ctx, skippedFetchedItem(
@@ -1028,7 +1067,7 @@ func (s *fetchState) fetchResource(
 				))
 			}
 			return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID,
-				withFileStage("export", fmt.Errorf("poll Tencent Docs resource export: %w", err)))
+				withExportTask(task.ID, withFileStage("export", fmt.Errorf("poll Tencent Docs resource export: %w", err))))
 		}
 		if status.Error != "" {
 			return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID,
@@ -1040,7 +1079,7 @@ func (s *fetchState) fetchResource(
 		select {
 		case <-exportCtx.Done():
 			return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID,
-				withFileStage("export", fmt.Errorf("Tencent Docs resource export timed out: %w", exportCtx.Err())))
+				withExportTask(task.ID, withFileStage("export", fmt.Errorf("Tencent Docs resource export timed out: %w", exportCtx.Err()))))
 		case <-time.After(exportPollInterval):
 		}
 	}
@@ -1060,6 +1099,7 @@ func (s *fetchState) fetchResource(
 		s.next.DocumentTimes[externalID] = info.ModifiedAt
 		if s.incremental && s.previous != nil &&
 			s.previous.ResourceFingerprints[externalID] == fingerprint {
+			delete(s.next.FileRetries, externalID)
 			return s.checkpoint(ctx)
 		}
 		return s.emit(ctx, skippedFetchedItem(
@@ -1069,13 +1109,14 @@ func (s *fetchState) fetchResource(
 	}
 	data, err := s.client.DownloadExport(ctx, status.FileURL)
 	if err != nil {
-		return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID, withFileStage("download", err))
+		return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID, withExportTask(task.ID, withFileStage("download", err)))
 	}
 	fingerprint := resourceFingerprint(data, fileName, title)
 	s.next.ResourceFingerprints[externalID] = fingerprint
 	if s.incremental && s.previous != nil && info.ModifiedAt == 0 &&
 		s.previous.ResourceFingerprints[externalID] == fingerprint {
 		s.next.DocumentTimes[externalID] = info.ModifiedAt
+		delete(s.next.FileRetries, externalID)
 		return s.checkpoint(ctx)
 	}
 	s.next.DocumentTimes[externalID] = info.ModifiedAt
@@ -1175,6 +1216,8 @@ func failedFetchedItem(
 		"error":     err.Error(),
 	}
 	addFileFailureMetadata(metadata, err)
+	metadata["document_type"] = node.DocumentType
+	metadata["retry_node_url"] = node.URL
 	if spaceID == "" {
 		metadata["location"] = "personal_home"
 	}

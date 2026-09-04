@@ -51,6 +51,25 @@ func TestDataSourceRepositoryUpdateSyncStateClearsErrorMessage(t *testing.T) {
 	require.NotNil(t, stored.LastSyncAt)
 }
 
+func TestDataSourceSettingsCannotOverwriteRetryCursor(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewDataSourceRepository(db)
+	ctx := context.Background()
+	ds := &types.DataSource{ID: "ds-cursor", TenantID: 1, KnowledgeBaseID: "kb", Name: "Before", Type: types.ConnectorTypeTencentDocs, LastSyncCursor: types.JSON(`{"server":"original"}`)}
+	require.NoError(t, repo.Create(ctx, ds))
+	// Simulate a worker advancing state after a settings form was loaded.
+	worker := *ds
+	worker.LastSyncCursor = types.JSON(`{"server":"newer"}`)
+	require.NoError(t, repo.UpdateSyncState(ctx, &worker))
+	ds.Name = "After"
+	ds.LastSyncCursor = types.JSON(`{"file_retries":{"injected":{}}}`)
+	require.NoError(t, repo.Update(ctx, ds))
+	stored, err := repo.FindByID(ctx, ds.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "After", stored.Name)
+	assert.Equal(t, `{"server":"newer"}`, stored.LastSyncCursor.ToString())
+}
+
 func TestDataSourceRepositoryDeleteSoftDeletesOnSQLite(t *testing.T) {
 	db := setupDataSourceRepoTestDB(t)
 	repo := NewDataSourceRepository(db)

@@ -75,6 +75,9 @@ func (r *DataSourceRepository) Update(ctx context.Context, ds *types.DataSource)
 	}
 	if err := r.db.WithContext(ctx).
 		Model(ds).
+		// Execution cursors (including file retry targets) are server-managed.
+		// Settings/credential edits must neither inject nor overwrite stale state.
+		Omit("last_sync_cursor", "last_sync_result", "last_sync_at").
 		Updates(ds).Error; err != nil {
 		return err
 	}

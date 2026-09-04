@@ -58,6 +58,13 @@ func addFileFailureMetadata(metadata map[string]string, err error) {
 	if errors.As(err, &operation) {
 		stage = operation.stage
 	}
+	category, retryable := fileRetryCategory(err, stage)
+	metadata["retryable"] = strconv.FormatBool(retryable)
+	metadata["retry_category"] = category
+	var task *exportTaskError
+	if errors.As(err, &task) {
+		metadata["retry_export_task_id"] = task.taskID
+	}
 	metadata["error_stage"] = stage
 	metadata["error_category"] = "SOURCE_FETCH_FAILED"
 	if stage == "export" {

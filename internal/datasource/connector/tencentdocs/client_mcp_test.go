@@ -625,8 +625,13 @@ func TestClientRetriesTransientHTTP429(t *testing.T) {
 		t.Fatalf("calls/spaces=%d/%+v, want 3/1", calls, spaces)
 	}
 	wantDelays := []time.Duration{2 * time.Second, 4 * time.Second}
-	if !reflect.DeepEqual(delays, wantDelays) {
-		t.Fatalf("retry delays=%v, want %v", delays, wantDelays)
+	if len(delays) != len(wantDelays) {
+		t.Fatalf("retry delays=%v", delays)
+	}
+	for i, want := range wantDelays {
+		if delays[i] < want || delays[i] >= want+want/4 {
+			t.Fatalf("retry delay %v outside jitter window", delays[i])
+		}
 	}
 }
 

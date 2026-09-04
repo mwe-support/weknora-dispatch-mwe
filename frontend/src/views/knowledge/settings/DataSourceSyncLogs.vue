@@ -152,7 +152,14 @@ function formatSyncError(e: SyncItemError): string {
   } else {
     reason = e.message || ''
   }
-  return e.title ? (reason ? `${e.title} — ${reason}` : e.title) : reason
+  const text = e.title ? (reason ? `${e.title} — ${reason}` : e.title) : reason
+  return e.retry_state ? `${text} · ${retryInfo(e.retry_state, e.retry_attempt, e.next_retry_at)}` : text
+}
+
+function retryInfo(state: string, attempt = 0, nextAt?: string): string {
+  const key = `datasource.fileRetry.${state}`
+  const label = t(key)
+  return `${label === key ? state : label} · ${t('datasource.fileRetry.attempt', { n: attempt })}${nextAt ? ` · ${t('datasource.fileRetry.nextAt')}: ${formatTime(nextAt)}` : ''}`
 }
 
 // Group logs by date
@@ -265,6 +272,10 @@ const groupedLogs = computed(() => {
 
               <!-- Expanded -->
               <div v-if="expandedId === log.id" class="tl-detail" @click.stop>
+                <div v-if="log.result?.retry_state" class="detail-row" role="status">
+                  <span class="detail-label">{{ t('datasource.fileRetry.label') }}</span>
+                  <span>{{ retryInfo(log.result.retry_state, log.result.retry_round, log.result.next_retry_at) }}</span>
+                </div>
                 <div class="detail-row">
                   <span class="detail-label">{{ t('datasource.logDetail.startTime') }}</span>
                   <span>{{ formatTime(log.started_at) }}</span>

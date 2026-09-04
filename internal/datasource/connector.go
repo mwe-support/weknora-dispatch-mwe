@@ -2,6 +2,7 @@ package datasource
 
 import (
 	"context"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -91,6 +92,14 @@ type StreamingConnector interface {
 		ctx context.Context, config *types.DataSourceConfig,
 		cursor *types.SyncCursor, h StreamHandler,
 	) (*types.SyncCursor, error)
+}
+
+// FileRetryConnector resumes only durable failed-file entries in its cursor.
+// It must never use a retry pass as a complete traversal for deletion detection.
+type FileRetryConnector interface {
+	StreamingConnector
+	FetchRetryStream(context.Context, *types.DataSourceConfig, *types.SyncCursor, StreamHandler) (*types.SyncCursor, error)
+	NextFileRetry(*types.SyncCursor) (*time.Time, error)
 }
 
 // ConnectorRegistry manages the registration and lookup of available connectors

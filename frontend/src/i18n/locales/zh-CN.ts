@@ -528,6 +528,12 @@ export default {
     }
   },
   datasource: {
+    fileRetry: {
+      label: '本次重试安排', scheduled: '已安排补偿重试', running: '补偿处理中',
+      enqueue_failed: '补偿入队失败，计划已保留',
+      completed: '补偿完成', needs_manual: '需人工处理', exhausted: '重试次数已用尽',
+      paused: '已暂停', attempt: '补偿轮次 {n}', nextAt: '下次执行时间',
+    },
     title: '数据源管理',
     description: '配置外部数据源，自动同步内容到知识库',
     add: '添加数据源',

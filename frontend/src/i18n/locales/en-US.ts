@@ -5152,6 +5152,12 @@ export default {
     daysAgo: '{days} days ago'
   },
   datasource: {
+    fileRetry: {
+      label: 'Retry plan for this attempt', scheduled: 'Compensation scheduled', running: 'Compensation running',
+      enqueue_failed: 'Enqueue failed; retry plan retained',
+      completed: 'Compensation completed', needs_manual: 'Manual action required', exhausted: 'Retry limit reached',
+      paused: 'Paused', attempt: 'Compensation round {n}', nextAt: 'Next execution',
+    },
     title: 'Data Sources',
     description: 'Configure external data sources to sync content into this knowledge base',
     add: 'Add Data Source',

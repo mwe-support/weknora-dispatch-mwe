@@ -978,8 +978,8 @@ func TestConnectorFetchStreamExportsUnclassifiedFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchStream() error: %v", err)
 	}
-	if len(handler.items) != 1 || len(handler.checkpoints) != 1 {
-		t.Fatalf("items=%d checkpoints=%d, want 1/1", len(handler.items), len(handler.checkpoints))
+	if len(handler.items) != 1 || len(handler.checkpoints) != 3 {
+		t.Fatalf("items=%d checkpoints=%d, want 1/3 (intent, task ID, result)", len(handler.items), len(handler.checkpoints))
 	}
 	if handler.items[0].FileName != "org-chart.png" || string(handler.items[0].Content) != "png-bytes" {
 		t.Fatalf("stream item = %+v", handler.items[0])
@@ -1005,7 +1005,7 @@ func TestConnectorFetchStreamCheckpointsAndSkipsUnchangedUnsupportedResource(t *
 	firstCursor, err := connector.FetchStream(
 		context.Background(), testDataSourceConfig(spaceID), nil, firstHandler,
 	)
-	if err != nil || len(firstHandler.items) != 1 || len(firstHandler.checkpoints) != 1 {
+	if err != nil || len(firstHandler.items) != 1 || len(firstHandler.checkpoints) != 3 {
 		t.Fatalf("first FetchStream items=%+v checkpoints=%d err=%v", firstHandler.items, len(firstHandler.checkpoints), err)
 	}
 	if firstHandler.items[0].Metadata["skip_reason"] != "unsupported_file_type" {
@@ -1019,8 +1019,12 @@ func TestConnectorFetchStreamCheckpointsAndSkipsUnchangedUnsupportedResource(t *
 	if err != nil {
 		t.Fatalf("second FetchStream() error: %v", err)
 	}
-	if len(secondHandler.items) != 0 || len(secondHandler.checkpoints) != 1 {
-		t.Fatalf("second items=%d checkpoints=%d, want 0/1", len(secondHandler.items), len(secondHandler.checkpoints))
+	if len(secondHandler.items) != 0 || len(secondHandler.checkpoints) != 3 {
+		t.Fatalf("second items=%d checkpoints=%d, want 0/3", len(secondHandler.items), len(secondHandler.checkpoints))
+	}
+	state, _ := decodeTencentDocsCursor(secondHandler.checkpoints[2])
+	if len(state.FileRetries) != 0 {
+		t.Fatal("unchanged skip retained stale export task")
 	}
 	if client.downloads != 0 {
 		t.Fatalf("DownloadExport() calls = %d, unsupported resource must not be downloaded", client.downloads)
