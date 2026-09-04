@@ -21,9 +21,26 @@ deployment. It deliberately treats Docker health as only one signal.
 - Grafana tables for failed documents, data-source sync errors and dead letters.
   The document table resolves workspace/account, data source, space ID,
   document, stage and error from existing WeKnora records.
-- Failure tables are unresolved queues, not time-window views: a document row
-  leaves only when its current parse status is no longer failed; a data-source
-  row leaves only after that source's latest sync completes successfully.
+- The document failure table also expands Tencent Docs per-file errors from
+  `sync_logs.result.errors`, including fetch/export/download failures that have
+  no knowledge row. It excludes deleted sources/KBs and has no time-window filter.
+- A stable-ID source failure resolves only after a newer source read/re-ingestion
+  has a current completed knowledge version. Old completed copies and unrelated
+  incremental success do not resolve it. Legacy title-only errors remain marked
+  as recovery-unverified; titles are not used to invent IDs or prove recovery.
+- The data-source summary shows each active source's latest failed/partial sync;
+  per-file unresolved evidence remains in the document view even if a later
+  incremental run succeeds without fetching that file.
+- The document table labels the destination explicitly as WeKnora workspace/KB.
+  Import size uses the current knowledge file_size or that failure's recorded
+  export size, formatted as KB/MB/GB (1024-based); unknown sizes say 未记录.
+  Source-space identifiers, raw byte evidence and technical IDs live in the
+  详情 cell inspector rather than separate main-table columns.
+  腾讯文档路径 reads only recorded source_path metadata; existing records did
+  not capture this field and show 未记录 until reliable source paths are stored.
+- Shared SQL definitions in `grafana/queries/` generate both detail and page-count
+  queries via `scripts/render-observability-failure-queries.py` in the repository.
+  Error evidence is limited to retained sync logs and their 100-item error sample.
 - Dead letters remain as a permanent audit archive in PostgreSQL, while the
   dashboard shows only the newest dead letter for each business object whose
   current document or data-source state is still unresolved.
