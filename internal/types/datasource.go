@@ -444,6 +444,18 @@ type SyncResult struct {
 // language, plus a Message fallback for clients without the key. The raw API
 // status/body/log_id is never stored here — that stays in the server logs.
 type SyncItemError struct {
+	// Optional correlation fields keep old title/message-only logs readable.
+	ExternalID           string     `json:"external_id,omitempty"`
+	FileID               string     `json:"file_id,omitempty"`
+	SourceResourceID     string     `json:"source_resource_id,omitempty"`
+	SpaceID              string     `json:"space_id,omitempty"`
+	Source               string     `json:"source,omitempty"`
+	Stage                string     `json:"stage,omitempty"`
+	Category             string     `json:"category,omitempty"`
+	OccurredAt           *time.Time `json:"occurred_at,omitempty"`
+	LimitBytes           *int64     `json:"limit_bytes,omitempty"`
+	ActualBytes          *int64     `json:"actual_bytes,omitempty"`
+	ObservedAtLeastBytes *int64     `json:"observed_at_least_bytes,omitempty"`
 	// Title is the document title (user content, not translated).
 	Title string `json:"title,omitempty"`
 	// Code is a stable key the frontend maps to a localized string, e.g.

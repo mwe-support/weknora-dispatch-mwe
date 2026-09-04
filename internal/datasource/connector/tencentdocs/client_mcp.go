@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -415,17 +414,7 @@ func (c *TencentDocsMCPClient) DownloadExport(ctx context.Context, fileURL strin
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, fmt.Errorf("download Tencent Docs export: HTTP status %d", response.StatusCode)
 	}
-	if response.ContentLength > maxExportBytes {
-		return nil, fmt.Errorf("download Tencent Docs export exceeds %d bytes", maxExportBytes)
-	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, maxExportBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read Tencent Docs export: %w", err)
-	}
-	if len(data) > maxExportBytes {
-		return nil, fmt.Errorf("download Tencent Docs export exceeds %d bytes", maxExportBytes)
-	}
-	return data, nil
+	return readExportBody(response.Body, response.ContentLength, maxExportBytes)
 }
 
 func validateExportURL(rawURL string) error {

@@ -10,6 +10,7 @@ import (
 	"net/textproto"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -819,7 +820,7 @@ func recordSyncError(result *types.SyncResult, item types.SyncItemError) {
 // without codes keep the raw text as a Message fallback. Best practice per
 // Airbyte/Fivetran/Onyx: humanised, actionable, localised UI; raw detail in logs.
 func fetchFailureSyncError(item *types.FetchedItem, rawMsg string) types.SyncItemError {
-	e := types.SyncItemError{Title: item.Title}
+	e := syncItemIdentity(item)
 	if code := item.Metadata["error_reason_code"]; code != "" {
 		e.Code = code
 		if v := item.Metadata["error_reason_code_value"]; v != "" {
@@ -830,6 +831,25 @@ func fetchFailureSyncError(item *types.FetchedItem, rawMsg string) types.SyncIte
 		e.Message = rawMsg
 	}
 	return e
+}
+
+func syncItemIdentity(item *types.FetchedItem) types.SyncItemError {
+	parseBytes := func(key string) *int64 {
+		v, err := strconv.ParseInt(item.Metadata[key], 10, 64)
+		if err != nil || v < 0 {
+			return nil
+		}
+		return &v
+	}
+	return types.SyncItemError{
+		Title: item.Title, ExternalID: item.ExternalID,
+		FileID: item.Metadata["file_id"], SourceResourceID: item.SourceResourceID,
+		SpaceID: item.Metadata["space_id"],
+		Source:  item.Metadata["channel"], Stage: item.Metadata["error_stage"],
+		Category: item.Metadata["error_category"], OccurredAt: timePtr(time.Now()),
+		LimitBytes: parseBytes("limit_bytes"), ActualBytes: parseBytes("actual_bytes"),
+		ObservedAtLeastBytes: parseBytes("observed_at_least_bytes"),
+	}
 }
 
 // applyFetchedItem writes a single fetched item into the knowledge base and
@@ -884,11 +904,10 @@ func (s *DataSourceService) applyFetchedItem(
 		default:
 			logger.Warnf(ctx, "failed to ingest item %q (external_id=%s): %v", item.Title, item.ExternalID, err)
 			result.Failed++
-			recordSyncError(result, types.SyncItemError{
-				Title:   item.Title,
-				Code:    "ingest_failed",
-				Message: "Ingest failed; see server logs",
-			})
+			failure := syncItemIdentity(item)
+			failure.Code, failure.Category, failure.Stage = "ingest_failed", "INGEST_FAILED", "ingest"
+			failure.Message = "Ingest failed; see server logs"
+			recordSyncError(result, failure)
 		}
 	} else if isUpdate {
 		result.Updated++
@@ -1181,6 +1200,11 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 	}
 	for k, v := range item.Metadata {
 		metadata[k] = v
+	}
+	// Only a real fetched body is evidence of a new source read. Cursor-only
+	// incremental success and reparsing an old version never set this marker.
+	if ds.Type == types.ConnectorTypeTencentDocs && len(item.Content) > 0 {
+		metadata["source_fetch_completed_at"] = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 
 	// Check if a knowledge item with this external_id already exists → delete it first (update)

@@ -872,7 +872,7 @@ func (s *fetchState) fetchNode(
 		}
 		return s.emit(ctx, failedFetchedItem(
 			externalID, node.Title, spaceID, node, sourceResourceID,
-			fmt.Errorf("get Tencent Docs file info: %w", err),
+			withFileStage("fetch_metadata", fmt.Errorf("get Tencent Docs file info: %w", err)),
 		))
 	}
 	resolved := nodeFromFileInfo(info)
@@ -911,7 +911,7 @@ func (s *fetchState) fetchDocument(
 	if err != nil {
 		return s.emit(ctx, failedFetchedItem(
 			externalID, node.Title, spaceID, node, sourceResourceID,
-			fmt.Errorf("get Tencent Docs file info: %w", err),
+			withFileStage("fetch_metadata", fmt.Errorf("get Tencent Docs file info: %w", err)),
 		))
 	}
 	if s.incremental && s.previous != nil && s.previous.DocumentTimes[externalID] == info.ModifiedAt && info.ModifiedAt != 0 {
@@ -932,7 +932,7 @@ func (s *fetchState) fetchDocument(
 		}
 		return s.emit(ctx, failedFetchedItem(
 			externalID, title, spaceID, node, sourceResourceID,
-			fmt.Errorf("get Tencent Docs content: %w", err),
+			withFileStage("fetch_content", fmt.Errorf("get Tencent Docs content: %w", err)),
 		))
 	}
 	s.next.DocumentTimes[externalID] = info.ModifiedAt
@@ -993,7 +993,7 @@ func (s *fetchState) fetchResource(
 	if err != nil {
 		return s.emit(ctx, failedFetchedItem(
 			externalID, node.Title, spaceID, node, sourceResourceID,
-			fmt.Errorf("get Tencent Docs resource info: %w", err),
+			withFileStage("fetch_metadata", fmt.Errorf("get Tencent Docs resource info: %w", err)),
 		))
 	}
 	if s.incremental && s.previous != nil && s.previous.DocumentTimes[externalID] == info.ModifiedAt && info.ModifiedAt != 0 {
@@ -1004,7 +1004,7 @@ func (s *fetchState) fetchResource(
 	task, err := s.client.StartExport(ctx, node.ID)
 	if err != nil {
 		return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID,
-			fmt.Errorf("start Tencent Docs resource export: %w", err))
+			withFileStage("export", fmt.Errorf("start Tencent Docs resource export: %w", err)))
 	}
 	exportCtx, cancel := context.WithTimeout(ctx, exportTimeout)
 	defer cancel()
@@ -1028,11 +1028,11 @@ func (s *fetchState) fetchResource(
 				))
 			}
 			return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID,
-				fmt.Errorf("poll Tencent Docs resource export: %w", err))
+				withFileStage("export", fmt.Errorf("poll Tencent Docs resource export: %w", err)))
 		}
 		if status.Error != "" {
 			return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID,
-				fmt.Errorf("Tencent Docs resource export failed: %s", status.Error))
+				withFileStage("export", fmt.Errorf("Tencent Docs resource export failed: %s", status.Error)))
 		}
 		if status.Progress >= 100 {
 			break
@@ -1040,13 +1040,13 @@ func (s *fetchState) fetchResource(
 		select {
 		case <-exportCtx.Done():
 			return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID,
-				fmt.Errorf("Tencent Docs resource export timed out: %w", exportCtx.Err()))
+				withFileStage("export", fmt.Errorf("Tencent Docs resource export timed out: %w", exportCtx.Err())))
 		case <-time.After(exportPollInterval):
 		}
 	}
 	if strings.TrimSpace(status.FileURL) == "" {
 		return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID,
-			errors.New("Tencent Docs resource export returned no download URL"))
+			withFileStage("export", errors.New("Tencent Docs resource export returned no download URL")))
 	}
 	fileName := exportFileName(status.FileName, status.FileURL, info.Title, node.Title)
 	if fileName == "" {
@@ -1069,7 +1069,7 @@ func (s *fetchState) fetchResource(
 	}
 	data, err := s.client.DownloadExport(ctx, status.FileURL)
 	if err != nil {
-		return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID, err)
+		return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID, withFileStage("download", err))
 	}
 	fingerprint := resourceFingerprint(data, fileName, title)
 	s.next.ResourceFingerprints[externalID] = fingerprint
@@ -1174,6 +1174,7 @@ func failedFetchedItem(
 		"node_type": node.Type,
 		"error":     err.Error(),
 	}
+	addFileFailureMetadata(metadata, err)
 	if spaceID == "" {
 		metadata["location"] = "personal_home"
 	}
