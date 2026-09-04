@@ -90,6 +90,8 @@ func fetchSheetMarkdown(
 	declaredColumns := 0
 	emittedColumns := 0
 	maxUsedColumns := 0
+	cellEntryCount := 0
+	emptyPlaceholderCount := 0
 
 	for _, sheet := range sheets {
 		if sheet.ID == "" {
@@ -142,6 +144,7 @@ func fetchSheetMarkdown(
 				)
 			}
 
+			cellEntryCount += len(cells)
 			rows := make([][]string, rowRange.end-rowRange.start+1)
 			for i := range rows {
 				rows[i] = make([]string, sheet.ColCount)
@@ -151,6 +154,11 @@ func fetchSheetMarkdown(
 			// one mode per response and normalize before validating.
 			relativeRows := rowRange.start > 0 && len(cells) > 0
 			for _, cell := range cells {
+				// The endpoint can include zero-value entries, not actual A1 cells.
+				// Ignore them before both coordinate inference and assignment.
+				if cell == (SheetCell{}) {
+					continue
+				}
 				if cell.Row >= rowRange.start && cell.Row <= rowRange.end {
 					relativeRows = false
 					break
@@ -161,6 +169,10 @@ func fetchSheetMarkdown(
 				}
 			}
 			for _, cell := range cells {
+				if cell == (SheetCell{}) {
+					emptyPlaceholderCount++
+					continue
+				}
 				sourceRow := cell.Row
 				if relativeRows {
 					sourceRow += rowRange.start
@@ -168,8 +180,8 @@ func fetchSheetMarkdown(
 				if sourceRow < rowRange.start || sourceRow > rowRange.end ||
 					cell.Col < 0 || cell.Col >= sheet.ColCount {
 					return nil, fmt.Errorf(
-						"get Sheet cells %s returned out-of-range cell (%d,%d)",
-						sheet.ID, cell.Row, cell.Col,
+						"get Sheet cells %s returned out-of-range cell (%d,%d), requested rows %d-%d cols 0-%d (0-based)",
+						sheet.ID, cell.Row, cell.Col, rowRange.start, rowRange.end, sheet.ColCount-1,
 					)
 				}
 				rows[sourceRow-rowRange.start][cell.Col] = sheetCellText(cell)
@@ -229,6 +241,9 @@ func fetchSheetMarkdown(
 			"exported_row_count":            strconv.Itoa(scannedRows),
 			"scanned_row_count":             strconv.Itoa(scannedRows),
 			"non_empty_row_count":           strconv.Itoa(nonEmptyRows),
+			"omitted_empty_row_count":       strconv.Itoa(scannedRows - nonEmptyRows),
+			"sheet_cell_entry_count":        strconv.Itoa(cellEntryCount),
+			"sheet_empty_placeholder_count": strconv.Itoa(emptyPlaceholderCount),
 			"emitted_non_empty_row_count":   strconv.Itoa(nonEmptyRows),
 			"max_non_empty_source_row":      strconv.Itoa(maxNonEmptySourceRow),
 			"sheet_range_call_count":        strconv.Itoa(totalRangeCalls),
