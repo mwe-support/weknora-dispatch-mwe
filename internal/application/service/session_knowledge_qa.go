@@ -1093,7 +1093,7 @@ func (s *sessionService) buildKBDocumentListing(ctx context.Context, chatManage 
 			if total >= maxDocuments {
 				break
 			}
-			if k.EnableStatus != "enabled" {
+			if k.EnableStatus != "enabled" || k.IsDataSourceCandidate() {
 				continue
 			}
 			title := k.Title

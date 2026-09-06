@@ -240,6 +240,11 @@ func (k *Knowledge) GetMetadata() map[string]string {
 	return metadata
 }
 
+// IsDataSourceCandidate is true until a fully processed source version is published.
+func (k *Knowledge) IsDataSourceCandidate() bool {
+	return k != nil && k.GetMetadata()["datasource_candidate"] == "true"
+}
+
 // BeforeCreate initializes required defaults for new Knowledge entities.
 func (k *Knowledge) BeforeCreate(tx *gorm.DB) (err error) {
 	if k.ID == "" {

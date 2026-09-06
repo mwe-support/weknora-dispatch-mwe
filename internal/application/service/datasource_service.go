@@ -914,7 +914,7 @@ func syncItemIdentity(item *types.FetchedItem) types.SyncItemError {
 func (s *DataSourceService) applyFetchedItem(
 	ctx context.Context, ds *types.DataSource, item *types.FetchedItem,
 	tagIDs []string, result *types.SyncResult,
-) {
+) error {
 	if item.IsDeleted {
 		if ds.SyncDeletions {
 			// Count only — actual KB deletion is intentionally not performed.
@@ -922,7 +922,7 @@ func (s *DataSourceService) applyFetchedItem(
 			// accidental data loss from connector misdetection or reconfiguration.
 			result.Deleted++
 		}
-		return
+		return nil
 	}
 
 	if len(item.Content) == 0 && item.URL == "" {
@@ -935,7 +935,7 @@ func (s *DataSourceService) applyFetchedItem(
 			logger.Infof(ctx, "skipping item %q (external_id=%s): no content or URL", item.Title, item.ExternalID)
 			result.Skipped++
 		}
-		return
+		return nil
 	}
 
 	isUpdate, err := s.ingestItem(ctx, ds, item, tagIDs)
@@ -963,12 +963,14 @@ func (s *DataSourceService) applyFetchedItem(
 			failure.Code, failure.Category, failure.Stage = "ingest_failed", "INGEST_FAILED", "ingest"
 			failure.Message = "Ingest failed; see server logs"
 			recordSyncError(result, failure)
+			return err
 		}
 	} else if isUpdate {
 		result.Updated++
 	} else {
 		result.Created++
 	}
+	return nil
 }
 
 // streamStartCursor decides which cursor a streaming fetch should resume from.
@@ -987,13 +989,14 @@ func streamStartCursor(ds *types.DataSource, forceFull bool, attempt int) (*type
 // Emit ingests each item as it arrives (bounding memory) and Checkpoint persists
 // the connector cursor plus live progress counts at page boundaries.
 type streamSyncHandler struct {
-	faq      bool
-	rejected map[string]bool
-	svc      *DataSourceService
-	ds       *types.DataSource
-	tagIDs   []string
-	result   *types.SyncResult
-	syncLog  *types.SyncLog
+	faq          bool
+	rejected     map[string]bool
+	ingestErrors map[string]error
+	svc          *DataSourceService
+	ds           *types.DataSource
+	tagIDs       []string
+	result       *types.SyncResult
+	syncLog      *types.SyncLog
 }
 
 // Emit ingests one streamed item. A canceled context aborts the stream so the
@@ -1016,7 +1019,18 @@ func (h *streamSyncHandler) Emit(ctx context.Context, item types.FetchedItem) er
 	if h.faq && !item.IsDeleted && item.Metadata["error"] == "" {
 		h.svc.applyFAQFetchedItem(withKBActivitySuppressed(ctx), h.ds, &item, h.result)
 	} else {
-		h.svc.applyFetchedItem(withKBActivitySuppressed(ctx), h.ds, &item, h.tagIDs, h.result)
+		if err := h.svc.applyFetchedItem(withKBActivitySuppressed(ctx), h.ds, &item, h.tagIDs, h.result); err != nil {
+			if errors.Is(err, datasource.ErrDataSourceNotActive) || errors.Is(err, datasource.ErrInvalidConfig) {
+				return err
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if h.ingestErrors == nil {
+				h.ingestErrors = map[string]error{}
+			}
+			h.ingestErrors[item.ExternalID] = err
+		}
 	}
 	if h.result.Failed > before {
 		if h.rejected == nil {
@@ -1028,6 +1042,19 @@ func (h *streamSyncHandler) Emit(ctx context.Context, item types.FetchedItem) er
 }
 
 func (h *streamSyncHandler) ItemRejected(id string) bool { return h.rejected[id] }
+
+func (h *streamSyncHandler) ItemIngestError(id string) error { return h.ingestErrors[id] }
+
+func (h *streamSyncHandler) UpdateFileFailure(item types.FetchedItem) {
+	for i := len(h.result.Errors) - 1; i >= 0; i-- {
+		if h.result.Errors[i].ExternalID == item.ExternalID {
+			updated := syncItemIdentity(&item)
+			updated.Code, updated.Message = h.result.Errors[i].Code, h.result.Errors[i].Message
+			h.result.Errors[i] = updated
+			return
+		}
+	}
+}
 
 // Checkpoint persists the connector cursor onto the data source and mirrors the
 // running counts into the sync log so progress survives a crash and the UI can
@@ -1294,6 +1321,9 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 //
 // Returns (isUpdate, error) — isUpdate is true when an existing item was replaced.
 func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource, item *types.FetchedItem, tagIDs []string) (bool, error) {
+	if ds.Type == types.ConnectorTypeTencentDocs {
+		return s.ingestTencentCandidate(ctx, ds, item, tagIDs)
+	}
 	// Channel decides the knowledge "source" label shown in the UI. Prefer the
 	// connector-supplied metadata["channel"] (e.g. Feishu Drive sets it to
 	// "feishu" so Drive docs share the wiki's "飞书" label instead of showing

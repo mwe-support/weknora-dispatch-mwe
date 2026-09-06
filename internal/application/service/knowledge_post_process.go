@@ -95,6 +95,11 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	if attempt <= 0 {
 		attempt = s.tracker().LatestAttempt(ctx, payload.KnowledgeID)
 	}
+	if payload.Attempt > 0 {
+		if latest := s.tracker().LatestAttempt(ctx, payload.KnowledgeID); latest > 0 && latest != payload.Attempt {
+			return nil
+		}
+	}
 
 	// Close the multimodal stage span (parent enqueued it as "running"
 	// and we never see the per-image fan-in here other than by reaching
@@ -133,6 +138,42 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		)
 		s.tracker().SkipSpan(ctx, postSpan,
 			"knowledge "+knowledge.ParseStatus+" before postprocess started")
+		return nil
+	}
+	if knowledge.IsDataSourceCandidate() && knowledge.ParseStatus == types.ParseStatusProcessing {
+		if knowledge.GetMetadata()["datasource_processing_failed"] != "" {
+			// All images have reached fan-in, but at least one failed. Keep the
+			// version hidden and make it eligible for the existing file retry.
+			return s.knowledgeRepo.UpdateKnowledgeColumns(ctx, knowledge.ID, map[string]interface{}{
+				"parse_status": types.ParseStatusFailed, "error_message": "source multimodal processing failed",
+			})
+		}
+		if knowledge.ProcessedAt == nil {
+			return errors.New("candidate core indexing is not complete")
+		}
+		// This delivery is the fan-in after core parsing/indexing and required
+		// multimodal work. Do not merge unpublished content into shared Wiki or
+		// graph state. The sync worker publishes and enqueues a fresh delivery.
+		if repo, ok := s.knowledgeRepo.(interface {
+			MarkDataSourceIndexReady(context.Context, string) error
+		}); ok {
+			// Atomically patch only an unpublished candidate. A duplicate stale
+			// delivery must not restore the candidate flag after publication.
+			if err := repo.MarkDataSourceIndexReady(ctx, knowledge.ID); err != nil {
+				return err
+			}
+		} else {
+			metadata := knowledge.GetMetadata()
+			metadata["datasource_index_ready"] = "true"
+			body, err := json.Marshal(metadata)
+			if err != nil {
+				return err
+			}
+			if err = s.knowledgeRepo.UpdateKnowledgeColumn(ctx, knowledge.ID, "metadata", types.JSON(body)); err != nil {
+				return err
+			}
+		}
+		s.tracker().SkipSpan(ctx, postSpan, "awaiting source-version publication")
 		return nil
 	}
 
@@ -369,12 +410,14 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 
 	// 5. Spawn Graph RAG Tasks — only when graph indexing is enabled in IndexingStrategy
 	enqueuedGraphCount := 0
+	graphEnqueueFailed := false
 	if graphChunkCount > 0 {
 		logger.Infof(ctx, "[KnowledgePostProcess] Spawning Graph RAG extract tasks for %d text-like chunks", len(textChunks))
 		for i, chunk := range textChunks {
 			ok, err := NewChunkExtractTask(ctx, s.taskEnqueuer, payload.TenantID, chunk.ID, kb.SummaryModelID,
 				payload.KnowledgeID, attempt, i)
 			if err != nil {
+				graphEnqueueFailed = true
 				logger.Errorf(ctx, "[KnowledgePostProcess] Failed to create chunk extract task for %s: %v", chunk.ID, err)
 			}
 			if ok {
@@ -434,6 +477,16 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 			actualOwned++
 		}
 		if shortfall := plannedOwned - actualOwned; shortfall > 0 {
+			// A missing task is not successful work. Persist failure before a
+			// decrement can complete the version; NEO4J-disabled skips are normal.
+			if (willSpawnSummary && !enqueuedSummary) || enqueuedQuestionCount < questionBatchCount || graphEnqueueFailed {
+				rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
+				err := markDataSourceSubtaskFailed(rctx, s.knowledgeRepo, payload.KnowledgeID, "postprocess_enqueue")
+				cancel()
+				if err != nil {
+					return err
+				}
+			}
 			logger.Warnf(ctx,
 				"[KnowledgePostProcess] Releasing %d un-enqueued subtask slot(s) for %s (planned=%d actual=%d)",
 				shortfall, payload.KnowledgeID, plannedOwned, actualOwned)

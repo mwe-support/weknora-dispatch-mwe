@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -28,6 +29,7 @@ type fileRetry struct {
 	Category             string    `json:"category,omitempty"`
 	NextAt               time.Time `json:"next_at,omitempty"`
 	ExportTaskID         string    `json:"export_task_id,omitempty"`
+	ExportModifiedAt     uint64    `json:"export_modified_at,omitempty"`
 	ExportStartUncertain bool      `json:"export_start_uncertain,omitempty"`
 }
 
@@ -56,6 +58,14 @@ func isRateLimited(message string) bool {
 func fileRetryCategory(err error, stage string) (string, bool) {
 	var size *ExportSizeExceededError
 	var tool *MCPToolError
+	if stage == "ingest" {
+		var app *werrors.AppError
+		var quota *types.StorageQuotaExceededError
+		if errors.Is(err, datasource.ErrDataSourceNotActive) || errors.Is(err, datasource.ErrInvalidConfig) || errors.As(err, &quota) || (errors.As(err, &app) && app.HTTPCode >= 400 && app.HTTPCode < 500 && app.HTTPCode != 429) || strings.Contains(err.Error(), "unsupported file type") {
+			return "INGEST_REJECTED", false
+		}
+		return "INGEST_FAILED", true // bounded by the same per-file retry budget
+	}
 	if errors.As(err, &size) {
 		return "FILE_SIZE_EXCEEDED", false
 	}
@@ -64,6 +74,8 @@ func fileRetryCategory(err error, stage string) (string, bool) {
 	}
 	if errors.As(err, &tool) {
 		switch tool.Code {
+		case 11607:
+			return "INVALID_REQUEST", false
 		case 323908:
 			return "UNSUPPORTED_FILE_TYPE", false
 		case 400005, 400006:
@@ -80,8 +92,7 @@ func fileRetryCategory(err error, stage string) (string, bool) {
 	if stage == "export_start" {
 		return "EXPORT_START_UNCERTAIN", false
 	}
-	m := strings.ToLower(err.Error())
-	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(m, "timeout") || strings.Contains(m, "timed out") || strings.Contains(m, "connection reset") || strings.Contains(m, "temporarily unavailable") || strings.Contains(m, "http status 503") || strings.Contains(m, "http status 502") || strings.Contains(m, "http status 504") {
+	if isTransientReadError(err) {
 		return "TRANSIENT_NETWORK", true
 	}
 	return "NEEDS_REVIEW", false

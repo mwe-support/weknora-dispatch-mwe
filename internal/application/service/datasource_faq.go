@@ -392,19 +392,3 @@ func parseFAQMarkdown(item *types.FetchedItem) ([]types.FAQEntryPayload, error) 
 	}
 	return entries, nil
 }
-
-func (s *DataSourceService) checkTencentCandidateScope(ctx context.Context, ds *types.DataSource) error {
-	if s.dsRepo != nil {
-		latest, err := s.dsRepo.FindByID(ctx, ds.ID)
-		if err != nil {
-			return err
-		}
-		if latest == nil || latest.DeletedAt.Valid || (latest.Status == types.DataSourceStatusPaused && ds.Status != types.DataSourceStatusPaused) || latest.Status == types.DataSourceStatusDeleted {
-			return datasource.ErrDataSourceNotActive
-		}
-		if latest.TenantID != ds.TenantID || latest.KnowledgeBaseID != ds.KnowledgeBaseID || !bytes.Equal(latest.Config, ds.Config) {
-			return datasource.ErrInvalidConfig
-		}
-	}
-	return nil
-}

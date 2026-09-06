@@ -174,6 +174,43 @@ func TestRetryAfterAndCredentialBudget(t *testing.T) {
 	}
 }
 
+type retryBudgetResponse struct {
+	status int
+	after  string
+}
+
+func (r retryBudgetResponse) RoundTrip(*http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: r.status, Header: http.Header{"Retry-After": []string{r.after}}, Body: http.NoBody}, nil
+}
+func TestMCPCooldownUsesMinutesAndHonorsLongerRetryAfter(t *testing.T) {
+	for _, status := range []int{429, 503} {
+		for _, tc := range []struct {
+			after   string
+			minimum time.Duration
+		}{{"", 2 * time.Minute}, {"5", 2 * time.Minute}, {"300", 5 * time.Minute}} {
+			transport := &budgetTransport{base: retryBudgetResponse{status, tc.after}, budget: &credentialBudget{}}
+			req, _ := http.NewRequest("POST", "https://docs.qq.com/openapi/mcp", nil)
+			before := time.Now()
+			response, err := transport.RoundTrip(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = response.Body.Close()
+			if transport.budget.cooldown.Before(before.Add(tc.minimum)) {
+				t.Fatalf("status=%d Retry-After=%q cooldown shorter than %v", status, tc.after, tc.minimum)
+			}
+		}
+	}
+	worst := time.Duration(maxMCPTransientRetries+1) * defaultMCPTimeout
+	for i := 0; i < maxMCPTransientRetries; i++ {
+		delay := initialMCPRetryDelay << i
+		worst += delay + delay/4
+	}
+	if exportTimeout < worst {
+		t.Fatalf("export budget %v cannot fit minute retries %v", exportTimeout, worst)
+	}
+}
+
 func TestFileRetryInterruptedLastAttemptIsNotReportedAsSuccess(t *testing.T) {
 	root := encodeSpaceResourceID("s")
 	id := encodeNodeResourceID("s", "doc")

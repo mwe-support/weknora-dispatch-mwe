@@ -238,10 +238,25 @@ func finalizeSubtaskDetached(
 	}
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
 	defer cancel()
+	if retErr != nil && final {
+		if err := markDataSourceSubtaskFailed(dctx, repo, knowledgeID, source); err != nil {
+			logger.Warnf(ctx, "failed to preserve source subtask failure: %v", err)
+			return
+		}
+	}
 	if _, _, err := repo.FinalizeSubtask(dctx, knowledgeID); err != nil {
 		logger.Warnf(ctx, "finalize subtask decrement failed source=%s knowledge=%s err=%v",
 			source, knowledgeID, err)
 	}
+}
+
+func markDataSourceSubtaskFailed(ctx context.Context, repo interfaces.KnowledgeRepository, id, source string) error {
+	if r, ok := repo.(interface {
+		MarkDataSourceSubtaskFailed(context.Context, string, string) error
+	}); ok {
+		return r.MarkDataSourceSubtaskFailed(ctx, id, source)
+	}
+	return nil
 }
 
 // beginStage / endStage / failStage / skipStage are the by-name shims

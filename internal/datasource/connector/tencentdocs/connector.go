@@ -20,13 +20,14 @@ import (
 )
 
 const (
-	resourceTypeSpace              = "tencent_docs_space"
-	resourceTypeHome               = "tencent_docs_home"
-	homeRootResourceID             = "tdoc:home"
-	spaceIDPrefix                  = "tdoc:space:"
-	nodeIDPrefix                   = "tdoc:node:"
-	homeNodeIDPrefix               = "tdoc:home-node:"
-	exportPollInterval             = 3 * time.Second
+	resourceTypeSpace  = "tencent_docs_space"
+	resourceTypeHome   = "tencent_docs_home"
+	homeRootResourceID = "tdoc:home"
+	spaceIDPrefix      = "tdoc:space:"
+	nodeIDPrefix       = "tdoc:node:"
+	homeNodeIDPrefix   = "tdoc:home-node:"
+	exportPollInterval = 3 * time.Second
+	// Four minute-scale retries plus jitter and per-call deadlines fit here.
 	exportTimeout                  = 45 * time.Minute
 	fileInfoUnsupportedTypeCode    = 400001
 	fileInfoUnsupportedTypeMessage = "file type not support query"
@@ -727,8 +728,13 @@ func (s *fetchState) emit(ctx context.Context, item types.FetchedItem) error {
 	}
 	item.Metadata["folder_path"] = s.folderPath
 	item.Metadata["source_path"] = strings.TrimPrefix(s.folderPath+"/"+item.Title, "/")
-	s.trackFileRetry(&item)
+	if item.Metadata["error"] != "" {
+		s.trackFileRetry(&item)
+	}
 	if s.handler == nil {
+		if item.Metadata["error"] == "" {
+			s.trackFileRetry(&item)
+		}
 		s.rememberFolder(item)
 		s.items = append(s.items, item)
 		return nil
@@ -741,7 +747,20 @@ func (s *fetchState) emit(ctx context.Context, item types.FetchedItem) error {
 	if h, ok := s.handler.(interface{ ItemRejected(string) bool }); ok && h.ItemRejected(item.ExternalID) {
 		delete(s.next.DocumentTimes, item.ExternalID)
 		delete(s.next.ResourceFingerprints, item.ExternalID)
+		if h, ok := s.handler.(interface{ ItemIngestError(string) error }); ok {
+			if err := h.ItemIngestError(item.ExternalID); err != nil {
+				item.Metadata["error"] = err.Error()
+				addFileFailureMetadata(item.Metadata, withFileStage("ingest", err))
+				s.trackFileRetry(&item)
+				if h, ok := s.handler.(interface{ UpdateFileFailure(types.FetchedItem) }); ok {
+					h.UpdateFileFailure(item)
+				}
+			}
+		}
 	} else {
+		if item.Metadata["error"] == "" {
+			s.trackFileRetry(&item)
+		}
 		s.rememberFolder(item)
 	}
 	return s.checkpoint(ctx)
@@ -1069,6 +1088,17 @@ func (s *fetchState) fetchResource(
 		return s.checkpoint(ctx)
 	}
 
+	// An export task belongs to the version from which it was created. A
+	// newer metadata timestamp must never acknowledge an older export body.
+	pendingVersion := s.next.FileRetries[externalID]
+	if pendingVersion.ExportTaskID != "" && pendingVersion.ExportModifiedAt != info.ModifiedAt {
+		pendingVersion.ExportTaskID = ""
+		pendingVersion.ExportStartUncertain = false
+		s.next.FileRetries[externalID] = pendingVersion
+		if err = s.checkpoint(ctx); err != nil {
+			return err
+		}
+	}
 	var task *ExportTask
 	if pending := s.next.FileRetries[externalID]; pending.ExportTaskID != "" {
 		task = &ExportTask{ID: pending.ExportTaskID}
@@ -1080,6 +1110,7 @@ func (s *fetchState) fetchResource(
 		// saving its returned task ID, never blindly issue a second export.
 		pending.Node, pending.SpaceID, pending.SourceResourceID = node, spaceID, sourceResourceID
 		pending.ExportStartUncertain = true
+		pending.ExportModifiedAt = info.ModifiedAt
 		s.next.FileRetries[externalID] = pending
 		if err = s.checkpoint(ctx); err != nil {
 			return err

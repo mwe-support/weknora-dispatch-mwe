@@ -166,6 +166,9 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 ) ([]*types.RetrieveResult, error) {
 	logger.GetLogger(ctx).Infof("[Postgres] Keywords retrieval: query=%s, topK=%d", params.Query, params.TopK)
 	conds := make([]clause.Expression, 0)
+	if len(params.ExcludeKnowledgeIDs) > 0 {
+		conds = append(conds, clause.Not(clause.IN{Column: "knowledge_id", Values: common.ToInterfaceSlice(params.ExcludeKnowledgeIDs)}))
+	}
 
 	// KnowledgeBaseIDs and KnowledgeIDs use AND logic
 	// - If only KnowledgeBaseIDs: search entire knowledge bases
@@ -313,6 +316,14 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 		}
 		whereParts = append(whereParts, fmt.Sprintf("knowledge_id IN (%s)",
 			strings.Join(placeholders, ", ")))
+	}
+	if len(params.ExcludeKnowledgeIDs) > 0 {
+		placeholders := make([]string, len(params.ExcludeKnowledgeIDs))
+		for i, id := range params.ExcludeKnowledgeIDs {
+			allVars = append(allVars, id)
+			placeholders[i] = fmt.Sprintf("$%d", len(allVars))
+		}
+		whereParts = append(whereParts, "knowledge_id NOT IN ("+strings.Join(placeholders, ", ")+")")
 	}
 	// Filter by tag IDs if specified
 	if len(params.TagIDs) > 0 {

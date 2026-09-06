@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrKnowledgeNotFound = errors.New("knowledge not found")
@@ -311,6 +313,32 @@ func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *ty
 	// to support unrelated updates when the caller did not provide the field.
 	if knowledge.CustomMetadata == nil {
 		omit = append(append([]string{}, omitFieldsOnUpdate...), "custom_metadata")
+	}
+	if knowledge.GetMetadata()["datasource_version"] != "" {
+		// Slow summary/index workers hold old snapshots. Lifecycle flags are
+		// owned by explicit source-version transitions, never by a full Save.
+		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var current types.Knowledge
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "metadata").Where("id = ?", knowledge.ID).First(&current).Error; err != nil {
+				return err
+			}
+			metadata := knowledge.GetMetadata()
+			latest := current.GetMetadata()
+			for _, key := range []string{"datasource_candidate", "datasource_index_ready", "datasource_processing_failed"} {
+				if value, ok := latest[key]; ok {
+					metadata[key] = value
+				} else {
+					delete(metadata, key)
+				}
+			}
+			copy := *knowledge
+			var err error
+			copy.Metadata, err = json.Marshal(metadata)
+			if err != nil {
+				return err
+			}
+			return tx.Omit(omit...).Save(&copy).Error
+		})
 	}
 	err := r.db.WithContext(ctx).Omit(omit...).Save(knowledge).Error
 	return err
@@ -702,6 +730,39 @@ func (r *knowledgeRepository) CountKnowledgeByStatus(
 // Only returns documents from document-type knowledge bases (excludes FAQ)
 // Returns (results, hasMore, error)
 // FindByMetadataKey finds a knowledge item by a key-value pair in the metadata JSON column.
+
+// ListDataSourceCandidateIDs is used only after knowledge-base authorization.
+func (r *knowledgeRepository) sourceMetadataPatch(key, value string) clause.Expr {
+	if r.db.Dialector.Name() == "sqlite" {
+		return gorm.Expr("json_set(COALESCE(metadata, '{}'), ?, ?)", "$."+key, value)
+	}
+	return gorm.Expr("jsonb_set(COALESCE(metadata, '{}'::jsonb), ?::text[], to_jsonb(?::text), true)", "{"+key+"}", value)
+}
+
+func (r *knowledgeRepository) MarkDataSourceSubtaskFailed(ctx context.Context, id, source string) error {
+	return r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("id = ? AND metadata->>'datasource_version' <> ''", id).
+		UpdateColumn("metadata", r.sourceMetadataPatch("datasource_processing_failed", source)).Error
+}
+
+func (r *knowledgeRepository) DataSourceProcessingAttempt(ctx context.Context, id string) (int, error) {
+	return NewKnowledgeSpanRepository(r.db).LatestAttempt(ctx, id)
+}
+
+func (r *knowledgeRepository) MarkDataSourceIndexReady(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("id = ? AND metadata->>'datasource_candidate' = ? AND COALESCE(metadata->>'datasource_processing_failed', '') = '' AND parse_status = ? AND processed_at IS NOT NULL", id, "true", types.ParseStatusProcessing).
+		UpdateColumn("metadata", r.sourceMetadataPatch("datasource_index_ready", "true")).Error
+}
+
+func (r *knowledgeRepository) ListDataSourceCandidateIDs(ctx context.Context, tenantID uint64, kbID string) ([]string, error) {
+	var ids []string
+	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND metadata->>'datasource_candidate' = ?", tenantID, kbID, "true").
+		Pluck("id", &ids).Error
+	return ids, err
+}
+
 // Uses Postgres jsonb operator: metadata->>'key' = 'value'.
 func (r *knowledgeRepository) FindByMetadataKey(
 	ctx context.Context,

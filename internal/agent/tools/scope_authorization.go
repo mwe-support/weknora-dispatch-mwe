@@ -79,6 +79,9 @@ func authorizeKnowledgeInSearchTargets(
 	if !searchTargets.ContainsKB(knowledge.KnowledgeBaseID) {
 		return nil, fmt.Errorf("knowledge base %s is not within the current Agent scope", knowledge.KnowledgeBaseID)
 	}
+	if knowledge.IsDataSourceCandidate() {
+		return nil, fmt.Errorf("document is still awaiting source-version publication")
+	}
 	allowed, err := searchTargetsAllowKnowledgeID(
 		ctx, searchTargets, knowledge.ID, knowledge.KnowledgeBaseID, knowledgeService,
 	)
@@ -121,6 +124,9 @@ func authorizeChunkInSearchTargets(
 	}
 	if !searchTargets.ContainsKB(chunk.KnowledgeBaseID) {
 		return nil, fmt.Errorf("knowledge base %s is not within the current Agent scope", chunk.KnowledgeBaseID)
+	}
+	if _, err := authorizeKnowledgeInSearchTargets(ctx, searchTargets, chunk.KnowledgeID, knowledgeService); err != nil {
+		return nil, err
 	}
 	allowed, err := searchTargetsAllowKnowledgeID(
 		ctx, searchTargets, chunk.KnowledgeID, chunk.KnowledgeBaseID, knowledgeService,

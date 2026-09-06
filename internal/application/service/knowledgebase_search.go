@@ -129,6 +129,17 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	if err := s.authorizeKBAccess(ctx, kbs, requestTenantID); err != nil {
 		return nil, err
 	}
+	if repo, ok := s.kgRepo.(interface {
+		ListDataSourceCandidateIDs(context.Context, uint64, string) ([]string, error)
+	}); ok {
+		for _, kb := range kbs {
+			ids, err := repo.ListDataSourceCandidateIDs(ctx, kb.TenantID, kb.ID)
+			if err != nil {
+				return nil, err
+			}
+			params.ExcludeKnowledgeIDs = append(params.ExcludeKnowledgeIDs, ids...)
+		}
+	}
 
 	// Explicit embedding-model consistency check. Multi-KB searches that
 	// span different embedding spaces would otherwise silently produce
@@ -361,15 +372,16 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 
 		appendVectorParams := func(kbIDs []string, knowledgeType string) {
 			retrieveParams = append(retrieveParams, types.RetrieveParams{
-				Query:            params.QueryText,
-				Embedding:        queryEmbedding,
-				KnowledgeBaseIDs: kbIDs,
-				TopK:             matchCount,
-				Threshold:        params.VectorThreshold,
-				RetrieverType:    types.VectorRetrieverType,
-				KnowledgeIDs:     params.KnowledgeIDs,
-				TagIDs:           params.TagIDs,
-				KnowledgeType:    knowledgeType,
+				Query:               params.QueryText,
+				Embedding:           queryEmbedding,
+				KnowledgeBaseIDs:    kbIDs,
+				TopK:                matchCount,
+				Threshold:           params.VectorThreshold,
+				RetrieverType:       types.VectorRetrieverType,
+				KnowledgeIDs:        params.KnowledgeIDs,
+				ExcludeKnowledgeIDs: params.ExcludeKnowledgeIDs,
+				TagIDs:              params.TagIDs,
+				KnowledgeType:       knowledgeType,
 			})
 		}
 
@@ -391,13 +403,14 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 		len(docKeywordKBIDs) > 0 {
 		logger.Info(ctx, "Keyword retrieval supported, preparing keyword retrieval parameters")
 		retrieveParams = append(retrieveParams, types.RetrieveParams{
-			Query:            params.QueryText,
-			KnowledgeBaseIDs: docKeywordKBIDs,
-			TopK:             matchCount,
-			Threshold:        params.KeywordThreshold,
-			RetrieverType:    types.KeywordsRetrieverType,
-			KnowledgeIDs:     params.KnowledgeIDs,
-			TagIDs:           params.TagIDs,
+			Query:               params.QueryText,
+			KnowledgeBaseIDs:    docKeywordKBIDs,
+			TopK:                matchCount,
+			Threshold:           params.KeywordThreshold,
+			RetrieverType:       types.KeywordsRetrieverType,
+			KnowledgeIDs:        params.KnowledgeIDs,
+			ExcludeKnowledgeIDs: params.ExcludeKnowledgeIDs,
+			TagIDs:              params.TagIDs,
 		})
 		logger.Info(ctx, "Keyword retrieval parameters setup completed")
 	}

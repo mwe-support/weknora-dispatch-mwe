@@ -94,11 +94,20 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		FileSize: file.Size,
 		FileHash: hash,
 	})
+	if version := metadata["datasource_version"]; version != "" {
+		// A source version owns its own row: a different source (or the old
+		// version with identical bytes) must not swallow this candidate update.
+		existingKnowledge, err = s.repo.FindByMetadataKey(ctx, tenantID, kbID, "datasource_version", version)
+		exists = existingKnowledge != nil
+	}
 	if err != nil {
 		logger.Errorf(ctx, "Failed to check knowledge existence: %v", err)
 		return nil, err
 	}
 	if exists {
+		if metadata["datasource_version"] != "" {
+			return existingKnowledge, nil
+		}
 		logger.Infof(ctx, "File already exists: %s", fileName)
 		// Update creation time for existing knowledge
 		if err := s.repo.UpdateKnowledgeColumn(ctx, existingKnowledge.ID, "created_at", time.Now()); err != nil {

@@ -195,6 +195,9 @@ func finalizeIndexedKnowledgeState(
 	}
 
 	knowledge.EnableStatus = "enabled"
+	if knowledge.GetMetadata()["datasource_candidate"] == "true" {
+		knowledge.EnableStatus = "disabled"
+	}
 	knowledge.StorageSize = totalStorageSize
 	knowledge.ProcessedAt = &now
 	knowledge.UpdatedAt = now
@@ -2489,6 +2492,11 @@ func (s *knowledgeService) ReparseKnowledge(
 		}
 
 		resetKnowledgeForReparse(existing, kb)
+		if existing.GetMetadata()["datasource_version"] != "" {
+			if err := s.repo.UpdateKnowledgeColumns(ctx, existing.ID, map[string]interface{}{"metadata": existing.Metadata, "parse_status": existing.ParseStatus, "enable_status": existing.EnableStatus}); err != nil {
+				return nil, err
+			}
+		}
 
 		if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
 			logger.Errorf(ctx, "Failed to update knowledge status before reparse: %v", err)
@@ -2520,6 +2528,11 @@ func (s *knowledgeService) ReparseKnowledge(
 
 	// Step 2: Update knowledge status and metadata
 	resetKnowledgeForReparse(existing, kb)
+	if existing.GetMetadata()["datasource_version"] != "" {
+		if err := s.repo.UpdateKnowledgeColumns(ctx, existing.ID, map[string]interface{}{"metadata": existing.Metadata, "parse_status": existing.ParseStatus, "enable_status": existing.EnableStatus}); err != nil {
+			return nil, err
+		}
+	}
 
 	if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge status before reparse: %v", err)
@@ -2703,6 +2716,12 @@ func (s *knowledgeService) ReparseKnowledge(
 // new processing attempt rather than retaining terminal state from the
 // previous one.
 func resetKnowledgeForReparse(knowledge *types.Knowledge, kb *types.KnowledgeBase) {
+	if knowledge.GetMetadata()["datasource_version"] != "" {
+		metadata := knowledge.GetMetadata()
+		delete(metadata, "datasource_index_ready")
+		delete(metadata, "datasource_processing_failed")
+		knowledge.Metadata, _ = json.Marshal(metadata)
+	}
 	knowledge.ParseStatus = types.ParseStatusPending
 	knowledge.EnableStatus = "disabled"
 	knowledge.Description = ""
@@ -3870,7 +3889,23 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 
 	attempt := attemptFromCtx(ctx)
 	redisKey := fmt.Sprintf("multimodal:pending:%s", knowledge.ID)
-	if s.redisClient != nil {
+	if knowledge.GetMetadata()["datasource_version"] != "" {
+		redisKey = fmt.Sprintf("%s:%d", redisKey, attempt)
+		var err error
+		if s.redisClient == nil {
+			err = errors.New("source multimodal pending counter is unavailable")
+		} else {
+			err = s.redisClient.Set(ctx, redisKey, len(images), 24*time.Hour).Err()
+		}
+		if err != nil {
+			// No image tasks were dispatched. Retain the old source version and
+			// let bounded file compensation reparse this failed candidate.
+			_ = s.repo.UpdateKnowledgeColumns(ctx, knowledge.ID, map[string]interface{}{
+				"parse_status": types.ParseStatusFailed, "error_message": err.Error(),
+			})
+			return
+		}
+	} else if s.redisClient != nil {
 		if err := s.redisClient.Set(ctx, redisKey, len(images), 24*time.Hour).Err(); err != nil {
 			logger.Warnf(ctx, "Failed to set multimodal pending count for %s: %v", knowledge.ID, err)
 		}

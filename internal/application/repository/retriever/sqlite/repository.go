@@ -548,6 +548,12 @@ type whereClause struct {
 
 func buildFilterWhere(params types.RetrieveParams, tableAlias string) []whereClause {
 	var parts []whereClause
+	if len(params.ExcludeKnowledgeIDs) > 0 {
+		parts = append(parts, whereClause{
+			clause: tableAlias + ".knowledge_id NOT IN (" + placeholders(len(params.ExcludeKnowledgeIDs)) + ")",
+			args:   toInterfaceSlice(params.ExcludeKnowledgeIDs),
+		})
+	}
 	if len(params.KnowledgeBaseIDs) > 0 {
 		parts = append(parts, whereClause{
 			clause: tableAlias + ".knowledge_base_id IN (" + placeholders(len(params.KnowledgeBaseIDs)) + ")",

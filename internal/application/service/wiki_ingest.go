@@ -1178,6 +1178,10 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 		// for deleted knowledge that has no counter to drain). The
 		// matching +1 was seeded by KnowledgePostProcess.SetFinalizing.
 		if op.Op == WikiOpIngest {
+			if err := markDataSourceSubtaskFailed(ctx, s.knowledgeRepo, op.KnowledgeID, "wiki"); err != nil {
+				settleErrs = append(settleErrs, err)
+				continue
+			}
 			s.finalizeWikiSubtask(ctx, op.KnowledgeID)
 		}
 		logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)

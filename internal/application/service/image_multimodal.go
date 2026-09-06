@@ -134,7 +134,7 @@ func (s *ImageMultimodalService) tracker() SpanTracker {
 }
 
 // Handle implements asynq handler for TypeImageMultimodal.
-func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) error {
+func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (retErr error) {
 	var payload types.ImageMultimodalPayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return fmt.Errorf("unmarshal image multimodal payload: %w", err)
@@ -144,6 +144,11 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		payload.ChunkID, payload.ImageURL, payload.EnableOCR, payload.EnableCaption)
 
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	if payload.Attempt > 0 {
+		if latest := s.tracker().LatestAttempt(ctx, payload.KnowledgeID); latest > 0 && latest != payload.Attempt {
+			return nil
+		}
+	}
 	if payload.Language != "" {
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
@@ -161,8 +166,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			payload.ChunkID, payload.KnowledgeID, payload.KnowledgeBaseID, payload.ImageURL)
 		// Still count this image toward the parent finalize gate so a batch
 		// of dropped orphans cannot strand multimodal:pending forever.
-		s.checkAndFinalizeAllImages(ctx, payload)
-		return nil
+		return s.checkAndFinalizeAllImages(ctx, payload)
 	}
 
 	// Open a per-image subspan under the parent attempt's multimodal
@@ -200,6 +204,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// cause of "stuck parsing" reports. Intermediate retries skip finalize
 	// so we don't double-count and prematurely trigger post-process.
 	var handleErr error
+	var extractionErr error
 	defer func() {
 		// Finalize the image subspan with the actual outcome — not the
 		// finalize-counter outcome. The counter logic counts a "tried"
@@ -216,7 +221,20 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			}
 		}
 		if handleErr == nil || isFinalAsynqAttempt(ctx) {
-			s.checkAndFinalizeAllImages(ctx, payload)
+			if payload.Attempt > 0 {
+				if latest := s.tracker().LatestAttempt(ctx, payload.KnowledgeID); latest > 0 && latest != payload.Attempt {
+					return
+				}
+			}
+			dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
+			defer cancel()
+			if handleErr != nil || extractionErr != nil {
+				if err := markDataSourceSubtaskFailed(dctx, s.knowledgeRepo, payload.KnowledgeID, "multimodal"); err != nil {
+					retErr = errors.Join(retErr, err)
+					return
+				}
+			}
+			retErr = errors.Join(retErr, s.checkAndFinalizeAllImages(dctx, payload))
 		} else {
 			logger.Infof(ctx,
 				"[ImageMultimodal] Skip finalize on retryable error for %s (will count on last attempt)",
@@ -245,6 +263,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// image, skip it (deferred finalize will count it).
 	imgBytes, readErr := s.readImageBytes(ctx, payload)
 	if readErr != nil {
+		extractionErr = readErr
 		logger.Errorf(ctx, "[ImageMultimodal] Skip unreadable image %s: %v", payload.ImageURL, readErr)
 		imgOut["skipped"] = "unreadable_image"
 		imgOut["read_error"] = readErr.Error()
@@ -270,6 +289,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 		if ocrErr != nil {
+			extractionErr = errors.Join(extractionErr, ocrErr)
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
 			imgOut["ocr_error"] = ocrErr.Error()
 		} else {
@@ -288,6 +308,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
 	if capErr != nil {
+		extractionErr = errors.Join(extractionErr, capErr)
 		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
 		imgOut["caption_error"] = capErr.Error()
 	} else if caption != "" {
@@ -342,6 +363,11 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 
 	// Persist chunks
+	if payload.Attempt > 0 {
+		if latest := s.tracker().LatestAttempt(ctx, payload.KnowledgeID); latest > 0 && latest != payload.Attempt {
+			return nil
+		}
+	}
 	if err := s.chunkService.CreateChunks(ctx, newChunks); err != nil {
 		handleErr = fmt.Errorf("create multimodal chunks: %w", err)
 		return handleErr
@@ -352,8 +378,9 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 
 	// Index chunks so they can be retrieved
-	s.indexChunks(ctx, payload, newChunks)
-	imgOut["indexed"] = true
+	indexErr := s.indexChunks(ctx, payload, newChunks)
+	extractionErr = errors.Join(extractionErr, indexErr)
+	imgOut["indexed"] = indexErr == nil
 
 	// Enqueue question generation for the caption/OCR content if KB has it enabled.
 	// During initial processChunks, question generation is skipped for image-type
@@ -424,11 +451,11 @@ func isFinalAsynqAttempt(ctx context.Context) bool {
 
 // indexChunks indexes the newly created multimodal chunks into the retrieval engine
 // so they can participate in semantic search.
-func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.ImageMultimodalPayload, chunks []*types.Chunk) {
+func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.ImageMultimodalPayload, chunks []*types.Chunk) error {
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
 	if err != nil || kb == nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to get KB for indexing: %v", err)
-		return
+		return fmt.Errorf("get KB for multimodal indexing: %v", err)
 	}
 
 	// Skip vector/keyword indexing when the KB has no embedding-based pipeline enabled
@@ -443,26 +470,27 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 			dbChunk, gerr := s.chunkService.GetChunkByIDOnly(ctx, chunk.ID)
 			if gerr != nil {
 				logger.Warnf(ctx, "[ImageMultimodal] Failed to fetch chunk %s for status update: %v", chunk.ID, gerr)
-				continue
+				return gerr
 			}
 			dbChunk.Status = int(types.ChunkStatusIndexed)
 			if uerr := s.chunkService.UpdateChunk(ctx, dbChunk); uerr != nil {
 				logger.Warnf(ctx, "[ImageMultimodal] Failed to update chunk %s status to indexed: %v", chunk.ID, uerr)
+				return uerr
 			}
 		}
-		return
+		return nil
 	}
 
 	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to get embedding model for indexing: %v", err)
-		return
+		return err
 	}
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to get tenant for indexing: %v", err)
-		return
+		return err
 	}
 	// The factory's unbound path reads TenantInfo from ctx; make sure it's there.
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenantInfo)
@@ -473,7 +501,7 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 		ctx, s.retrieveEngine, s.ownership, payload.TenantID, kb.VectorStoreID)
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to init retrieve engine: %v", err)
-		return
+		return err
 	}
 
 	indexInfoList := make([]*types.IndexInfo, 0, len(chunks))
@@ -490,7 +518,7 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 
 	if err := engine.BatchIndex(ctx, embeddingModel, indexInfoList); err != nil {
 		logger.Errorf(ctx, "[ImageMultimodal] Failed to index multimodal chunks: %v", err)
-		return
+		return err
 	}
 
 	// Mark chunks as indexed.
@@ -500,15 +528,17 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 		dbChunk, err := s.chunkService.GetChunkByIDOnly(ctx, chunk.ID)
 		if err != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] Failed to fetch chunk %s for status update: %v", chunk.ID, err)
-			continue
+			return err
 		}
 		dbChunk.Status = int(types.ChunkStatusIndexed)
 		if err := s.chunkService.UpdateChunk(ctx, dbChunk); err != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] Failed to update chunk %s status to indexed: %v", chunk.ID, err)
+			return err
 		}
 	}
 
 	logger.Infof(ctx, "[ImageMultimodal] Indexed %d multimodal chunks for image %s", len(chunks), payload.ImageURL)
+	return nil
 }
 
 // resolveVLM creates a vlm.VLM instance for the given knowledge base,
@@ -647,15 +677,45 @@ func downloadImageFromURL(imageURL string) ([]byte, error) {
 	return secutils.DownloadBytes(imageURL)
 }
 
-func (s *ImageMultimodalService) checkAndFinalizeAllImages(ctx context.Context, payload types.ImageMultimodalPayload) {
+func (s *ImageMultimodalService) checkAndFinalizeAllImages(ctx context.Context, payload types.ImageMultimodalPayload) error {
+	sourceVersion := false
+	if s.knowledgeRepo != nil {
+		k, err := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, payload.KnowledgeID)
+		if err != nil && !errors.Is(err, repository.ErrKnowledgeNotFound) {
+			return err
+		}
+		sourceVersion = k != nil && k.GetMetadata()["datasource_version"] != ""
+	}
 	if s.redisClient == nil {
+		if sourceVersion {
+			return errors.New("source multimodal completion requires its pending counter")
+		}
 		s.enqueueKnowledgePostProcessTask(ctx, payload)
-		return
+		return nil
 	}
 
 	redisKey := fmt.Sprintf("multimodal:pending:%s", payload.KnowledgeID)
+	if sourceVersion {
+		redisKey = fmt.Sprintf("%s:%d", redisKey, payload.Attempt)
+	}
 
-	pendingCount, err := s.redisClient.Decr(ctx, redisKey).Result()
+	var pendingCount int64
+	var err error
+	if sourceVersion {
+		// Asynq can redeliver an image. Count each image once per parse attempt;
+		// a missing/expired counter is not evidence that every sibling finished.
+		doneKey := fmt.Sprintf("multimodal:done:%s:%d", payload.KnowledgeID, payload.Attempt)
+		pendingCount, err = s.redisClient.Eval(ctx, `
+if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+if redis.call('SADD', KEYS[2], ARGV[1]) == 0 then return tonumber(redis.call('GET', KEYS[1])) end
+redis.call('EXPIRE', KEYS[2], 86400)
+return redis.call('DECR', KEYS[1])`, []string{redisKey, doneKey}, payload.ImageIndex).Int64()
+		if err != nil || pendingCount < 0 {
+			return fmt.Errorf("source multimodal completion is unconfirmed: count=%d error=%v", pendingCount, err)
+		}
+	} else {
+		pendingCount, err = s.redisClient.Decr(ctx, redisKey).Result()
+	}
 	if err != nil && err != redis.Nil {
 		// Redis hiccup must not strand the parent knowledge. Best-effort:
 		// enqueue post-process anyway. KnowledgePostProcess is idempotent
@@ -667,15 +727,18 @@ func (s *ImageMultimodalService) checkAndFinalizeAllImages(ctx context.Context, 
 			"[ImageMultimodal] Decrement failed for %s (%v); fallback-enqueueing post-process",
 			payload.KnowledgeID, err)
 		s.enqueueKnowledgePostProcessTask(ctx, payload)
-		return
+		return nil
 	}
 
 	if pendingCount <= 0 {
 		logger.Infof(ctx, "[ImageMultimodal] All images processed for knowledge %s. Finalizing...", payload.KnowledgeID)
-		s.redisClient.Del(ctx, redisKey)
+		if !sourceVersion {
+			s.redisClient.Del(ctx, redisKey)
+		}
 
 		s.enqueueKnowledgePostProcessTask(ctx, payload)
 	}
+	return nil
 }
 
 func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(ctx context.Context, payload types.ImageMultimodalPayload) {
@@ -688,6 +751,7 @@ func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(ctx context.Con
 		KnowledgeID:     payload.KnowledgeID,
 		KnowledgeBaseID: payload.KnowledgeBaseID,
 		Language:        payload.Language,
+		Attempt:         payload.Attempt,
 	}
 	langfuse.InjectTracing(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
