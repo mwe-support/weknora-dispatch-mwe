@@ -152,7 +152,8 @@ function formatSyncError(e: SyncItemError): string {
   } else {
     reason = e.message || ''
   }
-  const text = e.title ? (reason ? `${e.title} — ${reason}` : e.title) : reason
+  const title = e.source_path || e.title
+  const text = title ? (reason ? `${title} — ${reason}` : title) : reason
   return e.retry_state ? `${text} · ${retryInfo(e.retry_state, e.retry_attempt, e.next_retry_at)}` : text
 }
 

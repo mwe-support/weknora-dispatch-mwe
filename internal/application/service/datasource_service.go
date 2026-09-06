@@ -877,6 +877,7 @@ func syncItemIdentity(item *types.FetchedItem) types.SyncItemError {
 		return &v
 	}
 	return types.SyncItemError{
+		SourcePath: item.Metadata["source_path"],
 		RetryState: item.Metadata["retry_state"], RetryAttempt: retryAttempt, NextRetryAt: retryAt,
 		Title: item.Title, ExternalID: item.ExternalID,
 		FileID: item.Metadata["file_id"], SourceResourceID: item.SourceResourceID,
@@ -1299,6 +1300,10 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 
 	// Case 1: content already fetched → build a FileHeader from bytes and call CreateKnowledgeFromFile
 	if len(item.Content) > 0 {
+		customFileName := item.FileName
+		if ds.Type == types.ConnectorTypeTencentDocs && metadata["folder_path"] != "" {
+			customFileName = metadata["folder_path"] + "/" + item.FileName
+		}
 		fh, err := bytesToFileHeader(item.Content, item.FileName)
 		if err != nil {
 			return isUpdate, fmt.Errorf("build file header: %w", err)
@@ -1308,9 +1313,9 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			ds.KnowledgeBaseID,
 			fh,
 			metadata,
-			nil,           // use KB default for multimodal
-			item.FileName, // customFileName — must include extension for file-type validation
-			tagIDs,        // auto-tag from data source
+			nil,            // use KB default for multimodal
+			customFileName, // same relative-path contract as manual folder uploads
+			tagIDs,         // auto-tag from data source
 			channel,
 			nil,
 		); err != nil {

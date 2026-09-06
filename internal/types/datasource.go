@@ -448,6 +448,7 @@ type SyncResult struct {
 // language, plus a Message fallback for clients without the key. The raw API
 // status/body/log_id is never stored here — that stays in the server logs.
 type SyncItemError struct {
+	SourcePath   string     `json:"source_path,omitempty"`
 	RetryState   string     `json:"retry_state,omitempty"`
 	RetryAttempt int        `json:"retry_attempt,omitempty"`
 	NextRetryAt  *time.Time `json:"next_retry_at,omitempty"`

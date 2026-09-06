@@ -19,6 +19,7 @@ import (
 const maxFileRetries = 3
 
 type fileRetry struct {
+	FolderPath           string    `json:"folder_path,omitempty"`
 	Node                 Node      `json:"node"`
 	SpaceID              string    `json:"space_id"`
 	SourceResourceID     string    `json:"source_resource_id"`
@@ -97,6 +98,7 @@ func (s *fetchState) trackFileRetry(item *types.FetchedItem) {
 	r := s.next.FileRetries[item.ExternalID]
 	r.Node = Node{ID: item.Metadata["file_id"], Title: item.Title, Type: item.Metadata["node_type"], DocumentType: item.Metadata["document_type"], URL: item.Metadata["retry_node_url"]}
 	r.SpaceID, r.SourceResourceID = item.Metadata["space_id"], item.SourceResourceID
+	r.FolderPath = item.Metadata["folder_path"]
 	r.Category = item.Metadata["retry_category"]
 	if id := item.Metadata["retry_export_task_id"]; id != "" {
 		r.ExportTaskID = id
@@ -171,6 +173,7 @@ func (c *Connector) FetchRetryStream(ctx context.Context, config *types.DataSour
 	slices.Sort(ids)
 	for _, id := range ids {
 		r := s.next.FileRetries[id]
+		s.folderPath = r.FolderPath
 		if r.State == "exhausted" || r.State == "needs_manual" || (r.State == "scheduled" && r.Attempt >= maxFileRetries) {
 			// A crash after consuming the last attempt is not successful recovery.
 			// Report the durable terminal state without making any remote call.

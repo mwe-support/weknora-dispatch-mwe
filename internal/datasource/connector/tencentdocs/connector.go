@@ -419,6 +419,7 @@ func (c *Connector) FetchAll(
 }
 
 type tencentDocsCursor struct {
+	FolderPaths          map[string]string    `json:"folder_paths,omitempty"`
 	DocumentTimes        map[string]uint64    `json:"document_times"`
 	ResourceFingerprints map[string]string    `json:"resource_fingerprints,omitempty"`
 	FileRetries          map[string]fileRetry `json:"file_retries,omitempty"`
@@ -529,6 +530,7 @@ func (c *Connector) fetch(
 	}
 	state.next.RetryScope = retryScope(config)
 	for _, selectedID := range resourceIDs {
+		state.folderPath = ""
 		ref, err := decodeResourceID(selectedID)
 		if err != nil {
 			return nil, nil, err
@@ -581,7 +583,7 @@ func (c *Connector) fetch(
 			if ref.kind == resourceKindHomeNode {
 				children, listErr := client.ListHomeNodes(ctx, ref.nodeID)
 				if listErr == nil {
-					childrenErr = state.walkHomeNodes(ctx, children, selectedID)
+					childrenErr = state.walkHomeNodes(ctx, children, selectedID, sourceFolder("", info.Title))
 				} else {
 					childrenErr = listErr
 				}
@@ -594,7 +596,7 @@ func (c *Connector) fetch(
 			if listErr != nil {
 				return nil, nil, fmt.Errorf("list selected Tencent Docs folder %s: %w", ref.nodeID, listErr)
 			}
-			if err := state.walkNodes(ctx, ref.spaceID, children, selectedID); err != nil {
+			if err := state.walkNodes(ctx, ref.spaceID, children, selectedID, sourceFolder("", info.Title)); err != nil {
 				return nil, nil, err
 			}
 			continue
@@ -627,11 +629,15 @@ func (c *Connector) fetch(
 
 func copyTencentDocsCursor(previous *tencentDocsCursor) *tencentDocsCursor {
 	next := &tencentDocsCursor{
+		FolderPaths:          make(map[string]string),
 		DocumentTimes:        make(map[string]uint64),
 		ResourceFingerprints: make(map[string]string),
 		FileRetries:          make(map[string]fileRetry),
 	}
 	if previous != nil {
+		for id, p := range previous.FolderPaths {
+			next.FolderPaths[id] = p
+		}
 		next.RetryScope = previous.RetryScope
 		for id, retry := range previous.FileRetries {
 			next.FileRetries[id] = retry
@@ -662,6 +668,7 @@ func nodeFromFileInfo(info *FileInfo) Node {
 }
 
 type fetchState struct {
+	folderPath        string
 	client            Client
 	handler           datasource.StreamHandler
 	previous          *tencentDocsCursor
@@ -674,8 +681,10 @@ type fetchState struct {
 	items             []types.FetchedItem
 }
 
-func (s *fetchState) walkHomeNodes(ctx context.Context, nodes []HomeNode, sourceResourceID string) error {
+func (s *fetchState) walkHomeNodes(ctx context.Context, nodes []HomeNode, sourceResourceID string, parents ...string) error {
+	parent := strings.Join(parents, "/")
 	for _, homeNode := range nodes {
+		s.folderPath = parent
 		visitKey := "personal_home/" + homeNode.ID
 		if s.visitedNodes[visitKey] {
 			continue
@@ -696,7 +705,7 @@ func (s *fetchState) walkHomeNodes(ctx context.Context, nodes []HomeNode, source
 				}
 				continue
 			}
-			if err := s.walkHomeNodes(ctx, children, sourceResourceID); err != nil {
+			if err := s.walkHomeNodes(ctx, children, sourceResourceID, sourceFolder(parent, homeNode.Title)); err != nil {
 				return err
 			}
 			continue
@@ -711,7 +720,13 @@ func (s *fetchState) walkHomeNodes(ctx context.Context, nodes []HomeNode, source
 }
 
 func (s *fetchState) emit(ctx context.Context, item types.FetchedItem) error {
+	if item.Metadata == nil {
+		item.Metadata = map[string]string{}
+	}
+	item.Metadata["folder_path"] = s.folderPath
+	item.Metadata["source_path"] = strings.TrimPrefix(s.folderPath+"/"+item.Title, "/")
 	s.trackFileRetry(&item)
+	s.rememberFolder(item)
 	if s.handler == nil {
 		s.items = append(s.items, item)
 		return nil
@@ -722,6 +737,35 @@ func (s *fetchState) emit(ctx context.Context, item types.FetchedItem) error {
 	return s.checkpoint(ctx)
 }
 
+// Keep a source name as one folder segment, even when it contains slashes.
+func sourceFolder(parent, name string) string {
+	name = strings.NewReplacer("/", "／", "\\", "＼").Replace(name)
+	return types.NormalizeKnowledgeFolderPath(parent + "/" + name)
+}
+
+func (s *fetchState) rememberFolder(item types.FetchedItem) {
+	if item.IsDeleted {
+		delete(s.next.FolderPaths, item.ExternalID)
+		return
+	}
+	if len(item.Content) == 0 {
+		return
+	}
+	if s.next.FolderPaths == nil {
+		s.next.FolderPaths = map[string]string{}
+	}
+	s.next.FolderPaths[item.ExternalID] = s.folderPath
+}
+
+func (s *fetchState) sameFolder(id string) bool {
+	if s.previous == nil {
+		return false
+	}
+	p, known := s.previous.FolderPaths[id]
+	// Older cursors keep their incremental semantics. A full sync adopts paths.
+	return !known || p == s.folderPath
+}
+
 func (s *fetchState) checkpoint(ctx context.Context) error {
 	if s.handler == nil {
 		return nil
@@ -729,8 +773,10 @@ func (s *fetchState) checkpoint(ctx context.Context) error {
 	return s.handler.Checkpoint(ctx, syncCursorFromTencentDocs(s.next))
 }
 
-func (s *fetchState) walkNodes(ctx context.Context, spaceID string, nodes []Node, sourceResourceID string) error {
+func (s *fetchState) walkNodes(ctx context.Context, spaceID string, nodes []Node, sourceResourceID string, parents ...string) error {
+	parent := strings.Join(parents, "/")
 	for _, node := range nodes {
+		s.folderPath = parent
 		visitKey := spaceID + "/" + node.ID
 		if s.visitedNodes[visitKey] {
 			continue
@@ -755,7 +801,7 @@ func (s *fetchState) walkNodes(ctx context.Context, spaceID string, nodes []Node
 				}
 				continue
 			}
-			if err := s.walkNodes(ctx, spaceID, children, sourceResourceID); err != nil {
+			if err := s.walkNodes(ctx, spaceID, children, sourceResourceID, sourceFolder(parent, node.Title)); err != nil {
 				return err
 			}
 		}
@@ -926,7 +972,7 @@ func (s *fetchState) fetchDocument(
 			withFileStage("fetch_metadata", fmt.Errorf("get Tencent Docs file info: %w", err)),
 		))
 	}
-	if s.incremental && s.previous != nil && s.previous.DocumentTimes[externalID] == info.ModifiedAt && info.ModifiedAt != 0 {
+	if s.incremental && s.previous != nil && s.sameFolder(externalID) && s.previous.DocumentTimes[externalID] == info.ModifiedAt && info.ModifiedAt != 0 {
 		s.next.DocumentTimes[externalID] = info.ModifiedAt
 		return s.checkpoint(ctx)
 	}
@@ -1008,7 +1054,7 @@ func (s *fetchState) fetchResource(
 			withFileStage("fetch_metadata", fmt.Errorf("get Tencent Docs resource info: %w", err)),
 		))
 	}
-	if s.incremental && s.previous != nil && s.previous.DocumentTimes[externalID] == info.ModifiedAt && info.ModifiedAt != 0 {
+	if s.incremental && s.previous != nil && s.sameFolder(externalID) && s.previous.DocumentTimes[externalID] == info.ModifiedAt && info.ModifiedAt != 0 {
 		s.next.DocumentTimes[externalID] = info.ModifiedAt
 		return s.checkpoint(ctx)
 	}
@@ -1056,7 +1102,7 @@ func (s *fetchState) fetchResource(
 				fingerprint := resourceFingerprint(nil, "unsupported-export:"+extension, title)
 				s.next.ResourceFingerprints[externalID] = fingerprint
 				s.next.DocumentTimes[externalID] = info.ModifiedAt
-				if s.incremental && s.previous != nil &&
+				if s.incremental && s.previous != nil && s.sameFolder(externalID) &&
 					s.previous.ResourceFingerprints[externalID] == fingerprint {
 					delete(s.next.FileRetries, externalID)
 					return s.checkpoint(ctx)
@@ -1097,7 +1143,7 @@ func (s *fetchState) fetchResource(
 		fingerprint := resourceFingerprint(nil, fileName, title)
 		s.next.ResourceFingerprints[externalID] = fingerprint
 		s.next.DocumentTimes[externalID] = info.ModifiedAt
-		if s.incremental && s.previous != nil &&
+		if s.incremental && s.previous != nil && s.sameFolder(externalID) &&
 			s.previous.ResourceFingerprints[externalID] == fingerprint {
 			delete(s.next.FileRetries, externalID)
 			return s.checkpoint(ctx)
@@ -1113,7 +1159,7 @@ func (s *fetchState) fetchResource(
 	}
 	fingerprint := resourceFingerprint(data, fileName, title)
 	s.next.ResourceFingerprints[externalID] = fingerprint
-	if s.incremental && s.previous != nil && info.ModifiedAt == 0 &&
+	if s.incremental && s.previous != nil && s.sameFolder(externalID) && info.ModifiedAt == 0 &&
 		s.previous.ResourceFingerprints[externalID] == fingerprint {
 		s.next.DocumentTimes[externalID] = info.ModifiedAt
 		delete(s.next.FileRetries, externalID)

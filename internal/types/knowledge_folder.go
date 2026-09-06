@@ -3,6 +3,7 @@ package types
 import (
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -50,6 +51,9 @@ func NormalizeKnowledgeFolderPath(raw string) string {
 		}
 		if len(segment) > MaxKnowledgeFolderSegmentLength {
 			segment = strings.TrimSpace(segment[:MaxKnowledgeFolderSegmentLength])
+			for !utf8.ValidString(segment) {
+				segment = segment[:len(segment)-1]
+			}
 		}
 		if segment == "" {
 			continue

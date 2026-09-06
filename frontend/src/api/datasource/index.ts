@@ -31,6 +31,7 @@ export interface DataSource {
  * `message` is a fallback when no i18n key exists (old logs decode into it).
  */
 export interface SyncItemError {
+  source_path?: string
 	 retry_state?: string
 	 retry_attempt?: number
 	 next_retry_at?: string
