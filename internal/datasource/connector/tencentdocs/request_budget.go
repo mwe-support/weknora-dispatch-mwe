@@ -50,9 +50,7 @@ func (t *budgetTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	response, err := t.base.RoundTrip(req)
 	if err == nil && response != nil && (response.StatusCode == 429 || response.StatusCode == 503) {
 		delay := retryAfter(response.Header.Get("Retry-After"), time.Now())
-		if delay == 0 {
-			delay = 10 * time.Second
-		}
+		delay = max(delay, initialMCPRetryDelay)
 		t.budget.mu.Lock()
 		until := time.Now().Add(delay)
 		if until.After(t.budget.cooldown) {

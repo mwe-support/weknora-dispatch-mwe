@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/common"
+	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware/asynqdl"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -116,6 +117,9 @@ const wikiIngestRetryDelay = 15 * time.Second
 // progress for 7–10 minutes while the orphan lock expires AND the retry
 // schedule catches up.
 func asynqRetryDelayFunc(n int, e error, t *asynq.Task) time.Duration {
+	if errors.Is(e, datasource.ErrTencentDocsSyncRetry) {
+		return max(2*time.Minute, asynq.DefaultRetryDelayFunc(n, e, t))
+	}
 	if errors.Is(e, service.ErrWikiIngestConcurrent) {
 		return wikiIngestRetryDelay
 	}

@@ -27,7 +27,7 @@ const (
 	nodeIDPrefix                   = "tdoc:node:"
 	homeNodeIDPrefix               = "tdoc:home-node:"
 	exportPollInterval             = 3 * time.Second
-	exportTimeout                  = 2 * time.Minute
+	exportTimeout                  = 45 * time.Minute
 	fileInfoUnsupportedTypeCode    = 400001
 	fileInfoUnsupportedTypeMessage = "file type not support query"
 	exportUnsupportedTypeCode      = 323908

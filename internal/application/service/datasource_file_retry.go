@@ -83,7 +83,7 @@ func (s *DataSourceService) scheduleFileRetry(ctx context.Context, fc datasource
 	}
 	_, err = s.taskEnqueuer.Enqueue(asynq.NewTask(types.TypeDataSourceSync, body),
 		asynq.Queue(types.QueueSync), asynq.TaskID("file-retry:"+id), asynq.ProcessAt(*when),
-		asynq.MaxRetry(2), asynq.Timeout(30*time.Minute), asynq.Retention(24*time.Hour))
+		asynq.MaxRetry(2), asynq.Timeout(2*time.Hour), asynq.Retention(24*time.Hour))
 	if err != nil && !errors.Is(err, asynq.ErrTaskIDConflict) && !errors.Is(err, asynq.ErrDuplicateTask) {
 		// An unsent retry must not leave HasRunningSync permanently blocking cron.
 		child.Status = types.SyncLogStatusFailed

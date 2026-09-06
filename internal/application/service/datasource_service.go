@@ -587,9 +587,12 @@ func (s *DataSourceService) GetSyncLog(ctx context.Context, syncLogID string) (*
 
 // ProcessSync handles the actual sync operation (called by asynq task)
 func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) (retErr error) {
+	tencentDocs := false
 	defer func() {
-		if errors.Is(retErr, datasource.ErrInvalidCredentials) || errors.Is(retErr, datasource.ErrInvalidConfig) {
+		if errors.Is(retErr, datasource.ErrInvalidCredentials) || errors.Is(retErr, datasource.ErrInvalidConfig) || errors.Is(retErr, datasource.ErrDataSourceNotActive) {
 			retErr = fmt.Errorf("%w: %w", retErr, asynq.SkipRetry)
+		} else if tencentDocs && retErr != nil && !errors.Is(retErr, asynq.SkipRetry) {
+			retErr = fmt.Errorf("%w: %w", datasource.ErrTencentDocsSyncRetry, retErr)
 		}
 	}()
 	var payload types.DataSourceSyncPayload
@@ -621,6 +624,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) (
 		return nil
 	}
 
+	tencentDocs = ds.Type == types.ConnectorTypeTencentDocs
 	// Get sync log
 	syncLog, err := s.syncLogRepo.FindByID(ctx, payload.SyncLogID)
 	if err != nil {

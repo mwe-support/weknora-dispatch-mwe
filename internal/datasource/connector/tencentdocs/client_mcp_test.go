@@ -602,7 +602,7 @@ func TestClientRetriesTransientHTTP429(t *testing.T) {
 	transport := &fakeMCPClient{}
 	transport.callTool = func(name string, _ map[string]interface{}) (*internalmcp.CallToolResult, error) {
 		calls++
-		if calls < 3 {
+		if calls <= maxMCPTransientRetries {
 			return nil, errors.New("transport error: request failed with status 429:")
 		}
 		return toolJSON(t, map[string]interface{}{
@@ -621,10 +621,10 @@ func TestClientRetriesTransientHTTP429(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSpaces() error: %v", err)
 	}
-	if calls != 3 || len(spaces) != 1 {
-		t.Fatalf("calls/spaces=%d/%+v, want 3/1", calls, spaces)
+	if calls != 5 || len(spaces) != 1 {
+		t.Fatalf("calls/spaces=%d/%+v, want 5/1", calls, spaces)
 	}
-	wantDelays := []time.Duration{2 * time.Second, 4 * time.Second}
+	wantDelays := []time.Duration{2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 16 * time.Minute}
 	if len(delays) != len(wantDelays) {
 		t.Fatalf("retry delays=%v", delays)
 	}

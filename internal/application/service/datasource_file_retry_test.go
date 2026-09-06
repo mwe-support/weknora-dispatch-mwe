@@ -181,5 +181,8 @@ func TestFileCompensationRealAsynqScheduleDeduplicates(t *testing.T) {
 		if task.State != asynq.TaskStateScheduled || task.Type != types.TypeDataSourceSync {
 			t.Fatalf("unexpected task: %+v", task)
 		}
+		if task.Timeout != 2*time.Hour {
+			t.Fatalf("minute retries have insufficient task budget: %v", task.Timeout)
+		}
 	}
 }

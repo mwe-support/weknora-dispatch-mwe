@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -35,7 +37,7 @@ const (
 
 	defaultMCPTimeout      = 30 * time.Second
 	maxMCPTransientRetries = 4
-	initialMCPRetryDelay   = 2 * time.Second
+	initialMCPRetryDelay   = 2 * time.Minute
 	maxMCPPagination       = 10000
 	maxExportBytes         = 100 << 20
 )
@@ -478,7 +480,7 @@ func (c *TencentDocsMCPClient) callToolJSON(
 ) error {
 	for attempt := 0; ; attempt++ {
 		err := c.callToolJSONOnce(ctx, tool, args, out)
-		if err == nil || attempt >= maxMCPTransientRetries || !isRetryableTencentDocsMCPError(tool, err) {
+		if err == nil || ctx.Err() != nil || attempt >= maxMCPTransientRetries || !isRetryableTencentDocsMCPError(tool, err) {
 			return err
 		}
 		delay := initialMCPRetryDelay << attempt
@@ -555,7 +557,7 @@ func sleepWithContext(ctx context.Context, delay time.Duration) error {
 }
 
 func isRetryableTencentDocsMCPError(tool string, err error) bool {
-	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, datasource.ErrInvalidCredentials) {
 		return false
 	}
 	message := strings.ToLower(err.Error())
@@ -566,12 +568,31 @@ func isRetryableTencentDocsMCPError(tool string, err error) bool {
 		return false
 	}
 	var toolErr *MCPToolError
+	if errors.As(err, &toolErr) {
+		switch toolErr.Code {
+		case 11607, 323908, 400005, 400006, 400007, 400008, 400016:
+			return false
+		}
+	}
 	if errors.As(err, &toolErr) && (toolErr.Code == 10012 || toolErr.Code == 10328) {
 		return true
 	}
-	return strings.Contains(message, "i/o timeout") ||
-		strings.Contains(message, "connection reset") ||
-		strings.Contains(message, "temporarily unavailable")
+	return isTransientReadError(err)
+}
+
+func isTransientReadError(err error) bool {
+	var network net.Error
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		(errors.As(err, &network) && network.Timeout()) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	for _, pattern := range []string{"timeout", "timed out", "connection reset", "connection refused", "temporarily unavailable", "status 502", "status 503", "status 504", "http 502", "http 503", "http 504"} {
+		if strings.Contains(message, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseTransportBusinessError normalizes the structured diagnostic currently
