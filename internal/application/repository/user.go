@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -77,7 +78,7 @@ func (r *userRepository) GetUsersByIDs(ctx context.Context, ids []string) (map[s
 // GetUserByEmail gets a user by email
 func (r *userRepository) GetUserByEmail(ctx context.Context, email string) (*types.User, error) {
 	var user types.User
-	if err := r.db.WithContext(ctx).Where("email = ?", email).First(&user).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("LOWER(email) = LOWER(?)", email).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrUserNotFound
 		}
@@ -129,6 +130,20 @@ func (r *userRepository) UpdateUser(ctx context.Context, user *types.User) error
 }
 
 // DeleteUser deletes a user
+func (r *userRepository) ResetPasswordAndRevokeTokens(ctx context.Context, userID, passwordHash string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&types.User{}).Where("id = ?", userID).
+			Updates(map[string]any{"password_hash": passwordHash, "updated_at": time.Now()})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrUserNotFound
+		}
+		return tx.Model(&types.AuthToken{}).Where("user_id = ?", userID).Update("is_revoked", true).Error
+	})
+}
+
 func (r *userRepository) DeleteUser(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&types.User{}).Error
 }

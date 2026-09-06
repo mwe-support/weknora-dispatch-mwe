@@ -1,0 +1,11 @@
+# Merge with the existing production Compose files. Load the already-provided
+# service-secrets.env via --env-file; never paste the password into this file.
+services:
+  app:
+    environment:
+      WEKNORA_AUTH_PASSWORD_RESET_ENABLED: "true"
+      WEKNORA_AUTH_PASSWORD_RESET_SMTP_HOST: smtp.exmail.qq.com
+      WEKNORA_AUTH_PASSWORD_RESET_SMTP_PORT: "465"
+      WEKNORA_AUTH_PASSWORD_RESET_SMTP_USERNAME: sales001@marveltechgroup.com
+      WEKNORA_AUTH_PASSWORD_RESET_FROM: sales001@marveltechgroup.com
+      WEKNORA_AUTH_PASSWORD_RESET_SMTP_PASSWORD: ${SYSTEM_EMAIL_PASSWORD:?Load SYSTEM_EMAIL_PASSWORD from the existing service-secrets.env}

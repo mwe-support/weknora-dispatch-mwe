@@ -260,6 +260,7 @@ export async function getOIDCConfig(): Promise<OIDCConfigResponse> {
 export interface AuthConfigResponse {
   success: boolean
   registration_mode: 'self_serve' | 'invite_only' | string
+  password_reset_enabled: boolean
 }
 
 export async function getAuthConfig(): Promise<AuthConfigResponse> {
@@ -267,8 +268,20 @@ export async function getAuthConfig(): Promise<AuthConfigResponse> {
     const response = await get('/api/v1/auth/config')
     return response as unknown as AuthConfigResponse
   } catch {
-    return { success: false, registration_mode: 'self_serve' }
+    return { success: false, registration_mode: 'self_serve', password_reset_enabled: false }
   }
+}
+
+export async function requestPasswordReset(email: string): Promise<{ success: boolean; message?: string }> {
+  return post('/api/v1/auth/password-reset/request', { email }) as unknown as Promise<{ success: boolean; message?: string }>
+}
+
+export async function confirmPasswordReset(data: {
+  email: string
+  code: string
+  new_password: string
+}): Promise<{ success: boolean; message?: string }> {
+  return post('/api/v1/auth/password-reset/confirm', data) as unknown as Promise<{ success: boolean; message?: string }>
 }
 
 /**

@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"github.com/redis/go-redis/v9"
 )
 
 const oidcNonceCookieName = "weknora_oidc_nonce"
@@ -36,6 +37,9 @@ type AuthHandler struct {
 	// fixtures — the share-link endpoints respond 503 rather than
 	// blocking the rest of the auth surface.
 	invitationSvc interfaces.TenantInvitationService
+	redisClient   *redis.Client
+	// Test seam; nil uses sendConfiguredPasswordResetEmail.
+	sendPasswordResetEmail func(context.Context, string, string) error
 }
 
 // NewAuthHandler creates a new auth handler instance with the provided services
@@ -54,6 +58,7 @@ func NewAuthHandler(configInfo *config.Config,
 	userService interfaces.UserService, tenantService interfaces.TenantService,
 	systemSettingSvc interfaces.SystemSettingService,
 	invitationSvc interfaces.TenantInvitationService,
+	redisClient *redis.Client,
 ) *AuthHandler {
 	// Boot-time guard: a nil-or-empty Auth section silently disables the
 	// invite_only gate (see Register below). Emit a loud one-shot log
@@ -71,6 +76,7 @@ func NewAuthHandler(configInfo *config.Config,
 		tenantService:    tenantService,
 		systemSettingSvc: systemSettingSvc,
 		invitationSvc:    invitationSvc,
+		redisClient:      redisClient,
 	}
 }
 
@@ -706,16 +712,17 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 // @Router       /auth/config [get]
 //
 // GetAuthConfig is intentionally a no-auth endpoint: the frontend reads
-// it on app load to decide whether to show the Register tab. We expose
-// only what the UI strictly needs (registration_mode); other config
+// it on app load to decide whether to show the Register and password-reset
+// entries. We expose only those booleans; SMTP credentials and other config
 // stays internal.
 func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
 	// Same source-of-truth as Register's gate, so the UI hide-the-button
 	// signal can never disagree with the API enforcement signal.
 	mode := h.resolveRegistrationMode(c.Request.Context())
 	c.JSON(http.StatusOK, gin.H{
-		"success":           true,
-		"registration_mode": mode,
+		"success":                true,
+		"registration_mode":      mode,
+		"password_reset_enabled": h.passwordResetReady(),
 	})
 }
 

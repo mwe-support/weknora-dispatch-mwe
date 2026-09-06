@@ -44,6 +44,7 @@ func (s *stubAuthTokenRepo) RevokeTokensByUserID(_ context.Context, userID strin
 type stubUserRepoForAuth struct {
 	users       map[string]*types.User
 	updateCalls int
+	tokens      *stubAuthTokenRepo
 }
 
 func (s *stubUserRepoForAuth) CreateUser(context.Context, *types.User) error { return nil }
@@ -70,6 +71,11 @@ func (s *stubUserRepoForAuth) UpdateUser(context.Context, *types.User) error {
 	s.updateCalls++
 	return nil
 }
+func (s *stubUserRepoForAuth) ResetPasswordAndRevokeTokens(ctx context.Context, id, hash string) error {
+	s.users[id].PasswordHash = hash
+	s.updateCalls++
+	return s.tokens.RevokeTokensByUserID(ctx, id)
+}
 func (s *stubUserRepoForAuth) DeleteUser(context.Context, string) error { return nil }
 func (s *stubUserRepoForAuth) ListUsers(context.Context, int, int) ([]*types.User, error) {
 	return nil, nil
@@ -87,6 +93,7 @@ func (s *stubUserRepoForAuth) SearchUsers(context.Context, string, int) ([]*type
 func newAuthTestUserService(tokenRepo *stubAuthTokenRepo) *userService {
 	return &userService{
 		userRepo: &stubUserRepoForAuth{
+			tokens: tokenRepo,
 			users: map[string]*types.User{
 				"user-1": {ID: "user-1", TenantID: 1},
 			},

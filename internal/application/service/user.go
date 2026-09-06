@@ -645,16 +645,7 @@ func (s *userService) ChangePassword(ctx context.Context, userID string, oldPass
 		return err
 	}
 
-	user.PasswordHash = string(hashedPassword)
-	user.UpdatedAt = time.Now()
-
-	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
-		return err
-	}
-
-	// Invalidate every outstanding session so a stolen token cannot
-	// survive a password rotation.
-	return s.tokenRepo.RevokeTokensByUserID(ctx, userID)
+	return s.userRepo.ResetPasswordAndRevokeTokens(ctx, user.ID, string(hashedPassword))
 }
 
 // AdminResetPassword replaces a user's password without checking the previous
@@ -675,13 +666,7 @@ func (s *userService) AdminResetPassword(ctx context.Context, userID string, new
 		return err
 	}
 
-	user.PasswordHash = string(hashedPassword)
-	user.UpdatedAt = time.Now()
-	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
-		return err
-	}
-
-	return s.tokenRepo.RevokeTokensByUserID(ctx, userID)
+	return s.userRepo.ResetPasswordAndRevokeTokens(ctx, user.ID, string(hashedPassword))
 }
 
 // ValidatePassword validates user password

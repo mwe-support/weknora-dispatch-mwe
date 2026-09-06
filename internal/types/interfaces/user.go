@@ -90,6 +90,8 @@ type UserService interface {
 
 // UserRepository defines the user repository interface
 type UserRepository interface {
+	// ResetPasswordAndRevokeTokens commits both changes in one transaction.
+	ResetPasswordAndRevokeTokens(ctx context.Context, userID, passwordHash string) error
 	// CreateUser creates a user
 	CreateUser(ctx context.Context, user *types.User) error
 	// GetUserByID gets a user by ID

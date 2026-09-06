@@ -280,6 +280,22 @@ type AuthConfig struct {
 	// tenantless creates only the identity and waits for an invitation or an
 	// explicit self-service tenant creation.
 	DefaultTenantMode string `yaml:"default_tenant_mode" json:"default_tenant_mode"`
+	// PasswordReset enables email-code recovery for local password accounts.
+	PasswordReset *PasswordResetConfig `yaml:"password_reset" json:"password_reset,omitempty"`
+}
+
+type PasswordResetConfig struct {
+	Enabled      bool   `yaml:"enabled"       json:"enabled"`
+	SMTPHost     string `yaml:"smtp_host"     json:"smtp_host"`
+	SMTPPort     int    `yaml:"smtp_port"     json:"smtp_port"`
+	SMTPUsername string `yaml:"smtp_username" json:"smtp_username"`
+	SMTPPassword string `yaml:"smtp_password" json:"-"`
+	From         string `yaml:"from"          json:"from"`
+}
+
+func (c *PasswordResetConfig) Ready() bool {
+	return c != nil && c.Enabled && strings.TrimSpace(c.SMTPHost) != "" && c.SMTPPort > 0 &&
+		strings.TrimSpace(c.SMTPUsername) != "" && c.SMTPPassword != "" && strings.TrimSpace(c.From) != ""
 }
 
 // AuthRegistrationMode constants used by handlers and middleware.
@@ -637,6 +653,9 @@ func ValidateConfig(cfg *Config) error {
 			errs = append(errs, fmt.Sprintf("auth.default_tenant_mode must be %q or %q, got %q",
 				AuthDefaultTenantModeCreatePersonal, AuthDefaultTenantModeTenantless, tenantMode))
 		}
+		if cfg.Auth.PasswordReset != nil && cfg.Auth.PasswordReset.Enabled && !cfg.Auth.PasswordReset.Ready() {
+			errs = append(errs, "auth.password_reset requires SMTP host, port, username, password, and from when enabled")
+		}
 	}
 
 	if cfg.Audit != nil && cfg.Audit.RetentionDays < 0 {
@@ -846,6 +865,41 @@ func applyAuthAndTenantDefaults(cfg *Config) {
 	}
 	if strings.TrimSpace(cfg.Auth.DefaultTenantMode) == "" {
 		cfg.Auth.DefaultTenantMode = AuthDefaultTenantModeCreatePersonal
+	}
+	if cfg.Auth.PasswordReset == nil {
+		cfg.Auth.PasswordReset = &PasswordResetConfig{}
+	}
+	pr := cfg.Auth.PasswordReset
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUTH_PASSWORD_RESET_ENABLED")); value != "" {
+		if enabled, err := strconv.ParseBool(value); err == nil {
+			pr.Enabled = enabled
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUTH_PASSWORD_RESET_SMTP_HOST")); value != "" {
+		pr.SMTPHost = value
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUTH_PASSWORD_RESET_SMTP_PORT")); value != "" {
+		if port, err := strconv.Atoi(value); err == nil {
+			pr.SMTPPort = port
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUTH_PASSWORD_RESET_SMTP_USERNAME")); value != "" {
+		pr.SMTPUsername = value
+	}
+	if value := os.Getenv("WEKNORA_AUTH_PASSWORD_RESET_SMTP_PASSWORD"); value != "" {
+		pr.SMTPPassword = value
+	}
+	if pr.SMTPPassword == "" {
+		pr.SMTPPassword = os.Getenv("SYSTEM_EMAIL_PASSWORD")
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUTH_PASSWORD_RESET_FROM")); value != "" {
+		pr.From = value
+	}
+	if pr.SMTPPort == 0 {
+		pr.SMTPPort = 587
+	}
+	if strings.TrimSpace(pr.From) == "" {
+		pr.From = strings.TrimSpace(pr.SMTPUsername)
 	}
 
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_TENANT_ENABLE_RBAC")); value != "" {

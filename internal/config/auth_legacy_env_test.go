@@ -102,3 +102,34 @@ func TestApplyAuthAndTenantDefaults_DefaultTenantMode(t *testing.T) {
 		}
 	})
 }
+
+func TestApplyAuthAndTenantDefaults_PasswordResetSMTP(t *testing.T) {
+	t.Setenv("WEKNORA_AUTH_PASSWORD_RESET_ENABLED", "true")
+	t.Setenv("WEKNORA_AUTH_PASSWORD_RESET_SMTP_HOST", "smtp.example.com")
+	t.Setenv("WEKNORA_AUTH_PASSWORD_RESET_SMTP_PORT", "465")
+	t.Setenv("WEKNORA_AUTH_PASSWORD_RESET_SMTP_USERNAME", "sender@example.com")
+	t.Setenv("WEKNORA_AUTH_PASSWORD_RESET_SMTP_PASSWORD", "secret")
+	t.Setenv("WEKNORA_AUTH_PASSWORD_RESET_FROM", "sender@example.com")
+	cfg := &Config{Auth: &AuthConfig{}}
+
+	applyAuthAndTenantDefaults(cfg)
+
+	if !cfg.Auth.PasswordReset.Ready() || cfg.Auth.PasswordReset.SMTPPort != 465 {
+		t.Fatal("password reset SMTP env was not applied")
+	}
+}
+
+func TestPasswordResetSystemEmailPasswordFallbackAndOverride(t *testing.T) {
+	t.Setenv("SYSTEM_EMAIL_PASSWORD", "system-fixture")
+	t.Setenv("WEKNORA_AUTH_PASSWORD_RESET_SMTP_PASSWORD", "")
+	cfg := &Config{Auth: &AuthConfig{}}
+	applyAuthAndTenantDefaults(cfg)
+	if cfg.Auth.PasswordReset.SMTPPassword != "system-fixture" {
+		t.Fatal("system email password fallback missing")
+	}
+	t.Setenv("WEKNORA_AUTH_PASSWORD_RESET_SMTP_PASSWORD", "dedicated-fixture")
+	applyAuthAndTenantDefaults(cfg)
+	if cfg.Auth.PasswordReset.SMTPPassword != "dedicated-fixture" {
+		t.Fatal("dedicated SMTP password must take precedence")
+	}
+}

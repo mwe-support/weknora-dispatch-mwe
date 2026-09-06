@@ -196,6 +196,12 @@
                   autocomplete="current-password" size="large" :disabled="loading" @enter="handleLogin" />
               </t-form-item>
 
+              <div v-if="passwordResetEnabled" class="forgot-password-row">
+                <a href="#" class="link-button" @click.prevent="openPasswordReset">
+                  {{ $t('auth.forgotPassword') }}
+                </a>
+              </div>
+
               <t-button type="submit" theme="primary" size="large" block :loading="loading" class="submit-button">
                 {{ loading ? $t('auth.loggingIn') : $t('auth.login') }}
               </t-button>
@@ -320,6 +326,34 @@
         </div>
       </div>
     </div>
+
+    <t-dialog v-model:visible="passwordResetVisible" :header="$t('auth.passwordResetTitle')" :footer="false"
+      attach="body" placement="center" width="min(460px, calc(100vw - 32px))">
+      <div class="password-reset-form">
+        <p class="password-reset-hint">{{ $t('auth.passwordResetHint') }}</p>
+        <label>{{ $t('auth.email') }}</label>
+        <div class="password-reset-code-row">
+          <t-input v-model="passwordResetData.email" :placeholder="$t('auth.emailPlaceholder')" :aria-label="$t('auth.email')" autocomplete="email" />
+          <t-button variant="outline" :loading="passwordResetSending" :disabled="passwordResetCooldown > 0"
+            @click="sendPasswordResetCode">
+            {{ passwordResetCooldown > 0 ? `${passwordResetCooldown}s` : $t('auth.sendVerificationCode') }}
+          </t-button>
+        </div>
+        <label>{{ $t('auth.verificationCode') }}</label>
+        <t-input v-model="passwordResetData.code" maxlength="6" :placeholder="$t('auth.verificationCodePlaceholder')" :aria-label="$t('auth.verificationCode')" autocomplete="one-time-code" inputmode="numeric" />
+        <label>{{ $t('auth.newPassword') }}</label>
+        <t-input v-model="passwordResetData.newPassword" type="password" autocomplete="new-password"
+          :aria-label="$t('auth.newPassword')"
+          :placeholder="$t('auth.passwordPlaceholder')" />
+        <label>{{ $t('auth.confirmPassword') }}</label>
+        <t-input v-model="passwordResetData.confirmPassword" type="password" autocomplete="new-password"
+          :aria-label="$t('auth.confirmPassword')"
+          :placeholder="$t('auth.confirmPasswordPlaceholder')" @enter="confirmPasswordResetCode" />
+        <t-button theme="primary" block :loading="passwordResetSubmitting" @click="confirmPasswordResetCode">
+          {{ $t('auth.resetPassword') }}
+        </t-button>
+      </div>
+    </t-dialog>
   </div>
 </template>
 
@@ -341,6 +375,8 @@ import {
   getOIDCConfig,
   autoSetup,
   getAuthConfig,
+  requestPasswordReset,
+  confirmPasswordReset,
   userInfoFromApi,
   getInvitationByToken,
   registerByInvite,
@@ -403,6 +439,18 @@ const oidcProviderName = ref('')
 // link is visible; the actual mode is fetched from /auth/config in onMounted.
 // In invite_only mode the link/card are hidden.
 const registrationEnabled = ref(true)
+const passwordResetEnabled = ref(false)
+const passwordResetVisible = ref(false)
+const passwordResetSending = ref(false)
+const passwordResetSubmitting = ref(false)
+const passwordResetCooldown = ref(0)
+let passwordResetTimer: number | null = null
+const passwordResetData = reactive({
+  email: '',
+  code: '',
+  newPassword: '',
+  confirmPassword: '',
+})
 
 // invite-link state. When the URL carries ?token=xxx we resolve it to
 // the originating tenant + role and switch the form into a "register
@@ -531,7 +579,69 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleClickOutside)
+  if (passwordResetTimer !== null) window.clearInterval(passwordResetTimer)
 })
+
+const openPasswordReset = () => {
+  passwordResetData.email = formData.email
+  passwordResetData.code = ''
+  passwordResetData.newPassword = ''
+  passwordResetData.confirmPassword = ''
+  passwordResetVisible.value = true
+}
+
+const sendPasswordResetCode = async () => {
+  if (!/^\S+@\S+\.\S+$/.test(passwordResetData.email.trim())) {
+    MessagePlugin.warning(t('auth.emailInvalid'))
+    return
+  }
+  passwordResetSending.value = true
+  try {
+    await requestPasswordReset(passwordResetData.email.trim())
+    MessagePlugin.success(t('auth.verificationCodeSent'))
+    passwordResetCooldown.value = 60
+    if (passwordResetTimer !== null) window.clearInterval(passwordResetTimer)
+    passwordResetTimer = window.setInterval(() => {
+      passwordResetCooldown.value--
+      if (passwordResetCooldown.value <= 0 && passwordResetTimer !== null) {
+        window.clearInterval(passwordResetTimer)
+        passwordResetTimer = null
+      }
+    }, 1000)
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('auth.passwordResetFailed'))
+  } finally {
+    passwordResetSending.value = false
+  }
+}
+
+const confirmPasswordResetCode = async () => {
+  const { email, code, newPassword, confirmPassword } = passwordResetData
+  if (!/^\d{6}$/.test(code.trim())) {
+    MessagePlugin.warning(t('auth.verificationCodeInvalid'))
+    return
+  }
+  if (newPassword.length < 8 || newPassword.length > 32 || !/[A-Za-z]/.test(newPassword) || !/\d/.test(newPassword)) {
+    MessagePlugin.warning(t('auth.passwordPlaceholder'))
+    return
+  }
+  if (newPassword !== confirmPassword) {
+    MessagePlugin.warning(t('auth.passwordMismatch'))
+    return
+  }
+  passwordResetSubmitting.value = true
+  try {
+    await confirmPasswordReset({ email: email.trim(), code: code.trim(), new_password: newPassword })
+    MessagePlugin.success(t('auth.passwordResetSuccess'))
+    formData.email = email.trim()
+    formData.password = ''
+    passwordResetVisible.value = false
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('auth.passwordResetFailed'))
+  } finally {
+    passwordResetSubmitting.value = false
+  }
+}
 
 const persistLoginResponse = async (response: any) => {
   // Backend renamed `tenant` to `active_tenant` and added `memberships`
@@ -607,8 +717,10 @@ const loadAuthConfig = async () => {
   try {
     const response = await getAuthConfig()
     registrationEnabled.value = response.registration_mode !== 'invite_only'
+    passwordResetEnabled.value = response.password_reset_enabled === true
   } catch {
     registrationEnabled.value = true
+    passwordResetEnabled.value = false
   }
 }
 
@@ -1484,6 +1596,40 @@ onMounted(async () => {
   font-weight: 500;
   font-family: var(--app-font-family);
   margin: 20px 0 16px 0;
+}
+
+.forgot-password-row {
+  margin-top: -8px;
+  text-align: right;
+
+  .link-button {
+    color: var(--td-brand-color);
+    text-decoration: none;
+    font-size: 13px;
+  }
+}
+
+.password-reset-form {
+  display: grid;
+  gap: 12px;
+
+  label {
+    color: var(--td-text-color-primary);
+    font-size: 13px;
+    font-weight: 500;
+  }
+}
+
+.password-reset-hint {
+  margin: 0 0 4px;
+  color: var(--td-text-color-secondary);
+  line-height: 1.6;
+}
+
+.password-reset-code-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
 }
 
 .oidc-divider {
