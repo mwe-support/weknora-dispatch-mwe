@@ -22,6 +22,7 @@ import { getDatasourceIconUrl } from './datasourceIcons'
 
 const props = defineProps<{
   kbId: string
+  faq?: boolean
   dataSource: DataSource | null
 }>()
 
@@ -1270,7 +1271,7 @@ const drawerConfirmText = computed(() => {
       <h4 class="setting-drawer__section-title">{{ t('datasource.step.selectType') }}</h4>
       <div class="ds-type-grid">
         <button
-          v-for="def in connectorDefs"
+          v-for="def in connectorDefs.filter(d => !faq || d.type === 'tencent_docs')"
           :key="def.type"
           type="button"
           :class="['ds-type-card', { disabled: !def.available }]"

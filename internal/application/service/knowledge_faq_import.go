@@ -92,7 +92,13 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		if !runningInfoSet || enqueueSucceeded {
 			return
 		}
-		if clearErr := s.clearRunningFAQImportInfoIfMatches(ctx, kbID, taskID, instanceID, enqueuedAt); clearErr != nil {
+		cleanupCtx := ctx
+		if payload.Synchronous {
+			var cancel context.CancelFunc
+			cleanupCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+		}
+		if clearErr := s.clearRunningFAQImportInfoIfMatches(cleanupCtx, kbID, taskID, instanceID, enqueuedAt); clearErr != nil {
 			logger.Warnf(ctx, "Failed to clear FAQ import running info after setup failure: %v", clearErr)
 		}
 	}()
@@ -198,6 +204,14 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 	}
 
 	logger.Infof(ctx, "FAQ import task payload size: %d bytes", len(payloadBytes))
+	if payload.Synchronous {
+		if err := s.ProcessFAQImport(ctx, asynq.NewTask(types.TypeFAQImport, payloadBytes)); err != nil {
+			return "", err
+		}
+		// No queued worker owns this marker. The defer must clear it even if
+		// ProcessFAQImport returned early without a terminal progress record.
+		return taskID, nil
+	}
 
 	maxRetry := 5
 	if payload.DryRun {
@@ -1358,7 +1372,7 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 	var embeddingModel embedding.Embedder
 	totalEntries := len(payload.Entries) + processedCount
 
-	// Recovery机制：如果发生任何错误或panic，回滚所有已创建的chunks和索引数据
+	// Convert panics to a failed import; ordinary errors are handled below.
 	defer func() {
 		// 捕获panic
 		if r := recover(); r != nil {
@@ -1541,6 +1555,9 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 			taskID, i+1, end, len(chunks), buildDuration, chunkIds)
 		// 创建chunks
 		createStartTime := time.Now()
+		if err := checkFAQSourcePublication(ctx); err != nil {
+			return err
+		}
 		if err := s.chunkService.CreateChunks(ctx, chunks); err != nil {
 			return fmt.Errorf("failed to create chunks: %w", err)
 		}
@@ -1557,9 +1574,18 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 
 		// 索引chunks
 		indexStartTime := time.Now()
-		// 注意：如果索引失败，defer中的recovery机制会自动回滚已创建的chunks和索引数据
+		// A failed import keeps its failure state; do not acknowledge the source.
 		if err := s.indexFAQChunks(ctx, kb, faqKnowledge, chunks, embeddingModel, true, false); err != nil {
 			return fmt.Errorf("failed to index chunks: %w", err)
+		}
+		if err := checkFAQSourcePublication(ctx); err != nil {
+			// Only this new batch crossed a source-scope change. Keep previously
+			// committed batches, but remove these rows and their new vectors.
+			dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			deleteErr := s.chunkRepo.DeleteChunks(dctx, tenantID, chunkIds)
+			vectorErr := s.deleteFAQChunkVectors(dctx, kb, faqKnowledge, chunks)
+			cancel()
+			return errors.Join(err, deleteErr, vectorErr)
 		}
 		indexDuration := time.Since(indexStartTime)
 		logger.Infof(
@@ -2389,6 +2415,9 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	}
 
 	// 幂等性处理：清理可能已部分处理的chunks和索引数据
+	if err := checkFAQSourcePublication(ctx); err != nil {
+		return err
+	}
 	chunksDeleted, err := s.chunkRepo.DeleteUnindexedChunks(ctx, payload.TenantID, payload.KnowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to delete unindexed chunks: %v", err)
@@ -2618,7 +2647,8 @@ func (s *knowledgeService) executeFAQMergeOperations(
 		}
 		chunkMap := make(map[string]*types.Chunk, len(fullChunks))
 		for _, c := range fullChunks {
-			chunkMap[c.ID] = c
+			copy := *c
+			chunkMap[c.ID] = &copy
 		}
 
 		// 2. 逐条应用合并数据
@@ -2654,15 +2684,20 @@ func (s *knowledgeService) executeFAQMergeOperations(
 			mergedChunks = append(mergedChunks, fullChunk)
 		}
 
-		// 3. 事务批量保存（GORM Save 全字段更新，确保 metadata/content_hash 持久化）
-		if err := s.chunkRepo.SaveChunks(ctx, mergedChunks); err != nil {
-			logger.Errorf(ctx, "FAQ import task %s: failed to batch save merged chunks: %v", taskID, err)
-			return mergedCount, fmt.Errorf("failed to batch save merged chunks: %w", err)
+		// Index the candidate values before publishing answers/hash. A failed
+		// index or DB write leaves the previous hash, so a retry repairs indexes
+		// instead of mistaking a partially applied update for an unchanged FAQ.
+		if err := checkFAQSourcePublication(ctx); err != nil {
+			return mergedCount, err
 		}
-
-		// 4. 重建索引（EFPutDocument 会自动覆盖相同 SourceID）
 		if err := s.indexFAQChunks(ctx, kb, faqKnowledge, mergedChunks, embeddingModel, false, false); err != nil {
 			return mergedCount, fmt.Errorf("failed to re-index merged chunks: %w", err)
+		}
+		if err := checkFAQSourcePublication(ctx); err != nil {
+			return mergedCount, err
+		}
+		if err := s.chunkRepo.SaveChunks(ctx, mergedChunks); err != nil {
+			return mergedCount, fmt.Errorf("failed to publish merged chunks: %w", err)
 		}
 
 		// 5. 收集成功条目信息

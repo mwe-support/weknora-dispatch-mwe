@@ -61,10 +61,18 @@ INSERT INTO knowledges(id,tenant_id,knowledge_base_id,title,metadata,parse_statu
 SELECT 'page-'||i,1,'kb','synthetic '||i,'{}','failed','2026-01-03','2026-01-05' FROM generate_series(1,55) i;
 UPDATE knowledges SET file_size=CASE id WHEN 'page-1' THEN 1024 WHEN 'page-2' THEN 1048576 WHEN 'page-3' THEN 1073741824 ELSE 2048 END;
 UPDATE sync_logs SET result=jsonb_set(result,'{errors,0,source_path}','"源空间/目录/文档"'::jsonb) WHERE id='second';
+INSERT INTO sync_logs(id,data_source_id,tenant_id,status,started_at,updated_at,result) VALUES
+('faq-format','ds',1,'partial','2026-01-02','2026-01-02','{"errors":[{"title":"FAQ template","file_id":"faq-format","external_id":"faq-node","source_path":"Department/FAQ.csv","stage":"faq_validate","category":"FAQ_FORMAT_INVALID","message":"Sheet1 row 119: answers required"}]}');
+INSERT INTO sync_logs(id,data_source_id,tenant_id,status,started_at,updated_at,result) VALUES
+('faq-old','ds',1,'failed','2026-01-02','2026-01-02','{"errors":[{"title":"FAQ fixed","external_id":"faq-fixed","stage":"faq_import"}]}'),
+('faq-proof','ds',1,'partial','2026-01-03','2026-01-03','{"faq_completed":{"faq-fixed":"2026-01-03T00:00:00Z","faq-node":"2026-01-01T00:00:00Z"}}');
 """
 
 ASSERTIONS = r"""
 DO $$ BEGIN
+ IF EXISTS (SELECT 1 FROM actual WHERE external_id='faq-fixed') THEN RAISE EXCEPTION 'completed FAQ file not resolved'; END IF;
+ IF NOT EXISTS (SELECT 1 FROM actual WHERE file_key='file:faq-format' AND category='FAQ_FORMAT_INVALID' AND stage='faq_validate') THEN RAISE EXCEPTION 'FAQ structured error not captured'; END IF;
+ IF NOT EXISTS (SELECT 1 FROM presentation_all WHERE "文档名称"='FAQ template' AND "失败环节"='FAQ格式校验' AND "腾讯文档路径"='Department/FAQ.csv') THEN RAISE EXCEPTION 'FAQ error presentation lost'; END IF;
  IF (SELECT count(*) FROM actual WHERE file_key='file:missing')<>1 THEN RAISE EXCEPTION 'missing knowledge or dedup failed'; END IF;
  IF (SELECT sync_log_id FROM actual WHERE file_key='file:missing')<>'second' THEN RAISE EXCEPTION 'latest per-file event lost'; END IF;
  IF NOT EXISTS (SELECT 1 FROM actual WHERE file_key='file:old') THEN RAISE EXCEPTION 'old completed or unrelated success falsely cleared failure'; END IF;
@@ -96,6 +104,20 @@ DO $$ BEGIN
  IF (SELECT "腾讯文档路径" FROM presentation_all WHERE "文档名称"='legacy title')<>'未记录' THEN RAISE EXCEPTION 'missing source path guessed'; END IF;
 END $$;
 SELECT 'PASS: identity, history, recovery, soft deletion, size classification, KB/MB/GB display, details, paging/count' AS result;
+INSERT INTO knowledges(id,tenant_id,knowledge_base_id,title,metadata,parse_status,created_at,updated_at)
+VALUES ('candidate-proof',1,'kb','candidate proof','{"datasource_id":"ds","file_id":"old","datasource_candidate":"true","source_fetch_completed_at":"2026-01-09T00:00:00Z"}','completed','2026-01-09','2026-01-09');
+DO $$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM actual WHERE file_id='old') THEN RAISE EXCEPTION 'unpublished candidate incorrectly resolved old source failure'; END IF;
+END $$;
+UPDATE knowledges SET metadata=(metadata-'datasource_candidate')||'{"datasource_processing_failed":"wiki"}'::jsonb WHERE id='candidate-proof';
+DO $$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM actual WHERE file_id='old') THEN RAISE EXCEPTION 'failed completed replacement incorrectly resolved source failure'; END IF;
+END $$;
+UPDATE knowledges SET metadata=metadata-'datasource_processing_failed' WHERE id='candidate-proof';
+DO $$ BEGIN
+ IF EXISTS(SELECT 1 FROM actual WHERE file_id='old') THEN RAISE EXCEPTION 'published completed replacement did not resolve source failure'; END IF;
+END $$;
+SELECT 'PASS: unpublished and published source candidates' AS result;
 ROLLBACK;
 """
 

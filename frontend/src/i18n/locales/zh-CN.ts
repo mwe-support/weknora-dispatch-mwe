@@ -528,6 +528,7 @@ export default {
     }
   },
   datasource: {
+    faqDescription: 'FAQ型知识库目前仅支持腾讯文档。请使用FAQ模板的CSV/TSV/XLSX/JSON或腾讯文档表格，必须包含问题和答案；多个答案使用##分隔。旧版XLS请转为XLSX。按标准问题追加或合并，不删除已有FAQ；格式错误将显示文件及行号。',
     fileRetry: {
       label: '本次重试安排', scheduled: '已安排补偿重试', running: '补偿处理中',
       enqueue_failed: '补偿入队失败，计划已保留',

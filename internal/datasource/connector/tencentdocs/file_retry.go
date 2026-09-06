@@ -165,7 +165,7 @@ func (c *Connector) FetchRetryStream(ctx context.Context, config *types.DataSour
 		return nil, err
 	}
 	defer client.Close()
-	s := &fetchState{client: client, handler: h, previous: previous, next: copyTencentDocsCursor(previous), seenDocs: map[string]bool{}, seenFileIDs: map[string]bool{}, visitedNodes: map[string]bool{}}
+	s := &fetchState{faq: config.FAQEnabled, client: client, handler: h, previous: previous, next: copyTencentDocsCursor(previous), seenDocs: map[string]bool{}, seenFileIDs: map[string]bool{}, visitedNodes: map[string]bool{}}
 	ids := make([]string, 0, len(previous.FileRetries))
 	for id := range previous.FileRetries {
 		ids = append(ids, id)

@@ -29,6 +29,7 @@ def queries():
         ELSE COALESCE(NULLIF(source,''),ds_name) END AS "来源",
       CASE stage WHEN 'fetch_metadata' THEN '获取文件信息' WHEN 'fetch_content' THEN '获取内容'
         WHEN 'fetch' THEN '源端获取' WHEN 'export' THEN '导出' WHEN 'download' THEN '下载'
+        WHEN 'faq_validate' THEN 'FAQ格式校验' WHEN 'faq_import' THEN 'FAQ入库'
         WHEN 'ingest' THEN '入库' WHEN 'knowledge_processing' THEN '知识处理' ELSE stage END AS "失败环节",
       CASE WHEN category='FILE_SIZE_EXCEEDED' THEN '文件大小超出上限（上限：'||{size_label('limit_bytes')}||'）'
         ELSE LEFT(regexp_replace(reason,'https?://[^[:space:]]+','[URL_REDACTED]','g'),600) END AS "异常原因",

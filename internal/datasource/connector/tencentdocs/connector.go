@@ -515,6 +515,7 @@ func (c *Connector) fetch(
 	defer client.Close()
 
 	state := &fetchState{
+		faq:               config.FAQEnabled,
 		client:            client,
 		handler:           handler,
 		previous:          previous,
@@ -668,6 +669,7 @@ func nodeFromFileInfo(info *FileInfo) Node {
 }
 
 type fetchState struct {
+	faq               bool
 	folderPath        string
 	client            Client
 	handler           datasource.StreamHandler
@@ -726,13 +728,21 @@ func (s *fetchState) emit(ctx context.Context, item types.FetchedItem) error {
 	item.Metadata["folder_path"] = s.folderPath
 	item.Metadata["source_path"] = strings.TrimPrefix(s.folderPath+"/"+item.Title, "/")
 	s.trackFileRetry(&item)
-	s.rememberFolder(item)
 	if s.handler == nil {
+		s.rememberFolder(item)
 		s.items = append(s.items, item)
 		return nil
 	}
 	if err := s.handler.Emit(ctx, item); err != nil {
 		return err
+	}
+	// A fetched body is not an acknowledgement of successful ingestion.
+	// Keep rejected files eligible for the next incremental sync.
+	if h, ok := s.handler.(interface{ ItemRejected(string) bool }); ok && h.ItemRejected(item.ExternalID) {
+		delete(s.next.DocumentTimes, item.ExternalID)
+		delete(s.next.ResourceFingerprints, item.ExternalID)
+	} else {
+		s.rememberFolder(item)
 	}
 	return s.checkpoint(ctx)
 }
@@ -1139,7 +1149,7 @@ func (s *fetchState) fetchResource(
 	}
 	title := firstNonEmpty(info.Title, node.Title, fileName)
 	extension := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileName)), ".")
-	if !types.IsSupportedKnowledgeFileExtension(extension) {
+	if !types.IsSupportedKnowledgeFileExtension(extension) && !(s.faq && (extension == "json" || extension == "tsv")) {
 		fingerprint := resourceFingerprint(nil, fileName, title)
 		s.next.ResourceFingerprints[externalID] = fingerprint
 		s.next.DocumentTimes[externalID] = info.ModifiedAt

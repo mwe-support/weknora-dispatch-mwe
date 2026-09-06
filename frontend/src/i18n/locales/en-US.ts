@@ -5164,6 +5164,7 @@ export default {
     daysAgo: '{days} days ago'
   },
   datasource: {
+    faqDescription: 'FAQ sources currently support Tencent Docs only. Use FAQ-template CSV/TSV/XLSX/JSON or a Tencent Docs FAQ table with question and answers columns; separate multiple answers with ##. Save legacy XLS as XLSX. Entries are appended or merged by standard question, never deleted. Invalid files report row details.',
     fileRetry: {
       label: 'Retry plan for this attempt', scheduled: 'Compensation scheduled', running: 'Compensation running',
       enqueue_failed: 'Enqueue failed; retry plan retained',

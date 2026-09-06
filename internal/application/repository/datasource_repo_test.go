@@ -70,6 +70,26 @@ func TestDataSourceSettingsCannotOverwriteRetryCursor(t *testing.T) {
 	assert.Equal(t, `{"server":"newer"}`, stored.LastSyncCursor.ToString())
 }
 
+func TestDataSourceCheckpointPreservesPauseAndRejectsChangedScope(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewDataSourceRepository(db)
+	ctx := context.Background()
+	ds := &types.DataSource{ID: "source-cas", TenantID: 1, Type: types.ConnectorTypeTencentDocs, Status: types.DataSourceStatusActive, Config: types.JSON(`{"scope":"old"}`)}
+	require.NoError(t, repo.Create(ctx, ds))
+	require.NoError(t, db.Model(&types.DataSource{}).Where("id = ?", ds.ID).Update("status", types.DataSourceStatusPaused).Error)
+	ds.LastSyncCursor = types.JSON(`{"confirmed":"old"}`)
+	require.NoError(t, repo.UpdateSyncState(ctx, ds))
+	stored, err := repo.FindByID(ctx, ds.ID)
+	require.NoError(t, err)
+	require.Equal(t, types.DataSourceStatusPaused, stored.Status)
+	require.NoError(t, db.Model(&types.DataSource{}).Where("id = ?", ds.ID).Update("config", types.JSON(`{"scope":"new"}`)).Error)
+	ds.LastSyncCursor = types.JSON(`{"confirmed":"wrong-scope"}`)
+	require.Error(t, repo.UpdateSyncState(ctx, ds))
+	stored, err = repo.FindByID(ctx, ds.ID)
+	require.NoError(t, err)
+	require.Equal(t, `{"confirmed":"old"}`, stored.LastSyncCursor.ToString())
+}
+
 func TestDataSourceRepositoryDeleteSoftDeletesOnSQLite(t *testing.T) {
 	db := setupDataSourceRepoTestDB(t)
 	repo := NewDataSourceRepository(db)

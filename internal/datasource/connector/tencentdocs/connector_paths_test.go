@@ -40,6 +40,24 @@ func TestTencentSourceFolderPaths(t *testing.T) {
 	require.LessOrEqual(t, len(p), 128)
 }
 
+type rejectingPathHandler struct{ recordingStreamHandler }
+
+func (h *rejectingPathHandler) ItemRejected(id string) bool {
+	return id == encodeNodeResourceID("s", "doc")
+}
+
+func TestTencentRejectedItemDoesNotAdvanceCursor(t *testing.T) {
+	c := pathClient()
+	h := &rejectingPathHandler{}
+	cursor, err := testConnector(c).FetchStream(context.Background(), testDataSourceConfig(encodeSpaceResourceID("s")), nil, h)
+	require.NoError(t, err)
+	state, err := decodeTencentDocsCursor(cursor)
+	require.NoError(t, err)
+	require.NotContains(t, state.DocumentTimes, encodeNodeResourceID("s", "doc"))
+	require.Contains(t, state.DocumentTimes, encodeNodeResourceID("s", "rootdoc"))
+	require.NotContains(t, state.FolderPaths, encodeNodeResourceID("s", "doc"))
+}
+
 func TestTencentMovedFolderRefetchesUnchangedDocument(t *testing.T) {
 	c := pathClient()
 	h := &recordingStreamHandler{}

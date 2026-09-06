@@ -23,7 +23,7 @@ import {
 } from './datasourceSyncPolling'
 import { useAuthStore } from '@/stores/auth'
 
-const props = defineProps<{ kbId: string }>()
+const props = defineProps<{ kbId: string; faq?: boolean }>()
 const emit = defineEmits<{ (e: 'count', value: number): void }>()
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -205,7 +205,7 @@ onBeforeUnmount(stopPolling)
   <div class="ds-settings">
     <div class="section-header">
       <h2>{{ t('datasource.title') }}</h2>
-      <p class="section-description">{{ t('datasource.description') }}</p>
+      <p class="section-description">{{ t(faq ? 'datasource.faqDescription' : 'datasource.description') }}</p>
     </div>
 
     <t-loading :loading="loading" size="small" class="ds-list-loading">
@@ -347,6 +347,7 @@ onBeforeUnmount(stopPolling)
     <DataSourceEditorDialog
       v-model:visible="editorVisible"
       :kb-id="kbId"
+      :faq="faq"
       :data-source="editingDs"
       @saved="onEditorSaved"
     />

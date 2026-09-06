@@ -320,6 +320,8 @@ const (
 
 // FAQBatchUpsertPayload 批量导入 FAQ 条目
 type FAQBatchUpsertPayload struct {
+	// Internal sync callers wait for validation and indexing before acknowledging a source file.
+	Synchronous bool              `json:"-"`
 	Entries     []FAQEntryPayload `json:"entries"      binding:"required"`
 	Mode        string            `json:"mode"         binding:"oneof=append replace"`
 	KnowledgeID string            `json:"knowledge_id"`

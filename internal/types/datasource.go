@@ -217,6 +217,7 @@ func (s *SyncLog) BeforeCreate(tx *gorm.DB) error {
 // included in API responses — handlers serialize via dto.NewDataSourceResponse
 // which strips the Credentials map by construction.
 type DataSourceConfig struct {
+	FAQEnabled bool `json:"-"`
 	// Common fields applicable to most connectors
 	Type string `json:"type"`
 
@@ -414,10 +415,13 @@ type SyncCursor struct {
 
 // SyncResult summarizes the outcome of a sync operation
 type SyncResult struct {
-	RetryState  string     `json:"retry_state,omitempty"`
-	RetryRound  int        `json:"retry_round,omitempty"`
-	RetryOf     string     `json:"retry_of,omitempty"`
-	NextRetryAt *time.Time `json:"next_retry_at,omitempty"`
+	// Per-source-file proof of completed FAQ import; an empty incremental run
+	// must never clear a previous file failure in observability.
+	FAQCompleted map[string]time.Time `json:"faq_completed,omitempty"`
+	RetryState   string               `json:"retry_state,omitempty"`
+	RetryRound   int                  `json:"retry_round,omitempty"`
+	RetryOf      string               `json:"retry_of,omitempty"`
+	NextRetryAt  *time.Time           `json:"next_retry_at,omitempty"`
 	// Total items processed
 	Total int `json:"total"`
 

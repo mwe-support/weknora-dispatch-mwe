@@ -94,18 +94,31 @@ func (r *DataSourceRepository) UpdateSyncState(ctx context.Context, ds *types.Da
 	if ds.ID == "" {
 		return errors.New("data source id is empty")
 	}
-	if err := r.db.WithContext(ctx).
+	query := r.db.WithContext(ctx).
 		Model(&types.DataSource{}).
-		Where("id = ?", ds.ID).
-		Updates(map[string]interface{}{
-			"status":           ds.Status,
-			"last_sync_at":     ds.LastSyncAt,
-			"last_sync_cursor": ds.LastSyncCursor,
-			"last_sync_result": ds.LastSyncResult,
-			"error_message":    ds.ErrorMessage,
-			"updated_at":       time.Now().UTC(),
-		}).Error; err != nil {
-		return err
+		Where("id = ?", ds.ID)
+	if ds.Type == types.ConnectorTypeTencentDocs {
+		// A worker from an older scope/credential configuration cannot replace
+		// the new execution cursor. Keep legacy connectors' update contract.
+		if len(ds.Config) == 0 {
+			query = query.Where("config IS NULL")
+		} else {
+			query = query.Where("config = ?", ds.Config)
+		}
+	}
+	result := query.Updates(map[string]interface{}{
+		"status":           gorm.Expr("CASE WHEN status IN (?, ?) THEN status ELSE ? END", types.DataSourceStatusPaused, types.DataSourceStatusDeleted, ds.Status),
+		"last_sync_at":     ds.LastSyncAt,
+		"last_sync_cursor": ds.LastSyncCursor,
+		"last_sync_result": ds.LastSyncResult,
+		"error_message":    ds.ErrorMessage,
+		"updated_at":       time.Now().UTC(),
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("data source changed or was deleted while syncing")
 	}
 	return nil
 }

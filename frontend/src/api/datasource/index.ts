@@ -32,6 +32,8 @@ export interface DataSource {
  */
 export interface SyncItemError {
   source_path?: string
+  stage?: string
+  category?: string
 	 retry_state?: string
 	 retry_attempt?: number
 	 next_retry_at?: string

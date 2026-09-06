@@ -528,6 +528,7 @@ export default {
     }
   },
   datasource: {
+    faqDescription: 'FAQ 데이터 소스는 현재 Tencent Docs만 지원합니다. FAQ 템플릿 CSV/TSV/XLSX/JSON 또는 표에 질문과 답변을 입력하고 여러 답변은 ##로 구분하세요. 기존 XLS는 XLSX로 저장해야 합니다. 표준 질문을 기준으로 추가·병합하며 기존 FAQ는 삭제하지 않습니다. 형식 오류에는 파일과 행 정보가 표시됩니다.',
     title: '데이터 소스 관리',
     description: '외부 데이터 소스를 구성하여 콘텐츠를 지식베이스에 자동 동기화',
     add: '데이터 소스 추가',

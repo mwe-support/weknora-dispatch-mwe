@@ -417,7 +417,7 @@
 
                 <!-- 数据源管理（仅编辑模式） -->
                 <div v-if="editorMode === 'edit' && activeKbId && currentSection === 'datasource'" class="section">
-                  <DataSourceSettings :kb-id="activeKbId" @count="dsCount = $event" />
+                  <DataSourceSettings :kb-id="activeKbId" :faq="formData?.type === 'faq'" @count="dsCount = $event" />
                 </div>
 
                 <!-- 共享设置（仅编辑模式） -->
@@ -642,9 +642,9 @@ const navItems = computed(() => {
       { key: 'graph', icon: 'chart-bubble', label: t('knowledgeEditor.sidebar.graph') },
       { key: 'advanced', icon: 'setting', label: t('knowledgeEditor.sidebar.advanced') }
     )
-    if (editorMode.value === 'edit' && activeKbId.value) {
-      items.push({ key: 'datasource', icon: 'cloud-download', label: t('knowledgeEditor.sidebar.datasource'), badge: dsCount.value || undefined })
-    }
+  }
+  if (editorMode.value === 'edit' && activeKbId.value) {
+    items.push({ key: 'datasource', icon: 'cloud-download', label: t('knowledgeEditor.sidebar.datasource'), badge: dsCount.value || undefined })
   }
   if (editorMode.value === 'edit' && activeKbId.value && !authStore.isLiteMode) {
     items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') })

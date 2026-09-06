@@ -79,6 +79,9 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 	if kb.TenantID != ds.TenantID {
 		return nil, datasource.ErrKnowledgeBaseNotFound
 	}
+	if err := validateFAQConnector(kb.Type, ds.Type); err != nil {
+		return nil, err
+	}
 
 	// Validate connector type
 	_, err = s.connectorRegistry.Get(ds.Type)
@@ -169,6 +172,13 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 	}
 	if ds.TenantID != existing.TenantID {
 		return nil, datasource.ErrDataSourceInvalid
+	}
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, ds.KnowledgeBaseID)
+	if err != nil || kb == nil || kb.TenantID != ds.TenantID {
+		return nil, datasource.ErrKnowledgeBaseNotFound
+	}
+	if err := validateFAQConnector(kb.Type, ds.Type); err != nil {
+		return nil, err
 	}
 
 	// Credentials NEVER flow through this endpoint — they live behind the
@@ -655,6 +665,10 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) (
 	}
 
 	wasPaused := ds.Status == types.DataSourceStatusPaused
+	if err := validateFAQConnector(kb.Type, ds.Type); err != nil {
+		s.updateSyncRunResult(ctx, ds, syncLog, &types.SyncResult{}, nil, types.SyncLogStatusFailed, err.Error(), wasPaused)
+		return fmt.Errorf("%w: %w", err, asynq.SkipRetry)
+	}
 
 	// Get connector
 	connector, err := s.connectorRegistry.Get(ds.Type)
@@ -690,6 +704,10 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) (
 	// Surface the KB's multimodal/VLM state to the connector so it only extracts
 	// embedded images for OCR when the KB can actually ingest them (never persisted).
 	config.MultimodalEnabled = kb.IsMultimodalEnabled()
+	config.FAQEnabled = kb.Type == types.KnowledgeBaseTypeFAQ
+	if config.FAQEnabled {
+		config.MultimodalEnabled = false
+	}
 
 	// Streaming path: connectors that support it interleave fetch→ingest→
 	// checkpoint so a large sync bounds memory and resumes after a timeout
@@ -969,11 +987,13 @@ func streamStartCursor(ds *types.DataSource, forceFull bool, attempt int) (*type
 // Emit ingests each item as it arrives (bounding memory) and Checkpoint persists
 // the connector cursor plus live progress counts at page boundaries.
 type streamSyncHandler struct {
-	svc     *DataSourceService
-	ds      *types.DataSource
-	tagIDs  []string
-	result  *types.SyncResult
-	syncLog *types.SyncLog
+	faq      bool
+	rejected map[string]bool
+	svc      *DataSourceService
+	ds       *types.DataSource
+	tagIDs   []string
+	result   *types.SyncResult
+	syncLog  *types.SyncLog
 }
 
 // Emit ingests one streamed item. A canceled context aborts the stream so the
@@ -984,10 +1004,30 @@ func (h *streamSyncHandler) Emit(ctx context.Context, item types.FetchedItem) er
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// A slow fetch may finish after the owner pauses or reconfigures the source.
+	// Check before either document or synchronous FAQ publication begins.
+	if h.ds.Type == types.ConnectorTypeTencentDocs {
+		if err := h.svc.checkTencentCandidateScope(ctx, h.ds); err != nil {
+			return err
+		}
+	}
 	h.result.Total++
-	h.svc.applyFetchedItem(withKBActivitySuppressed(ctx), h.ds, &item, h.tagIDs, h.result)
+	before := h.result.Failed
+	if h.faq && !item.IsDeleted && item.Metadata["error"] == "" {
+		h.svc.applyFAQFetchedItem(withKBActivitySuppressed(ctx), h.ds, &item, h.result)
+	} else {
+		h.svc.applyFetchedItem(withKBActivitySuppressed(ctx), h.ds, &item, h.tagIDs, h.result)
+	}
+	if h.result.Failed > before {
+		if h.rejected == nil {
+			h.rejected = map[string]bool{}
+		}
+		h.rejected[item.ExternalID] = true
+	}
 	return nil
 }
+
+func (h *streamSyncHandler) ItemRejected(id string) bool { return h.rejected[id] }
 
 // Checkpoint persists the connector cursor onto the data source and mirrors the
 // running counts into the sync log so progress survives a crash and the UI can
@@ -1059,7 +1099,7 @@ func (s *DataSourceService) processSyncStreaming(
 			return err
 		}
 	}
-	handler := &streamSyncHandler{svc: s, ds: ds, tagIDs: autoTagIDs, result: result, syncLog: syncLog}
+	handler := &streamSyncHandler{svc: s, ds: ds, tagIDs: autoTagIDs, result: result, syncLog: syncLog, faq: config.FAQEnabled}
 
 	var nextCursor *types.SyncCursor
 	var fetchErr error

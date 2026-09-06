@@ -36,10 +36,18 @@ WITH valid_sources AS (
 ), unresolved_file_errors AS (
   SELECT e.* FROM latest_file_errors e
   WHERE NOT EXISTS (
+    SELECT 1 FROM sync_logs completed
+    WHERE completed.data_source_id=e.id AND completed.tenant_id=e.tenant_id
+      AND e.external_id IS NOT NULL
+      AND CASE WHEN pg_input_is_valid(completed.result->'faq_completed'->>e.external_id,'timestamp with time zone')
+          THEN (completed.result->'faq_completed'->>e.external_id)::timestamptz>e.failed_at ELSE false END
+  ) AND NOT EXISTS (
     SELECT 1 FROM knowledges k
     WHERE k.tenant_id=e.tenant_id AND k.knowledge_base_id=e.knowledge_base_id
       AND k.deleted_at IS NULL AND k.metadata->>'datasource_id'=e.id
       AND k.parse_status='completed'
+	  AND COALESCE(k.metadata->>'datasource_candidate','')<>'true'
+	  AND COALESCE(k.metadata->>'datasource_processing_failed','')=''
       AND ((e.canonical_file_id IS NOT NULL AND k.metadata->>'file_id'=e.canonical_file_id)
         OR (e.canonical_file_id IS NULL AND e.external_id IS NOT NULL AND k.metadata->>'external_id'=e.external_id))
       -- Updated timestamps or an old completed row are NOT source-read proof.
