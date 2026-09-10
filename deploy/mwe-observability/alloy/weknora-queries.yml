@@ -89,3 +89,45 @@ weknora_sync_status:
     - total:
         usage: GAUGE
         description: Data-source sync runs over the last twenty-four hours
+
+weknora_lifecycle_incidents:
+  query: |
+    SELECT error_code, COUNT(*)::bigint AS total
+    FROM mwe_processing_unresolved_incidents GROUP BY error_code
+  cache_seconds: 15
+  metrics:
+    - error_code:
+        usage: LABEL
+        description: Unresolved lifecycle incident code, including old cleanup
+    - total:
+        usage: GAUGE
+        description: Unresolved incidents without an age cutoff
+
+weknora_lifecycle_inconsistencies:
+  query: |
+    SELECT status, COUNT(*)::bigint AS total
+    FROM mwe_processing_lifecycle_inconsistencies GROUP BY status
+  cache_seconds: 15
+  metrics:
+    - status:
+        usage: LABEL
+        description: Lifecycle invariant that needs reconciliation
+    - total:
+        usage: GAUGE
+        description: Current lifecycle inconsistencies
+
+weknora_lifecycle_stages:
+  query: |
+    SELECT stage,status,COUNT(*)::bigint AS total
+    FROM mwe_processing_stage_retry_queue GROUP BY stage,status
+  cache_seconds: 15
+  metrics:
+    - stage:
+        usage: LABEL
+        description: Processing stage
+    - status:
+        usage: LABEL
+        description: Authoritative stage state
+    - total:
+        usage: GAUGE
+        description: Active or unresolved stage count

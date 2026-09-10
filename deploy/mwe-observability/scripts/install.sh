@@ -81,12 +81,14 @@ if [[ ! -f "$SECRETS_FILE" ]]; then
     "ALTER ROLE weknora_observer PASSWORD '$observer_password';" \
     "GRANT CONNECT ON DATABASE $db_name TO weknora_observer;" \
     "GRANT USAGE ON SCHEMA public TO weknora_observer;" \
-    "GRANT SELECT ON ALL TABLES IN SCHEMA public TO weknora_observer;" \
-    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO weknora_observer;" \
     | docker exec -i WeKnora-postgres psql -U weknora -d "$db_name" -v ON_ERROR_STOP=1 >/dev/null
 else
   chmod 600 "$SECRETS_FILE"
 fi
+
+docker exec -i WeKnora-postgres psql -U weknora -d "$db_name" -v ON_ERROR_STOP=1 \
+  -v app_schema=public -v observer_schema=mwe_observer -v observer_role=weknora_observer \
+  < "$ROOT/grafana/queries/observer-access.sql" >/dev/null
 
 cd "$ROOT"
 docker compose --env-file "$SECRETS_FILE" --profile backend --profile agent config --quiet

@@ -1,4 +1,22 @@
 groups:
+  - name: processing-lifecycle
+    rules:
+      - alert: WeKnoraLifecycleInconsistent
+        expr: sum by (status) (weknora_lifecycle_inconsistencies_total) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "WeKnora processing state requires reconciliation"
+          description: "{{ $labels.status }} remains unresolved. Inspect lifecycle history; an observability warning is not evidence of a business-stage failure."
+      - alert: WeKnoraLifecycleBlocked
+        expr: sum by (stage) (weknora_lifecycle_stages_total{status="blocked"}) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A WeKnora stage needs operator attention"
+          description: "Stage {{ $labels.stage }} is blocked. Retry only that stage after resolving its recorded cause."
   - name: knowledgebase-health
     rules:
       - alert: KnowledgeBaseEndpointDown
