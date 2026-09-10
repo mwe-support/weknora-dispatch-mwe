@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getSyncLogs, type SyncLog, type SyncItemError } from '@/api/datasource'
+import ProcessingHistory from '@/components/ProcessingHistory.vue'
 
 const props = defineProps<{
+  kbId: string
   dataSourceId: string
   dataSourceName?: string
 }>()
@@ -15,12 +17,19 @@ const loading = ref(false)
 const loadingMore = ref(false)
 const hasMore = ref(false)
 const expandedId = ref('')
+const activeTab = ref('lifecycle')
+const loadError = ref('')
+let request = 0
 const pageSize = 50
 
 async function fetchLogs(reset = true) {
   if (!props.dataSourceId) return
+  const serial = ++request
+  loadError.value = ''
 
   if (reset) {
+    logs.value = []
+    hasMore.value = false
     loading.value = true
   } else {
     loadingMore.value = true
@@ -29,10 +38,13 @@ async function fetchLogs(reset = true) {
   try {
     const offset = reset ? 0 : logs.value.length
     const res = await getSyncLogs(props.dataSourceId, pageSize, offset)
+    if (serial !== request) return
     const items = res?.data || res || []
     logs.value = reset ? items : [...logs.value, ...items]
     hasMore.value = items.length === pageSize
-  } catch { /* ignore */ }
+  } catch { if (serial === request) loadError.value = t('processing.loadingError') }
+
+  if (serial !== request) return
 
   if (reset) {
     loading.value = false
@@ -41,11 +53,17 @@ async function fetchLogs(reset = true) {
   }
 }
 
-watch(visible, (v) => {
-  if (!v) return
+watch(() => [visible.value, props.dataSourceId], () => {
+  ++request
+  loading.value = false
+  loadingMore.value = false
+  logs.value = []
+  if (!visible.value) return
   expandedId.value = ''
-  fetchLogs(true)
+  if (activeTab.value === 'legacy') fetchLogs(true)
 })
+watch(activeTab, (value) => { if (value === 'legacy' && visible.value) fetchLogs(true) })
+onBeforeUnmount(() => { ++request })
 
 function toggleExpand(id: string) {
   expandedId.value = expandedId.value === id ? '' : id
@@ -182,8 +200,9 @@ const groupedLogs = computed(() => {
 <template>
   <t-drawer
     v-model:visible="visible"
-    size="480px"
+    size="min(1100px, 96vw)"
     destroy-on-close
+    :footer="false"
     class="ds-logs-drawer"
   >
     <template #header>
@@ -191,28 +210,38 @@ const groupedLogs = computed(() => {
         <span class="logs-drawer-title">
           {{ props.dataSourceName ? `${t('datasource.syncHistory')} · ${props.dataSourceName}` : t('datasource.syncHistory') }}
         </span>
-        <t-tooltip :content="t('datasource.refreshLogs')">
+        <t-tooltip v-if="activeTab === 'legacy'" :content="t('datasource.refreshLogs')">
           <t-button
             size="small"
             variant="text"
             shape="square"
             :loading="loading"
-            @click="fetchLogs"
+            :aria-label="t('datasource.refreshLogs')"
+            @click="fetchLogs(true)"
           >
             <template #icon><t-icon name="refresh" /></template>
           </t-button>
         </t-tooltip>
+        <t-button variant="text" @click="visible = false">{{ t('processing.close') }}</t-button>
       </div>
     </template>
 
+    <div class="history-tabs" :aria-label="t('datasource.syncHistory')">
+      <button type="button" :aria-pressed="activeTab === 'lifecycle'" @click="activeTab = 'lifecycle'">{{ t('processing.title') }}</button>
+      <button type="button" :aria-pressed="activeTab === 'legacy'" @click="activeTab = 'legacy'">{{ t('processing.legacy') }}</button>
+    </div>
+    <ProcessingHistory v-if="visible && activeTab === 'lifecycle'" :kb-id="kbId" :source-id="dataSourceId" />
+    <section v-if="activeTab === 'legacy'" :aria-label="t('processing.legacy')">
+    <p style="margin:16px 0">{{ t('processing.legacyNotice') }}</p>
+    <t-alert v-if="loadError" theme="error" :message="loadError" role="alert" />
     <div v-if="loading" style="text-align:center;padding:60px"><t-loading /></div>
 
-    <div v-else-if="logs.length === 0" class="logs-empty">
+    <div v-else-if="!loadError && logs.length === 0" class="logs-empty">
       <t-icon name="root-list" size="40px" />
       <p>{{ t('datasource.noLogs') }}</p>
     </div>
 
-    <template v-else>
+    <template v-else-if="logs.length">
       <!-- Summary -->
       <div class="logs-summary">
         <div class="summary-stat">
@@ -331,10 +360,14 @@ const groupedLogs = computed(() => {
         </div>
       </div>
     </template>
+    </section>
   </t-drawer>
 </template>
 
 <style scoped>
+.history-tabs { display: flex; gap: 20px; margin-bottom: 16px; border-bottom: 1px solid var(--td-component-stroke); }
+.history-tabs button { padding: 12px 4px; color: var(--td-text-color-secondary); background: transparent; border: 0; border-bottom: 3px solid transparent; font: inherit; cursor: pointer; }
+.history-tabs button[aria-pressed=true] { color: var(--td-brand-color); border-bottom-color: var(--td-brand-color); }
 .logs-empty {
   display: flex;
   flex-direction: column;

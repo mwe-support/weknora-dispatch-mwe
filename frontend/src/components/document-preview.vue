@@ -9,7 +9,7 @@ import 'highlight.js/styles/github.css';
 import markedKatex from 'marked-katex-extension';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
-import { sanitizeHTML, safeMarkdownToHTML } from '@/utils/security';
+import { sanitizeHTML, safeMarkdownToHTML, hydrateProtectedFileImages } from '@/utils/security';
 
 
 const VueOfficePptx = defineAsyncComponent(() => import('@vue-office/pptx'));
@@ -18,6 +18,7 @@ const { t } = useI18n();
 
 const props = defineProps<{
   knowledgeId?: string;
+  kbId?: string;
   sessionId?: string;
   attachmentId?: string;
   fileType: string;
@@ -33,6 +34,7 @@ const blobUrl = ref('');
 const textContent = ref('');
 const highlightedCode = ref('');
 const markdownHtml = ref('');
+const markdownContainer = ref<HTMLElement | null>(null);
 const excelHtml = ref('');
 const pptxData = shallowRef<ArrayBuffer | null>(null);
 const docxContainer = ref<HTMLElement | null>(null);
@@ -244,6 +246,8 @@ async function renderMarkdown(blob: Blob) {
   const safeText = safeMarkdownToHTML(mathSafeText);
   const rawHtml = marked.parse(safeText) as string;
   markdownHtml.value = sanitizeHTML(rawHtml);
+  await nextTick();
+  await hydrateProtectedFileImages(markdownContainer.value, props.kbId ? { mode: 'knowledgeBase', kbId: props.kbId } : undefined);
 }
 
 function onImageLoad(e: Event) {
@@ -435,7 +439,7 @@ onUnmounted(() => {
 
     <!-- Markdown -->
     <div v-else-if="previewType === 'markdown' && markdownHtml" class="preview-markdown">
-      <div class="markdown-body" v-html="markdownHtml" />
+      <div ref="markdownContainer" class="markdown-body" v-html="markdownHtml" />
     </div>
 
     <!-- Text / Code -->

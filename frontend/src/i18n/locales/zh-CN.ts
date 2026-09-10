@@ -1,4 +1,6 @@
+import { processingZH } from '../processingMessages'
 export default {
+  processing: processingZH,
   platformApiKeys: {
     title: '平台 API Key',
     description: '为跨空间自动化创建平台级凭据；调用空间接口时通过 X-Tenant-ID 指定目标空间。',

@@ -2126,7 +2126,7 @@ const handleDetailsScroll = () => {
 
           <!-- 文档预览视图 -->
           <div v-else-if="viewMode === 'preview'">
-            <DocumentPreview :knowledgeId="details.id" :fileType="details.file_type" :fileName="details.title"
+            <DocumentPreview :knowledgeId="details.id" :kbId="kbId" :fileType="details.file_type" :fileName="details.title"
               :active="viewMode === 'preview'" />
           </div>
         </section>

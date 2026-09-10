@@ -18,6 +18,7 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
   parser: 'admin',
   storage: 'admin',
   mcp: 'admin',
+  'processing-history': 'admin',
   system: 'viewer',
   userprofile: 'viewer',
   tenant: 'viewer',

@@ -1,4 +1,6 @@
+import { processingEN } from '../processingMessages'
 export default {
+  processing: processingEN,
   menu: {
     knowledgeBase: 'Knowledge Base',
     agents: 'Agents',

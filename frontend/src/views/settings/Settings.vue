@@ -143,6 +143,10 @@
                   <div v-if="currentSection === 'runtime-queues'" class="section">
                     <RuntimeQueues />
                   </div>
+                  <div v-if="currentSection === 'processing-history'" class="section">
+                    <h2>{{ t('processing.title') }}</h2>
+                    <ProcessingHistory />
+                  </div>
 
                   <div v-if="currentSection === 'platform-api-keys'" class="section">
                     <PlatformAPIKeys />
@@ -209,6 +213,7 @@ import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
 import TenantMembers from './TenantMembers.vue'
 import SystemSettings from '@/views/system/SystemSettings.vue'
 import RuntimeQueues from '@/views/system/RuntimeQueues.vue'
+import ProcessingHistory from '@/components/ProcessingHistory.vue'
 import PlatformAPIKeys from '@/views/system/PlatformAPIKeys.vue'
 import SystemAuditLog from '@/views/system/SystemAuditLog.vue'
 import IntegrationSettingsSection from '@/views/integrations/IntegrationSettingsSection.vue'
@@ -330,6 +335,7 @@ const navItems = computed(() => {
     { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
     { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
     { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
+    { key: 'processing-history', icon: 'history', label: t('processing.title') },
     { key: 'system', icon: 'info-circle', label: t('settings.versionInfo') },
     { key: 'system-global', icon: 'server', label: t('settings.system') },
     { key: 'runtime-queues', icon: 'queue', label: t('settings.taskQueue') },
@@ -392,6 +398,7 @@ const navGroups = computed<NavGroup[]>(() => {
         'storage',
         'websearch',
         'mcp',
+        'processing-history',
       ]),
     },
     {

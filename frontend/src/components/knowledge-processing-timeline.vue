@@ -11,6 +11,8 @@ import {
 } from '@/utils/knowledgeTrace'
 import { resolveTimelineHeaderStatus } from '@/utils/knowledgeProcessingStatus'
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
+import ProcessingJobDetails from './ProcessingJobDetails.vue'
+import { getProcessingJob, type JobDetail } from '@/api/processing'
 
 type SpanNode = KnowledgeTraceNode
 
@@ -84,6 +86,9 @@ const STAGES = ['docreader', 'chunking', 'embedding', 'multimodal', 'postprocess
 const POLL_INTERVAL_MS = 2000
 
 const data = ref<SpansResponse | null>(null)
+const identityChecked = ref(false)
+const processingRef = ref<{ jobId: string; kbId: string }>()
+const processingDetail = ref<JobDetail>()
 const processOverrides = ref<KnowledgeProcessOverrides | null>(null)
 const currentKnowledgeFileType = ref('')
 const loading = ref(false)
@@ -329,6 +334,8 @@ const isWithinQuiesceGrace = computed<boolean>(() => {
 //     yet?"). The next user-initiated drawer-open will get a fresh
 //     fetch via onMounted, picking up any post-pipeline progress.
 function shouldPollNow(): boolean {
+  if (!identityChecked.value) return true
+  if (processingRef.value) return props.compact && (!processingDetail.value || processingDetail.value.steps.some(s => ['planned','enqueue_pending','queued','running','waiting_external','retry_wait'].includes(s.status)))
   if (!data.value) return isPolling(props.parseStatus)
   if (props.gracePoll) {
     return isLive.value || isWithinQuiesceGrace.value
@@ -343,8 +350,23 @@ async function fetchSpans(opts: { manual?: boolean } = {}) {
   if (opts.manual) refreshing.value = true
   if (!data.value) loading.value = true
   let attemptOk = false
+  const knowledgeID = props.knowledgeId
   try {
+    if (!identityChecked.value) await fetchProcessOverrides()
+    if (knowledgeID !== props.knowledgeId || !identityChecked.value) return
+    if (processingRef.value) {
+      const current = await getProcessingJob(processingRef.value.kbId, processingRef.value.jobId)
+      if (knowledgeID !== props.knowledgeId) return
+      processingDetail.value = current
+      const done = current.steps.filter(s => s.status === 'succeeded').length
+      const active = current.steps.find(s => ['blocked','failed','running','retry_wait'].includes(s.status))
+      emit('update:hasSpans', current.steps.length > 0)
+      emit('update:summary', { totalMs: 0, status: current.job.status === 'succeeded' ? 'done' : ['blocked','failed'].includes(current.job.status) ? 'failed' : current.job.status === 'canceled' ? 'cancelled' : 'running', stageIndex: done, stageTotal: current.steps.length, stageLabel: active?.stage || t('processing.title') })
+      attemptOk = true
+      return
+    }
     const res: any = await getKnowledgeSpans(props.knowledgeId, selectedAttempt.value)
+    if (knowledgeID !== props.knowledgeId) return
     if (res?.success && res.data) {
       data.value = res.data as SpansResponse
       attemptOk = true
@@ -517,6 +539,9 @@ function onAttemptChange(n: number) {
 watch(
   () => props.knowledgeId,
   () => {
+    identityChecked.value = false
+    processingRef.value = undefined
+    processingDetail.value = undefined
     selectedAttempt.value = undefined
     data.value = null
     processOverrides.value = null
@@ -526,7 +551,6 @@ watch(
     attemptStatuses.clear()
     userToggledRows.value = new Set()
     fetchSpans()
-    fetchProcessOverrides()
   },
 )
 
@@ -537,10 +561,17 @@ function onKeydown(ev: KeyboardEvent) {
 }
 
 async function fetchProcessOverrides() {
-  if (props.compact || !props.knowledgeId) return
+  if (!props.knowledgeId) return
+  const knowledgeID = props.knowledgeId
   try {
-    const res: any = await getKnowledgeDetails(props.knowledgeId)
+    const res: any = await getKnowledgeDetails(knowledgeID)
+    if (knowledgeID !== props.knowledgeId) return
     if (res?.success && res.data) {
+      if (String(res.data.metadata?.processing_protocol) === '2') {
+        if (!res.data.metadata.processing_job_id || !res.data.knowledge_base_id) return
+        processingRef.value = { jobId: res.data.metadata.processing_job_id, kbId: res.data.knowledge_base_id }
+      }
+      identityChecked.value = true
       processOverrides.value = res.data.metadata?.process_overrides ?? null
       currentKnowledgeFileType.value = normalizeFileType(
         res.data.file_type || getFileTypeFromName(res.data.file_name || res.data.title || ''),
@@ -554,7 +585,6 @@ async function fetchProcessOverrides() {
 
 onMounted(() => {
   fetchSpans()
-  fetchProcessOverrides()
   // One permanent interval for the entire component lifetime. The
   // tick decides whether to actually fetch — no clearing, no
   // re-arming, no watchers wired into it. If this interval ever
@@ -1253,6 +1283,7 @@ watch(
     () => stages.value.length,
   ],
   () => {
+    if (!identityChecked.value || processingRef.value) return
     emit('update:summary', {
       totalMs: totalMs.value,
       status: headerStatus.value,
@@ -1402,10 +1433,16 @@ const processConfigLines = computed<string[]>(() => {
 
 <template>
   <div class="kp-timeline" :class="{ 'kp-compact': compact }">
+    <template v-if="processingRef">
+      <span v-if="compact">{{ processingDetail ? t(`processing.${processingDetail.job.status}`) : t('processing.title') }}</span>
+      <ProcessingJobDetails v-else :kb-id="processingRef.kbId" :job-id="processingRef.jobId" @close="emit('close')" @changed="fetchSpans({ manual: true })" />
+    </template>
+    <t-loading v-else-if="!identityChecked && loading" />
+    <t-alert v-else-if="!identityChecked" theme="error" :message="t('processing.loadingError')" />
     <!-- =========================================================
          COMPACT MODE — used by the card hover popover. Untouched.
          ========================================================= -->
-    <template v-if="compact">
+    <template v-else-if="compact">
       <div class="kp-compact-row">
         <span v-for="s in stages" :key="s.name" class="kp-dot" :class="['kp-dot-' + s.status]"
           :title="t(`knowledgeStages.stage.${s.name}`) + ' · ' + t(`knowledgeStages.status.${s.status}`)" />

@@ -354,6 +354,7 @@ onBeforeUnmount(stopPolling)
 
     <DataSourceSyncLogs
       v-model:visible="logsVisible"
+      :kb-id="kbId"
       :data-source-id="logsDsId"
       :data-source-name="logsDsName"
     />
