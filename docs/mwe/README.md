@@ -2,6 +2,12 @@
 
 本目录记录 `mwe-support/weknora-dispatch-mwe` 的定制实现与生产验证，便于审计、升级和回滚。
 
+## 设计与复审
+
+- [腾讯文档同步与文档生命周期复审（2026-09-10）](design/2026-09-10-tencent-sync-review.md)：当前代码、历史问题、已有保护及残余缺口。
+- [生命周期、原生兼容、阶段重试和Dashboard重设计（2026-09-10）](design/2026-09-10-tencent-sync-lifecycle.md)：设计契约、迁移顺序及验收门槛；实际交付状态见对应发布记录。
+- [生命周期实现与验收（2026-09-11）](releases/2026-09-11-tencent-processing-lifecycle.md)：T1–T7 变更、隔离验收、复审、生产放行与回滚边界。
+
 ## 发布记录规则
 
 每次向版本分支推送一批定制代码前，必须在 `docs/mwe/releases/` 新增或更新一份记录，至少包含：
