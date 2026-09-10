@@ -128,8 +128,10 @@ type Chunk struct {
 	// SourceContent is the immutable parser output. Legacy rows are lazily
 	// backfilled from Content on the first manual edit.
 	SourceContent string `json:"-"`
-	// ContentRevision is incremented for every user edit or rollback.
+	// ContentRevision counts document edits/rollbacks and every FAQ mutation.
 	ContentRevision int `json:"content_revision" gorm:"not null;default:0"`
+	// Only indexes named by this confirmed FAQ manifest may serve the entry.
+	FAQIndexManifest string `json:"-" gorm:"type:text;not null;default:''"`
 	// IndexStatus reports whether the current content is reflected in the
 	// retrieval stores: ready | processing | failed.
 	IndexStatus string `json:"index_status" gorm:"type:varchar(16);not null;default:'ready'"`

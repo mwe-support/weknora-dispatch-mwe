@@ -1,0 +1,466 @@
+{
+  "smartcanvas": {
+    "content": "<Paragraph id=\"yZNDm5uyWMEmpiLlZRbRcf\">\n  MDX 分页段落 40，检索标记 MDX-P-40。\n</Paragraph>\n\n<Paragraph id=\"nso0ckqot2YOLU9z7MNWEU\">\n  MDX 分页段落 41，检索标记 MDX-P-41。\n</Paragraph>\n\n<Paragraph id=\"VRtoIFStFjwtyhhDRPrqYT\">\n  MDX 分页段落 42，检索标记 MDX-P-42。\n</Paragraph>\n\n<Paragraph id=\"rLPKDLs2oD9bGuBmVb0P8Y\">\n  MDX 分页段落 43，检索标记 MDX-P-43。\n</Paragraph>\n\n<Paragraph id=\"0Jx9zXTDlrOatIgYW1YWTo\">\n  MDX 分页段落 44，检索标记 MDX-P-44。\n</Paragraph>\n\n<Paragraph id=\"nvib1gpmhC7vEHMN6VKrzt\">\n  MDX 分页段落 45，检索标记 MDX-P-45。\n</Paragraph>\n\n<Callout blockColor=\"yellow\" borderColor=\"green\" icon=\"🧪\" id=\"099Ukg7nIkbih00h9QZ81g\">\n  <Paragraph id=\"DR4R0tdnMLHX8mh0BBu0Gl\">\n    嵌套提示 **MDX-CALLOUT-7391**。\n  </Paragraph>\n\n  <Todo id=\"CWeqN5XMxiFIWkftoLLy2F\">\n    MDX-TODO-DONE-7391\n  </Todo>\n</Callout>\n\n<Table readonly id=\"2DOIy0OpwhOjEzV1pWV7qQ\">\n  <TableRow id=\"EA5MveXcsMgXMdYh0m9xdH\">\n    <TableCell id=\"wzkkuLLAviL1h8vcniu95F\">\n      <Paragraph id=\"LnZ4TLzTsoVGRSfftLgllX\">\n        产品\n      </Paragraph>\n    </TableCell>\n\n    <TableCell id=\"UVsphImErjSxXYYSJefBMQ\">\n      <Paragraph id=\"Lt6tuNvBvKrY6QeETIBREo\">\n        数量\n      </Paragraph>\n    </TableCell>\n  </TableRow>\n\n  <TableRow id=\"fSIMavaELVLVa33ryEEmNf\">\n    <TableCell id=\"SyyegATfEHHXHVQM9RR2o2\">\n      <Paragraph id=\"P1UQ37XZgjX5tmCLOhJKc5\">\n        MDX-TABLE-7391\n      </Paragraph>\n    </TableCell>\n\n    <TableCell id=\"pax4lGOlrPbxyEy2XI5s1t\">\n      <Paragraph id=\"1seeaekOuDsnsM2oMph8G3\">\n        0\n      </Paragraph>\n    </TableCell>\n  </TableRow>\n</Table>\n\n<Unsupported type=\"code\" id=\"MGqcyYKGc5UDIgZwT8XzyB\" readonly />\n\n<Paragraph id=\"RuIKvvXiDvCDW0zcjOvDP5\">\n  最终智能文档标记 MDX-END-7391。\n</Paragraph>\n\n<Image src=\"https://docimg5.docs.qq.com/image/R5fpqvK3SLWCTjwyk9uVEg.png?w=640&h=180\" width={640} height={180} id=\"BKSwvX8tnic4RLJTOQqumN\" />\n\n<Paragraph id=\"YH4qyuPRnCwJyMxEFwDGgN\">\n  图片说明 IMAGE-ASSET-7391。\n</Paragraph>\n",
+    "error": "",
+    "next_token": "",
+    "trace_id": "99cd32cb8b0c4fc79d15cd8637925c02"
+  },
+  "smartSheetFields": {
+    "fields": [
+      {
+        "before_field_id": "",
+        "field_id": "fkfKit",
+        "field_title": "文本",
+        "field_type": "text",
+        "property_text": {}
+      },
+      {
+        "before_field_id": "",
+        "field_id": "f2cnP7",
+        "field_title": "数字",
+        "field_type": "number",
+        "property_number": {
+          "decimal_places": 1,
+          "use_separate": true
+        }
+      },
+      {
+        "before_field_id": "",
+        "field_id": "f0JNov",
+        "field_title": "单选",
+        "field_type": "singleSelect",
+        "property_single_select": {
+          "is_multiple": false,
+          "is_quick_add": true,
+          "options": []
+        }
+      },
+      {
+        "before_field_id": "",
+        "field_id": "fHSMJO",
+        "field_title": "日期",
+        "field_type": "dateTime",
+        "property_date_time": {
+          "auto_fill": false,
+          "format": "yyyy\"年\"m\"月\"d\"日\""
+        }
+      },
+      {
+        "before_field_id": "",
+        "field_id": "fZeyBi",
+        "field_title": "图片",
+        "field_type": "image",
+        "property_image": {}
+      },
+      {
+        "before_field_id": "",
+        "field_id": "fOGZYb",
+        "field_title": "复选验收",
+        "field_type": "checkbox",
+        "property_checkbox": {
+          "checked": false
+        }
+      },
+      {
+        "before_field_id": "",
+        "field_id": "f388Kv",
+        "field_title": "双倍公式",
+        "field_type": "formula",
+        "property_formula": {
+          "formatter": null,
+          "formula_model": [
+            {
+              "field_id": "f2cnP7",
+              "table_id": "",
+              "text": "",
+              "type": 2
+            },
+            {
+              "field_id": "",
+              "table_id": "",
+              "text": "*2",
+              "type": 1
+            }
+          ]
+        }
+      }
+    ],
+    "has_more": false,
+    "next": 0,
+    "total": 7,
+    "trace_id": "d128d620138f4621ac31730a0f8664f9"
+  },
+  "smartSheetRecords": {
+    "error": "",
+    "has_more": true,
+    "next": 8,
+    "records": [
+      {
+        "field_values": [
+          {
+            "bool_value": false,
+            "field": "复选验收"
+          },
+          {
+            "field": "文本",
+            "text_value": {
+              "items": [
+                {
+                  "text": "SMART-ROW-1",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          {
+            "field": "数字",
+            "number_value": 0
+          },
+          {
+            "computed_value": {
+              "bool_value": false,
+              "has_bool": false,
+              "has_number": true,
+              "is_error": false,
+              "number": 0,
+              "text": "0"
+            },
+            "field": "双倍公式"
+          }
+        ],
+        "record_id": "r1JotS"
+      },
+      {
+        "field_values": [
+          {
+            "bool_value": true,
+            "field": "复选验收"
+          },
+          {
+            "field": "文本",
+            "text_value": {
+              "items": [
+                {
+                  "text": "SMART-ROW-2",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          {
+            "field": "数字",
+            "number_value": 2
+          },
+          {
+            "computed_value": {
+              "bool_value": false,
+              "has_bool": false,
+              "has_number": true,
+              "is_error": false,
+              "number": 4,
+              "text": "4"
+            },
+            "field": "双倍公式"
+          }
+        ],
+        "record_id": "rE1zR6"
+      },
+      {
+        "field_values": [
+          {
+            "field": "文本",
+            "text_value": {
+              "items": [
+                {
+                  "text": "SMART-ROW-3",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          {
+            "field": "数字",
+            "number_value": 3
+          },
+          {
+            "bool_value": false,
+            "field": "复选验收"
+          },
+          {
+            "computed_value": {
+              "bool_value": false,
+              "has_bool": false,
+              "has_number": true,
+              "is_error": false,
+              "number": 6,
+              "text": "6"
+            },
+            "field": "双倍公式"
+          }
+        ],
+        "record_id": "r7kJlT"
+      }
+    ],
+    "total": 135,
+    "trace_id": "f4ceb232f18b4a9684c5be88e4bad4a9"
+  },
+  "docPage2": {
+    "effective_mode": "compact",
+    "effective_text_preview_length": 200,
+    "nodes": [
+      {
+        "end_index": 5129,
+        "paragraph_index": 151,
+        "start_index": 5096,
+        "text_preview": "段落 148：合成产品 P-148，验收标记 DOC-P-148。",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5163,
+        "paragraph_index": 152,
+        "start_index": 5130,
+        "text_preview": "段落 149：合成产品 P-149，验收标记 DOC-P-149。",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5197,
+        "paragraph_index": 153,
+        "start_index": 5164,
+        "text_preview": "段落 150：合成产品 P-150，验收标记 DOC-P-150。",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5231,
+        "paragraph_index": 154,
+        "start_index": 5198,
+        "text_preview": "段落 151：合成产品 P-151，验收标记 DOC-P-151。",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5265,
+        "paragraph_index": 155,
+        "start_index": 5232,
+        "text_preview": "段落 152：合成产品 P-152，验收标记 DOC-P-152。",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5299,
+        "paragraph_index": 156,
+        "start_index": 5266,
+        "text_preview": "段落 153：合成产品 P-153，验收标记 DOC-P-153。",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5333,
+        "paragraph_index": 157,
+        "start_index": 5300,
+        "text_preview": "段落 154：合成产品 P-154，验收标记 DOC-P-154。",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5367,
+        "paragraph_index": 158,
+        "start_index": 5334,
+        "text_preview": "段落 155：合成产品 P-155，验收标记 DOC-P-155。",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5401,
+        "paragraph_index": 159,
+        "start_index": 5368,
+        "text_preview": "段落 156：合成产品 P-156，验收标记 DOC-P-156。",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5435,
+        "paragraph_index": 160,
+        "start_index": 5402,
+        "text_preview": "段落 157：合成产品 P-157，验收标记 DOC-P-157。",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5469,
+        "paragraph_index": 161,
+        "start_index": 5436,
+        "text_preview": "段落 158：合成产品 P-158，验收标记 DOC-P-158。",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5503,
+        "paragraph_index": 162,
+        "start_index": 5470,
+        "text_preview": "段落 159：合成产品 P-159，验收标记 DOC-P-159。",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5537,
+        "paragraph_index": 163,
+        "start_index": 5504,
+        "text_preview": "段落 160：合成产品 P-160，验收标记 DOC-P-160。",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5571,
+        "paragraph_index": 164,
+        "start_index": 5538,
+        "text_preview": "段落 161：合成产品 P-161，验收标记 DOC-P-161。",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5605,
+        "paragraph_index": 165,
+        "start_index": 5572,
+        "text_preview": "段落 162：合成产品 P-162，验收标记 DOC-P-162。",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5639,
+        "paragraph_index": 166,
+        "start_index": 5606,
+        "text_preview": "段落 163：合成产品 P-163，验收标记 DOC-P-163。",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5673,
+        "paragraph_index": 167,
+        "start_index": 5640,
+        "text_preview": "段落 164：合成产品 P-164，验收标记 DOC-P-164。",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5707,
+        "paragraph_index": 168,
+        "start_index": 5674,
+        "text_preview": "段落 165：合成产品 P-165，验收标记 DOC-P-165。",
+        "type": "Paragraph"
+      },
+      {
+        "col_count": 3,
+        "end_index": 5776,
+        "first_row_texts": [
+          "产品",
+          "数量",
+          "说明"
+        ],
+        "paragraph_index": 169,
+        "row_count": 3,
+        "start_index": 5708,
+        "table_id": "uoyjsa1e",
+        "table_index": 1,
+        "table_rows": [
+          {
+            "cells": [
+              {
+                "col": 1,
+                "end_index": 5711,
+                "row": 1,
+                "start_index": 5709,
+                "text_preview": "产品"
+              },
+              {
+                "col": 2,
+                "end_index": 5715,
+                "row": 1,
+                "start_index": 5713,
+                "text_preview": "数量"
+              },
+              {
+                "col": 3,
+                "end_index": 5719,
+                "row": 1,
+                "start_index": 5717,
+                "text_preview": "说明"
+              }
+            ],
+            "row": 1
+          },
+          {
+            "cells": [
+              {
+                "col": 1,
+                "end_index": 5727,
+                "row": 2,
+                "start_index": 5722,
+                "text_preview": "合成齿轮A"
+              },
+              {
+                "col": 2,
+                "end_index": 5730,
+                "row": 2,
+                "start_index": 5729,
+                "text_preview": "0"
+              },
+              {
+                "col": 3,
+                "end_index": 5746,
+                "row": 2,
+                "start_index": 5732,
+                "text_preview": "DOC-TABLE-ZERO"
+              }
+            ],
+            "row": 2
+          },
+          {
+            "cells": [
+              {
+                "col": 1,
+                "end_index": 5754,
+                "row": 3,
+                "start_index": 5749,
+                "text_preview": "合成齿轮B"
+              },
+              {
+                "col": 2,
+                "end_index": 5758,
+                "row": 3,
+                "start_index": 5756,
+                "text_preview": "12"
+              },
+              {
+                "col": 3,
+                "end_index": 5773,
+                "row": 3,
+                "start_index": 5760,
+                "text_preview": "DOC-TABLE-END"
+              }
+            ],
+            "row": 3
+          }
+        ],
+        "type": "Table"
+      },
+      {
+        "end_index": 5799,
+        "paragraph_index": 170,
+        "start_index": 5777,
+        "text_preview": "print('DOC-CODE-7391')",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5821,
+        "paragraph_index": 171,
+        "start_index": 5800,
+        "text_preview": "最终正文校验码 DOC-END-7391。",
+        "type": "Paragraph"
+      },
+      {
+        "end_index": 5822,
+        "paragraph_id": "11F13ED5",
+        "paragraph_index": 172,
+        "start_index": 5822,
+        "type": "Paragraph"
+      }
+    ],
+    "pagination": {
+      "limit": 150,
+      "offset": 150,
+      "returned_nodes": 22,
+      "total_nodes": 172
+    },
+    "total_headings": 2,
+    "total_paragraphs": 169,
+    "total_tables": 1,
+    "trace_id": "5c27946df0ca45d990e1e16fa7033bcf",
+    "version": "1"
+  }
+}

@@ -60,3 +60,50 @@ func TestSaveChunkRevisionIsAtomicAndOptimistic(t *testing.T) {
 	require.Equal(t, int64(1), count)
 	require.False(t, errors.Is(gorm.ErrRecordNotFound, ErrChunkRevisionConflict))
 }
+
+func TestProcessingFAQSharedWritesRejectStaleAndDeletedSnapshots(t *testing.T) {
+	db := faqTestStore(t)
+	require.NoError(t, db.AutoMigrate(&types.Chunk{}))
+	repo := NewChunkRepository(db)
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	makeFAQ := func(question string) *types.Chunk {
+		c := &types.Chunk{ID: uuid.NewString(), TenantID: 1, KnowledgeBaseID: "kb", KnowledgeID: "faq", ChunkType: types.ChunkTypeFAQ, Content: question, IsEnabled: true}
+		require.NoError(t, c.SetFAQMetadata(&types.FAQChunkMetadata{StandardQuestion: question, Answers: []string{"answer"}}))
+		require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{c}))
+		return c
+	}
+	first, second := makeFAQ("one"), makeFAQ("two")
+	stale := *first
+	first.Content = "manual edit"
+	require.NoError(t, repo.UpdateChunk(ctx, first))
+	require.Equal(t, stale.ContentRevision+1, first.ContentRevision)
+	stale.Content = "late source merge"
+	require.ErrorIs(t, repo.UpdateChunk(ctx, &stale), ErrChunkRevisionConflict)
+	second.Content = "must roll back"
+	require.ErrorIs(t, repo.SaveChunks(ctx, []*types.Chunk{second, &stale}), ErrChunkRevisionConflict)
+	stored, err := repo.GetChunkByID(ctx, 1, second.ID)
+	require.NoError(t, err)
+	require.Equal(t, "two", stored.Content)
+	require.Equal(t, stored.ContentRevision, second.ContentRevision, "failed batch must not advance in-memory revisions")
+
+	beforeFlags := *first
+	require.NoError(t, repo.UpdateChunkFlagsBatch(ctx, 1, "kb", map[string]types.ChunkFlags{first.ID: types.ChunkFlagRecommended}, nil))
+	require.ErrorIs(t, repo.UpdateChunk(ctx, &beforeFlags), ErrChunkRevisionConflict)
+	first, err = repo.GetChunkByID(ctx, 1, first.ID)
+	require.NoError(t, err)
+	beforeTag := *first
+	newTag := "manual-tag"
+	_, err = repo.UpdateChunkFieldsByTagID(ctx, 1, "kb", "", nil, 0, 0, &newTag, []string{second.ID})
+	require.NoError(t, err)
+	require.ErrorIs(t, repo.UpdateChunks(ctx, []*types.Chunk{&beforeTag}), ErrChunkRevisionConflict)
+	first, err = repo.GetChunkByID(ctx, 1, first.ID)
+	require.NoError(t, err)
+	wrongScope := *first
+	wrongScope.TenantID = 2
+	require.Error(t, repo.UpdateChunk(ctx, &wrongScope))
+	require.NoError(t, repo.DeleteChunk(ctx, 1, first.ID))
+	require.Error(t, repo.UpdateChunk(ctx, first))
+	var count int64
+	require.NoError(t, db.Model(&types.Chunk{}).Where("id = ?", first.ID).Count(&count).Error)
+	require.Zero(t, count, "late writer cannot resurrect a deleted FAQ")
+}

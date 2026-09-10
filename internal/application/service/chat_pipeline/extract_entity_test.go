@@ -2,9 +2,26 @@ package chatpipeline
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 )
+
+func TestFormaterGraphPreservesValidatedOutput(t *testing.T) {
+	t.Run("unknown output is not an empty graph", func(t *testing.T) {
+		for _, input := range []string{`[{"unexpected":"ignored"}]`, `[{"entity1":"A","entity2":"B"}]`, `[{"entity":42}]`} {
+			if _, err := NewFormater().ParseGraph(context.Background(), input); err == nil {
+				t.Fatalf("accepted malformed graph: %s", input)
+			}
+		}
+	})
+	t.Run("duplicate entities retain both attributes", func(t *testing.T) {
+		graph, err := NewFormater().ParseGraph(context.Background(), `[{"entity":"A","entity_attributes":["first"]},{"entity":"A","entity_attributes":["second"]}]`)
+		if err != nil || len(graph.Node) != 1 || !slices.Contains(graph.Node[0].Attributes, "first") || !slices.Contains(graph.Node[0].Attributes, "second") {
+			t.Fatalf("lost graph attributes: %+v, %v", graph, err)
+		}
+	})
+}
 
 // TestFormater_ParseGraph_FenceVariants exercises the JSON parsing path used
 // by the graph extraction pipeline against the LLM response shapes that

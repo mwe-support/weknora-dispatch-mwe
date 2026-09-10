@@ -3,11 +3,28 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"os"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
 )
+
+const (
+	DefaultEmbeddingModelIDEnv = "WEKNORA_DEFAULT_EMBEDDING_MODEL_ID"
+	DefaultLLMModelIDEnv       = "WEKNORA_DEFAULT_LLM_MODEL_ID"
+)
+
+// ApplyDeploymentModelDefaults is shared by runtime loading and processing
+// configuration fencing so inherited models are part of the fixed input.
+func (kb *KnowledgeBase) ApplyDeploymentModelDefaults() {
+	if strings.TrimSpace(kb.EmbeddingModelID) == "" {
+		kb.EmbeddingModelID = strings.TrimSpace(os.Getenv(DefaultEmbeddingModelIDEnv))
+	}
+	if strings.TrimSpace(kb.SummaryModelID) == "" {
+		kb.SummaryModelID = strings.TrimSpace(os.Getenv(DefaultLLMModelIDEnv))
+	}
+}
 
 const storageBackendScheme = "storage://"
 

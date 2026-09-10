@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"sort"
 	"strings"
@@ -22,6 +23,108 @@ type FAQChunkMetadata struct {
 	AnswerStrategy    AnswerStrategy `json:"answer_strategy,omitempty"`
 	Version           int            `json:"version,omitempty"`
 	Source            string         `json:"source,omitempty"`
+}
+
+type FAQIndexManifest struct {
+	ContentDigest string   `json:"content_digest"`
+	SourceIDs     []string `json:"source_ids"`
+	WriteIDs      []string `json:"write_ids"`
+}
+
+// FAQIndexWrite records exact external keys before I/O, including writes whose
+// acknowledgement is lost. It outlives the source job and contains no FAQ text.
+type FAQIndexWrite struct {
+	ID              string    `gorm:"primaryKey;type:text"`
+	TenantID        uint64    `gorm:"not null;index:idx_faq_index_scope,priority:1"`
+	KnowledgeBaseID string    `gorm:"not null;index:idx_faq_index_scope,priority:2"`
+	KnowledgeID     string    `gorm:"not null"`
+	ChunkID         string    `gorm:"not null;index"`
+	JobID           string    `gorm:"not null;default:'';index"`
+	StepID          string    `gorm:"not null;default:''"`
+	Attempt         int       `gorm:"not null;default:0"`
+	BaseRevision    int       `gorm:"not null"`
+	NewEntry        bool      `gorm:"not null;default:false"`
+	ContentDigest   string    `gorm:"not null"`
+	SourceIDs       JSON      `gorm:"type:jsonb;not null"`
+	Destination     JSON      `gorm:"type:jsonb;not null"`
+	State           string    `gorm:"not null;default:pending"`
+	EstimatedBytes  int64     `gorm:"not null;default:0"` // Backend estimate, not measured physical size.
+	StorageReleased bool      `gorm:"not null;default:false"`
+	CreatedAt       time.Time `gorm:"not null;index"`
+	UpdatedAt       time.Time `gorm:"not null"`
+}
+
+// FAQIndexContentDigest excludes operational flags and answer selection policy:
+// those are read from the current DB row and do not change embedding inputs.
+func (c *Chunk) FAQIndexContentDigest() (string, error) {
+	meta, err := c.FAQMetadata()
+	if err != nil {
+		return "", err
+	}
+	if meta == nil {
+		meta = &FAQChunkMetadata{StandardQuestion: c.Content}
+	}
+	meta = meta.Normalize()
+	encoded, err := json.Marshal(struct {
+		Question         string
+		Similar, Answers []string
+	}{meta.StandardQuestion, meta.SimilarQuestions, meta.Answers})
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+// VersionFAQIndexes isolates external writes until the caller CAS-publishes
+// this manifest with the corresponding chunk. Attempt identity is unique even
+// when model configuration changes without changing its model ID.
+func VersionFAQIndexes(attempt string, chunk *Chunk, indexes []*IndexInfo) (string, error) {
+	if attempt == "" || chunk == nil || chunk.ID == "" || len(indexes) == 0 {
+		return "", errors.New("FAQ index identity is incomplete")
+	}
+	seen := map[string]bool{}
+	for _, index := range indexes {
+		if index == nil || index.SourceID == "" || seen[index.SourceID] {
+			return "", errors.New("FAQ index source identity is invalid")
+		}
+		seen[index.SourceID] = true
+	}
+	digest, err := chunk.FAQIndexContentDigest()
+	if err != nil {
+		return "", err
+	}
+	manifest := FAQIndexManifest{ContentDigest: digest, SourceIDs: make([]string, 0, len(indexes)), WriteIDs: []string{attempt + "/" + chunk.ID}}
+	for _, index := range indexes {
+		hash := sha256.Sum256([]byte(attempt + "\x00" + chunk.ID + "\x00" + index.SourceID))
+		index.SourceID = "fq-" + hex.EncodeToString(hash[:30])
+		manifest.SourceIDs = append(manifest.SourceIDs, index.SourceID)
+	}
+	encoded, err := json.Marshal(manifest)
+	return string(encoded), err
+}
+
+func (c *Chunk) AcceptsFAQIndex(sourceID string) bool {
+	if !c.IsEnabled || c.Status != int(ChunkStatusIndexed) || c.DeletedAt.Valid {
+		return false
+	}
+	if c.FAQIndexManifest == "" {
+		return !strings.HasPrefix(sourceID, "fq-")
+	}
+	var manifest FAQIndexManifest
+	if json.Unmarshal([]byte(c.FAQIndexManifest), &manifest) != nil || manifest.ContentDigest == "" {
+		return false
+	}
+	digest, err := c.FAQIndexContentDigest()
+	if err != nil || digest != manifest.ContentDigest {
+		return false
+	}
+	for _, id := range manifest.SourceIDs {
+		if id == sourceID && strings.HasPrefix(id, "fq-") {
+			return true
+		}
+	}
+	return false
 }
 
 // GeneratedQuestion 表示AI生成的单个问题

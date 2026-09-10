@@ -192,10 +192,10 @@ func TestMCPCooldownUsesMinutesAndHonorsLongerRetryAfter(t *testing.T) {
 			req, _ := http.NewRequest("POST", "https://docs.qq.com/openapi/mcp", nil)
 			before := time.Now()
 			response, err := transport.RoundTrip(req)
-			if err != nil {
-				t.Fatal(err)
+			var statusErr *mcpHTTPStatusError
+			if !errors.As(err, &statusErr) || statusErr.StatusCode != status || statusErr.RetryAfter < tc.minimum || response != nil {
+				t.Fatalf("response/error=%v/%v, want a typed Retry-After rejection", response, err)
 			}
-			_ = response.Body.Close()
 			if transport.budget.cooldown.Before(before.Add(tc.minimum)) {
 				t.Fatalf("status=%d Retry-After=%q cooldown shorter than %v", status, tc.after, tc.minimum)
 			}

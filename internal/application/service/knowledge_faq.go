@@ -236,7 +236,7 @@ func (s *knowledgeService) CreateFAQEntry(ctx context.Context,
 	if indexErr != nil {
 		// 如果索引失败，删除已创建的chunk。回滚失败会留下一条 stored 状态的
 		// 残留：它不出现在列表里，却会被重复校验命中，因此必须告警而非静默。
-		if delErr := s.chunkService.DeleteChunk(ctx, chunk.ID); delErr != nil {
+		if delErr := s.chunkRepo.DeleteChunkSnapshot(ctx, chunk); delErr != nil {
 			logger.Errorf(ctx,
 				"CreateFAQEntry: rollback failed, chunk %s left in stored state: %v", chunk.ID, delErr)
 		}
@@ -369,22 +369,8 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 		return nil, err
 	}
 
-	// 获取旧的相似问列表，用于增量更新
-	var oldSimilarQuestions []string
-	var oldStandardQuestion string
-	var oldAnswers []string
-	questionIndexMode := types.FAQQuestionIndexModeCombined
-	if kb.FAQConfig != nil && kb.FAQConfig.QuestionIndexMode != "" {
-		questionIndexMode = kb.FAQConfig.QuestionIndexMode
-	}
 	if existing, err := chunk.FAQMetadata(); err == nil && existing != nil {
 		meta.Version = existing.Version + 1
-		// 保存旧的内容用于增量比较
-		if questionIndexMode == types.FAQQuestionIndexModeSeparate {
-			oldSimilarQuestions = existing.SimilarQuestions
-			oldStandardQuestion = existing.StandardQuestion
-			oldAnswers = existing.Answers
-		}
 	}
 	if err := chunk.SetFAQMetadata(meta); err != nil {
 		return nil, err
@@ -419,13 +405,6 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 		}
 	}
 	chunk.UpdatedAt = time.Now()
-	if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
-		return nil, err
-	}
-
-	// Note: We don't need to call BatchUpdateChunkEnabledStatus here because
-	// indexFAQChunks will delete old vectors and re-insert with the latest chunk data
-	// (including the updated is_enabled status). Calling both would cause version conflicts.
 
 	faqKnowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, chunk.KnowledgeID)
 	if err != nil {
@@ -437,39 +416,11 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 		return nil, err
 	}
 
-	// 增量索引优化：只对变化的内容进行索引操作
-	if questionIndexMode == types.FAQQuestionIndexModeSeparate && len(oldSimilarQuestions) > 0 {
-		// 分别索引模式下的增量更新
-		if err := s.incrementalIndexFAQEntry(ctx, kb, faqKnowledge, chunk, embeddingModel,
-			oldStandardQuestion, oldSimilarQuestions, oldAnswers, meta); err != nil {
-			return nil, err
-		}
-	} else {
-		// Combined 模式或首次创建，使用全量索引
-		// 增量删除：只删除被移除的相似问索引
-		oldSimilarQuestionCount := len(oldSimilarQuestions)
-		newSimilarQuestionCount := len(meta.SimilarQuestions)
-		if questionIndexMode == types.FAQQuestionIndexModeSeparate && oldSimilarQuestionCount > newSimilarQuestionCount {
-			retrieveEngine, engineErr := retriever.CreateRetrieveEngineForKB(
-				ctx, s.retrieveEngine, s.ownership, types.MustTenantIDFromContext(ctx), kb.VectorStoreID)
-			if engineErr == nil {
-				sourceIDsToDelete := make([]string, 0, oldSimilarQuestionCount-newSimilarQuestionCount)
-				for i := newSimilarQuestionCount; i < oldSimilarQuestionCount; i++ {
-					sourceIDsToDelete = append(sourceIDsToDelete, fmt.Sprintf("%s-%d", chunk.ID, i))
-				}
-				if len(sourceIDsToDelete) > 0 {
-					logger.Debugf(ctx, "UpdateFAQEntry: incremental delete %d obsolete source IDs", len(sourceIDsToDelete))
-					if delErr := retrieveEngine.DeleteBySourceIDList(ctx, sourceIDsToDelete, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); delErr != nil {
-						logger.Warnf(ctx, "UpdateFAQEntry: failed to delete obsolete source IDs: %v", delErr)
-					}
-				}
-			}
-		}
-
-		// 使用 needDelete=false，因为 EFPutDocument 会自动覆盖相同 SourceID 的文档
-		if err := s.indexFAQChunks(ctx, kb, faqKnowledge, []*types.Chunk{chunk}, embeddingModel, false, false); err != nil {
-			return nil, err
-		}
+	if err := s.indexFAQChunks(ctx, kb, faqKnowledge, []*types.Chunk{chunk}, embeddingModel, false, false); err != nil {
+		return nil, err
+	}
+	if err := s.chunkRepo.SaveChunks(ctx, []*types.Chunk{chunk}); err != nil {
+		return nil, err
 	}
 
 	// Build tag seq_id map for conversion
@@ -594,10 +545,6 @@ func (s *knowledgeService) AddSimilarQuestions(ctx context.Context,
 	chunk.Content = buildFAQChunkContent(meta, indexMode)
 	chunk.UpdatedAt = time.Now()
 
-	if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
-		return nil, err
-	}
-
 	// Index new similar questions
 	faqKnowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, chunk.KnowledgeID)
 	if err != nil {
@@ -628,6 +575,10 @@ func (s *knowledgeService) AddSimilarQuestions(ctx context.Context,
 	}
 
 	// Build response
+	if err := s.chunkRepo.SaveChunks(ctx, []*types.Chunk{chunk}); err != nil {
+		return nil, err
+	}
+
 	tagSeqIDMap := make(map[string]int64)
 	if chunk.TagID != "" {
 		tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID)

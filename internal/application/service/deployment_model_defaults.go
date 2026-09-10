@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	defaultEmbeddingModelIDEnv = "WEKNORA_DEFAULT_EMBEDDING_MODEL_ID"
+	defaultEmbeddingModelIDEnv = types.DefaultEmbeddingModelIDEnv
 	defaultRerankModelIDEnv    = "WEKNORA_DEFAULT_RERANK_MODEL_ID"
-	defaultLLMModelIDEnv       = "WEKNORA_DEFAULT_LLM_MODEL_ID"
+	defaultLLMModelIDEnv       = types.DefaultLLMModelIDEnv
 )
 
 type deploymentModelDefaults struct {
@@ -38,13 +38,7 @@ func applyDeploymentKnowledgeBaseModelDefaults(kb *types.KnowledgeBase) {
 	if kb == nil {
 		return
 	}
-	defaults := loadDeploymentModelDefaults()
-	if strings.TrimSpace(kb.EmbeddingModelID) == "" {
-		kb.EmbeddingModelID = defaults.EmbeddingModelID
-	}
-	if strings.TrimSpace(kb.SummaryModelID) == "" {
-		kb.SummaryModelID = defaults.LLMModelID
-	}
+	kb.ApplyDeploymentModelDefaults()
 }
 
 // validateDeploymentKnowledgeBaseModels closes the API/MCP omission path once

@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
-	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -71,7 +71,6 @@ func (s *knowledgeService) syncFAQChunkStatusBatch(
 	recommendedUpdates := make(map[string]bool)
 	tagUpdates := make(map[string]string)
 	rows := make([]*types.Chunk, 0, len(pairs))
-	metadataIDs := make([]string, 0)
 
 	for _, p := range pairs {
 		src, dst := srcByID[p.SrcChunkID], dstByID[p.DstChunkID]
@@ -85,10 +84,22 @@ func (s *knowledgeService) syncFAQChunkStatusBatch(
 		if !types.FAQChunkNeedsStatusSync(src, dst, mappedTag) {
 			continue
 		}
-		rows = append(rows, &types.Chunk{
-			ID: dst.ID, IsEnabled: src.IsEnabled, Flags: src.Flags,
-			TagID: mappedTag, UpdatedAt: time.Now(),
-		})
+		full, err := s.chunkRepo.GetChunkByID(ctx, tenantID, dst.ID)
+		if err != nil {
+			return err
+		}
+		if full.KnowledgeBaseID != dstKB.ID || full.ContentRevision != dst.ContentRevision {
+			return repository.ErrChunkRevisionConflict
+		}
+		full.IsEnabled, full.Flags, full.TagID = src.IsEnabled, src.Flags, mappedTag
+		if types.NormalizeAnswerStrategy(src.AnswerStrategy) != types.NormalizeAnswerStrategy(dst.AnswerStrategy) {
+			patched, err := types.PatchFAQAnswerStrategy(full.Metadata, src.Metadata)
+			if err != nil {
+				return fmt.Errorf("patch answer_strategy for %s: %w", dst.ID, err)
+			}
+			full.Metadata = patched
+		}
+		rows = append(rows, full)
 		if dst.IsEnabled != src.IsEnabled {
 			enabledUpdates[dst.ID] = src.IsEnabled
 		}
@@ -100,32 +111,9 @@ func (s *knowledgeService) syncFAQChunkStatusBatch(
 		if mappedTag != dst.TagID {
 			tagUpdates[dst.ID] = mappedTag
 		}
-		if types.NormalizeAnswerStrategy(src.AnswerStrategy) != types.NormalizeAnswerStrategy(dst.AnswerStrategy) {
-			metadataIDs = append(metadataIDs, dst.ID)
-		}
 	}
 	if len(rows) > 0 {
-		if err := s.chunkRepo.UpdateChunks(ctx, rows); err != nil {
-			return err
-		}
-	}
-	for _, dstID := range metadataIDs {
-		src := srcForDst(pairs, srcByID, dstID)
-		dst := dstByID[dstID]
-		if src == nil || dst == nil {
-			continue
-		}
-		patched, err := types.PatchFAQAnswerStrategy(dst.Metadata, src.Metadata)
-		if err != nil {
-			return fmt.Errorf("patch answer_strategy for %s: %w", dstID, err)
-		}
-		full, err := s.chunkRepo.GetChunkByID(ctx, tenantID, dstID)
-		if err != nil {
-			return err
-		}
-		full.Metadata = patched
-		full.UpdatedAt = time.Now()
-		if err := s.chunkRepo.UpdateChunk(ctx, full); err != nil {
+		if err := s.chunkRepo.SaveChunks(ctx, rows); err != nil {
 			return err
 		}
 	}
@@ -151,15 +139,6 @@ func (s *knowledgeService) syncFAQChunkStatusBatch(
 		// Vector-store recommended flag sync is not yet available on all backends in
 		// this branch; DB flags were already updated via UpdateChunks above.
 		logger.Warnf(ctx, "FAQ clone sync: skipped vector recommended update for %d chunks (DB flags updated)", len(recommendedUpdates))
-	}
-	return nil
-}
-
-func srcForDst(pairs []types.FAQChunkSyncPair, srcByID map[string]*types.FAQChunkStatus, dstID string) *types.FAQChunkStatus {
-	for _, p := range pairs {
-		if p.DstChunkID == dstID {
-			return srcByID[p.SrcChunkID]
-		}
 	}
 	return nil
 }

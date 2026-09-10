@@ -961,6 +961,10 @@ func (h *KnowledgeBaseHandler) DeleteKnowledgeBase(c *gin.Context) {
 
 	// Delete the knowledge base
 	if err := h.service.DeleteKnowledgeBase(ctx, id); err != nil {
+		if stderrors.Is(err, repository.ErrProcessingConflict) {
+			c.Error(apperrors.NewConflictError("This knowledge base contains a version held for rollback. Release its hold in processing history before deleting."))
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -35,6 +37,8 @@ type DataSourceService struct {
 	tenantRepo        interfaces.TenantRepository
 	tagService        interfaces.KnowledgeTagService
 	audit             interfaces.AuditLogService
+	processing        *repository.ProcessingRepository
+	config            *config.Config
 }
 
 // NewDataSourceService creates a new data source service
@@ -49,6 +53,8 @@ func NewDataSourceService(
 	tenantRepo interfaces.TenantRepository,
 	tagService interfaces.KnowledgeTagService,
 	audit interfaces.AuditLogService,
+	processing *repository.ProcessingRepository,
+	cfg *config.Config,
 ) interfaces.DataSourceService {
 	return &DataSourceService{
 		dsRepo:            dsRepo,
@@ -61,6 +67,8 @@ func NewDataSourceService(
 		tenantRepo:        tenantRepo,
 		tagService:        tagService,
 		audit:             audit,
+		processing:        processing,
+		config:            cfg,
 	}
 }
 
@@ -469,6 +477,9 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 	if err != nil {
 		return nil, err
 	}
+	if ProcessingLifecycleEnabled(ds) && ds.Status == types.DataSourceStatusPaused {
+		return nil, datasource.ErrDataSourceNotActive
+	}
 
 	if ds.Status != types.DataSourceStatusActive &&
 		ds.Status != types.DataSourceStatusError &&
@@ -668,6 +679,25 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) (
 	if err := validateFAQConnector(kb.Type, ds.Type); err != nil {
 		s.updateSyncRunResult(ctx, ds, syncLog, &types.SyncResult{}, nil, types.SyncLogStatusFailed, err.Error(), wasPaused)
 		return fmt.Errorf("%w: %w", err, asynq.SkipRetry)
+	}
+	if ProcessingLifecycleEnabled(ds) {
+		if s.processing == nil {
+			return fmt.Errorf("lifecycle repository is unavailable: %w", asynq.SkipRetry)
+		}
+		if payload.FileRetryOnly {
+			return fmt.Errorf("legacy file recovery requires explicit migration: %w", asynq.SkipRetry)
+		}
+		if syncLog.FinishedAt != nil {
+			return nil
+		}
+		if wasPaused {
+			syncLog.Status, syncLog.FinishedAt, syncLog.ErrorMessage = types.SyncLogStatusCanceled, timePtr(time.Now().UTC()), "SOURCE_PAUSED"
+			return s.syncLogRepo.UpdateResult(ctx, syncLog)
+		}
+		if _, err := BeginProcessingScan(ctx, s.processing, ds, syncLog, s.config); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	// Get connector

@@ -101,6 +101,9 @@ type KnowledgeService interface {
 	RenameKnowledgeFolder(ctx context.Context, kbID string, from string, to string) (int64, error)
 	// DeleteKnowledge deletes knowledge by ID.
 	DeleteKnowledge(ctx context.Context, id string) error
+	// CheckKnowledgeDeletion rejects a held version before an async delete is queued.
+	// The actual delete transaction rechecks the hold under the source lock.
+	CheckKnowledgeDeletion(ctx context.Context, tenantID uint64, ids []string) error
 	// DeleteKnowledgeList deletes multiple knowledge entries by IDs.
 	DeleteKnowledgeList(ctx context.Context, ids []string) error
 	// GetKnowledgeFile retrieves the file associated with the knowledge.

@@ -17,14 +17,15 @@ func newResourceCatalogForTest(t *testing.T) (interfaces.ResourceCatalog, *gorm.
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.StoredResource{}, &types.ResourceBinding{}, &types.ResourceAccessGrant{}))
+	require.NoError(t, db.AutoMigrate(&types.StoredResource{}, &types.ResourceBinding{}, &types.ResourceAccessGrant{}, &types.StorageBackend{}))
 	return NewResourceCatalog(repository.NewResourceRepository(db)), db
 }
 
 func TestResourceCatalogRegisterResolveAndDeduplicate(t *testing.T) {
-	catalog, _ := newResourceCatalogForTest(t)
+	catalog, db := newResourceCatalogForTest(t)
 	ctx := context.Background()
 	physical := "storage://backend-a/local://7/exports/a.png"
+	require.NoError(t, db.Create(&types.StorageBackend{ID: "backend-a", TenantID: 7, Name: "synthetic", Provider: "local", Status: types.StorageBackendStatusActive}).Error)
 
 	ref, err := catalog.Register(ctx, 7, physical, interfaces.ResourceRegistration{Kind: "image", OriginalName: "a.png"})
 	require.NoError(t, err)

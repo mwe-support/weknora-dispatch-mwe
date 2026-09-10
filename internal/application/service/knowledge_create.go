@@ -26,6 +26,9 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
 ) (*types.Knowledge, error) {
+	if _, err := validateKnowledgeFileSize(file); err != nil {
+		return nil, err
+	}
 	logger.Info(ctx, "Start creating knowledge from file")
 
 	// Use custom filename if provided, otherwise use original filename. Folder

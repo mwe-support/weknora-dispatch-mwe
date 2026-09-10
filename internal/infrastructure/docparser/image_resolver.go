@@ -346,6 +346,41 @@ var imgHTMLDataURI = regexp.MustCompile(
 // the submatch layout and the known limits.
 var imgHTMLSrc = searchutil.HTMLImageSrcRegex
 
+// RewriteProcessingImages replaces every registered Markdown/HTML placement.
+// Unlike the best-effort import helper, missing references stop publication.
+func RewriteProcessingImages(markdown string, targets map[string]string) (string, error) {
+	refs := make(map[string]types.ImageRef, len(targets))
+	seen := make(map[string]bool, len(targets))
+	for ref := range targets {
+		refs[ref] = types.ImageRef{}
+	}
+	matches := scanMarkdownImageTargets(markdown)
+	for i := len(matches) - 1; i >= 0; i-- {
+		m := matches[i]
+		ref, start, end, ok := splitMarkdownImageTarget(markdown[m.TargetStart:m.TargetEnd], refs)
+		if !ok {
+			return "", errors.New("IMAGE_REFERENCE_UNREGISTERED")
+		}
+		seen[ref] = true
+		markdown = markdown[:m.TargetStart+start] + targets[ref] + markdown[m.TargetStart+end:]
+	}
+	htmlMatches := imgHTMLSrc.FindAllStringSubmatchIndex(markdown, -1)
+	for i := len(htmlMatches) - 1; i >= 0; i-- {
+		m := htmlMatches[i]
+		ref := html.UnescapeString(strings.TrimSpace(markdown[m[4]:m[5]]))
+		target, ok := targets[ref]
+		if !ok {
+			return "", errors.New("IMAGE_REFERENCE_UNREGISTERED")
+		}
+		seen[ref] = true
+		markdown = markdown[:m[4]] + target + markdown[m[5]:]
+	}
+	if len(seen) != len(targets) {
+		return "", errors.New("IMAGE_REFERENCE_MISSING")
+	}
+	return markdown, nil
+}
+
 // ResolveHTMLDataURIImages finds <img src="data:image/*;base64,..."> tags in markdown,
 // decodes the images, stores them via fileSvc, and replaces each tag with a markdown
 // image reference using the storage URL.
@@ -1004,6 +1039,28 @@ func (r *ImageResolver) ResolveRemoteImages(
 
 // downloadImage fetches an image from remoteURL using the provided SSRF-safe
 // client. It validates Content-Type and enforces maxRemoteImageSize.
+type ImageDownloadLimitError struct {
+	ActualBytes          *int64
+	ObservedAtLeastBytes int64
+}
+
+type ImageDownloadStatusError struct{ StatusCode int }
+
+func (e *ImageDownloadStatusError) Error() string {
+	return fmt.Sprintf("image HTTP status %d", e.StatusCode)
+}
+
+func (e *ImageDownloadLimitError) Error() string { return "IMAGE_SIZE_EXCEEDED" }
+
+// DownloadProcessingImage fetches one registered asset without the legacy
+// document-count budget or icon filter. The processing ledger owns retries.
+func DownloadProcessingImage(ctx context.Context, address string) ([]byte, error) {
+	client := secutils.NewSSRFSafeHTTPClient(secutils.SSRFSafeHTTPClientConfig{Timeout: remoteImageFetchTimeout, MaxRedirects: 5})
+	defer client.CloseIdleConnections()
+	data, _, err := downloadImage(ctx, client, address)
+	return data, err
+}
+
 func downloadImage(ctx context.Context, client *http.Client, remoteURL string) (data []byte, mimeType string, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, remoteURL, nil)
 	if err != nil {
@@ -1011,6 +1068,12 @@ func downloadImage(ctx context.Context, client *http.Client, remoteURL string) (
 	}
 	// Some CDNs require a browser-like User-Agent.
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; WeKnora/1.0)")
+	// Tencent's image CDN requires its public document origin for hotlink
+	// protection. No document URL, cookie or MCP token is sent to the CDN.
+	host := strings.ToLower(req.URL.Hostname())
+	if host == "docs.qq.com" || strings.HasSuffix(host, ".docs.qq.com") {
+		req.Header.Set("Referer", "https://docs.qq.com/")
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -1019,7 +1082,11 @@ func downloadImage(ctx context.Context, client *http.Client, remoteURL string) (
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("unexpected status %d", resp.StatusCode)
+		return nil, "", &ImageDownloadStatusError{StatusCode: resp.StatusCode}
+	}
+	if resp.ContentLength > maxRemoteImageSize {
+		n := resp.ContentLength
+		return nil, "", &ImageDownloadLimitError{ActualBytes: &n}
 	}
 
 	// Determine MIME type from Content-Type header.
@@ -1041,7 +1108,7 @@ func downloadImage(ctx context.Context, client *http.Client, remoteURL string) (
 		return nil, "", fmt.Errorf("read body: %w", err)
 	}
 	if len(body) > maxRemoteImageSize {
-		return nil, "", fmt.Errorf("image exceeds %d bytes limit", maxRemoteImageSize)
+		return nil, "", &ImageDownloadLimitError{ObservedAtLeastBytes: int64(len(body))}
 	}
 
 	// If MIME was octet-stream, sniff the real type from body.

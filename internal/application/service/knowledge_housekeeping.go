@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -137,6 +138,7 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	// span heartbeat is older than the threshold.
 	var candidates []types.Knowledge
 	if err := h.db.WithContext(ctx).
+		Scopes(repository.LegacyKnowledge).
 		Where("parse_status IN ? AND updated_at < ?",
 			[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing}, cutoff).
 		Find(&candidates).Error; err != nil {
@@ -163,6 +165,7 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 			stuckIDs = append(stuckIDs, k.ID)
 		}
 		res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
+			Scopes(repository.LegacyKnowledge).
 			Where("id IN ? AND parse_status IN ?", stuckIDs,
 				[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing}).
 			Updates(map[string]interface{}{
@@ -201,6 +204,7 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	// downstream asynq task), so we accept the original simple check.
 	summaryCutoff := time.Now().Add(-1 * time.Hour)
 	resSummary := h.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Scopes(repository.LegacyKnowledge).
 		Where("summary_status = ? AND updated_at < ?", types.SummaryStatusProcessing, summaryCutoff).
 		Update("summary_status", types.SummaryStatusFailed)
 	if resSummary.Error != nil {

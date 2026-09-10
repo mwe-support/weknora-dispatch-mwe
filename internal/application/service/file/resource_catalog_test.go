@@ -14,9 +14,13 @@ import (
 )
 
 type catalogStub struct {
+	interfaces.ResourceCatalog
 	resource *types.StoredResource
 	ref      string
 }
+
+func (c *catalogStub) SetStoragePath(context.Context, uint64, string, string) error { return nil }
+func (c *catalogStub) ReleaseStorage(context.Context, uint64, string) error         { return nil }
 
 func (c *catalogStub) Register(
 	_ context.Context,

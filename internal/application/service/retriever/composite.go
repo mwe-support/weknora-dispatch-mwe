@@ -27,6 +27,29 @@ type CompositeRetrieveEngine struct {
 	engineInfos []*engineInfo
 }
 
+// ForRetrieverTypes keeps KB indexing choices while preserving the factory's
+// tenant/store binding. The shared engine remains unchanged for other callers.
+func (c *CompositeRetrieveEngine) ForRetrieverTypes(wanted []types.RetrieverType) (*CompositeRetrieveEngine, error) {
+	result := &CompositeRetrieveEngine{}
+	for _, kind := range wanted {
+		if !c.SupportRetriever(kind) {
+			return nil, fmt.Errorf("retriever type %s is unavailable", kind)
+		}
+	}
+	for _, info := range c.engineInfos {
+		var selected []types.RetrieverType
+		for _, kind := range info.retrieverType {
+			if slices.Contains(wanted, kind) {
+				selected = append(selected, kind)
+			}
+		}
+		if len(selected) > 0 {
+			result.engineInfos = append(result.engineInfos, &engineInfo{retrieveEngine: info.retrieveEngine, retrieverType: selected})
+		}
+	}
+	return result, nil
+}
+
 // Retrieve performs retrieval operations by delegating to the appropriate engine
 // based on the retriever type specified in the parameters
 func (c *CompositeRetrieveEngine) Retrieve(ctx context.Context,

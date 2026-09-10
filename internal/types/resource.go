@@ -25,6 +25,7 @@ type StoredResource struct {
 	ID               string         `json:"id" gorm:"type:varchar(36);primaryKey"`
 	Handle           string         `json:"handle" gorm:"type:varchar(22);not null;uniqueIndex"`
 	TenantID         uint64         `json:"tenant_id" gorm:"not null;index"`
+	CreationJobID    string         `json:"-" gorm:"size:64;index"`
 	StorageBackendID string         `json:"storage_backend_id,omitempty" gorm:"type:varchar(36);index"`
 	Provider         string         `json:"provider" gorm:"type:varchar(32);not null"`
 	PhysicalPath     string         `json:"-" gorm:"type:text;not null"`

@@ -678,6 +678,10 @@ func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.
 		return nil, "", err
 	}
 
+	if knowledge.GetMetadata()["processing_protocol"] == "2" {
+		return s.processingKnowledgeFile(ctx, knowledge)
+	}
+
 	// Manual knowledge stores content in Metadata — stream it directly as a .md file.
 	if knowledge.IsManual() {
 		meta, err := knowledge.ManualMetadata()

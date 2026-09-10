@@ -55,6 +55,14 @@ type TaskPendingOp struct {
 	// so future no-lock parallel workers can flip it inside a row-level
 	// lock without another migration.
 	ClaimedAt *time.Time `json:"claimed_at,omitempty"`
+	// Lifecycle deliveries use a separate operation type and a nullable unique
+	// key; existing Wiki operations have no step identity.
+	StepID      *string    `json:"step_id,omitempty" gorm:"size:64;uniqueIndex:uq_processing_delivery,priority:1"`
+	StepAttempt *int       `json:"step_attempt,omitempty" gorm:"uniqueIndex:uq_processing_delivery,priority:2"`
+	DispatchSeq *int64     `json:"dispatch_seq,omitempty" gorm:"uniqueIndex:uq_processing_delivery,priority:3"`
+	AvailableAt *time.Time `json:"available_at,omitempty" gorm:"index"`
+	DeliveredAt *time.Time `json:"delivered_at,omitempty"`
+	QueueTaskID string     `json:"queue_task_id,omitempty" gorm:"size:256"`
 }
 
 // TableName binds TaskPendingOp to the `task_pending_ops` table.

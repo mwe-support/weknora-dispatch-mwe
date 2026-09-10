@@ -73,15 +73,29 @@ func (r *DataSourceRepository) Update(ctx context.Context, ds *types.DataSource)
 	if ds.ID == "" {
 		return errors.New("data source id is empty")
 	}
-	if err := r.db.WithContext(ctx).
-		Model(ds).
-		// Execution cursors (including file retry targets) are server-managed.
-		// Settings/credential edits must neither inject nor overwrite stale state.
-		Omit("last_sync_cursor", "last_sync_result", "last_sync_at").
-		Updates(ds).Error; err != nil {
-		return err
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		before, err := lockProcessingSource(tx, ds.ID)
+		if err != nil {
+			return err
+		}
+		if before.DeletedAt.Valid || (ds.TenantID != 0 && ds.TenantID != before.TenantID) || (ds.KnowledgeBaseID != "" && ds.KnowledgeBaseID != before.KnowledgeBaseID) {
+			return ErrProcessingScope
+		}
+		// Execution state is server-managed; settings cannot overwrite a newer
+		// cursor. Scope edits and revocation of execution commit atomically.
+		if err := tx.Model(ds).Omit("last_sync_cursor", "last_sync_result", "last_sync_at").Updates(ds).Error; err != nil {
+			return err
+		}
+		var after types.DataSource
+		if err := tx.Where("id = ?", ds.ID).Take(&after).Error; err != nil {
+			return err
+		}
+		status, reason, err := processingSourceEditReason(before, &after)
+		if err != nil || status == "" {
+			return err
+		}
+		return invalidateProcessingSource(tx, &after, status, reason)
+	})
 }
 
 // UpdateSyncState updates only fields managed by sync execution. GORM's
@@ -98,6 +112,7 @@ func (r *DataSourceRepository) UpdateSyncState(ctx context.Context, ds *types.Da
 		Model(&types.DataSource{}).
 		Where("id = ?", ds.ID)
 	if ds.Type == types.ConnectorTypeTencentDocs {
+		query = query.Where("NOT EXISTS (?)", r.db.Model(&types.ProcessingJob{}).Select("1").Where("datasource_id = ? AND tenant_id = ?", ds.ID, ds.TenantID))
 		// A worker from an older scope/credential configuration cannot replace
 		// the new execution cursor. Keep legacy connectors' update contract.
 		if len(ds.Config) == 0 {
@@ -128,12 +143,19 @@ func (r *DataSourceRepository) Delete(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("id is empty")
 	}
-	if err := r.db.WithContext(ctx).
-		Where("id = ?", id).
-		Delete(&types.DataSource{}).Error; err != nil {
-		return err
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		source, err := lockProcessingSource(tx, id)
+		if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && source.DeletedAt.Valid) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := tx.Where("id = ?", id).Delete(&types.DataSource{}).Error; err != nil {
+			return err
+		}
+		return invalidateProcessingSource(tx, source, types.ProcessingCanceled, "SOURCE_DELETED")
+	})
 }
 
 // FindActive retrieves all active data sources (used for scheduling)
@@ -256,6 +278,7 @@ func (r *SyncLogRepository) Update(ctx context.Context, log *types.SyncLog) erro
 	}
 	if err := r.db.WithContext(ctx).
 		Model(log).
+		Where("NOT EXISTS (?)", r.db.Model(&types.ProcessingJob{}).Select("1").Where("origin_run_id = ?", log.ID)).
 		Updates(log).Error; err != nil {
 		return err
 	}
@@ -274,6 +297,7 @@ func (r *SyncLogRepository) UpdateResult(ctx context.Context, log *types.SyncLog
 	if err := r.db.WithContext(ctx).
 		Model(&types.SyncLog{}).
 		Where("id = ?", log.ID).
+		Where("NOT EXISTS (?)", r.db.Model(&types.ProcessingJob{}).Select("1").Where("origin_run_id = ?", log.ID)).
 		Updates(map[string]interface{}{
 			"status":        log.Status,
 			"finished_at":   log.FinishedAt,
@@ -302,6 +326,7 @@ func (r *SyncLogRepository) CancelPendingByDataSource(ctx context.Context, dsID 
 		Model(&types.SyncLog{}).
 		Where("data_source_id = ?", dsID).
 		Where("status IN ?", []string{types.SyncLogStatusRunning, "pending"}).
+		Where("NOT EXISTS (?)", r.db.Model(&types.ProcessingJob{}).Select("1").Where("origin_run_id = sync_logs.id")).
 		Updates(map[string]interface{}{
 			"status":        types.SyncLogStatusCanceled,
 			"finished_at":   &now,
@@ -311,14 +336,20 @@ func (r *SyncLogRepository) CancelPendingByDataSource(ctx context.Context, dsID 
 
 // CleanupOldLogs deletes sync logs older than the retention period
 func (r *SyncLogRepository) CleanupOldLogs(ctx context.Context, retentionDays int) error {
-	if retentionDays <= 0 {
-		retentionDays = 30
+	if retentionDays < 90 {
+		retentionDays = 90
 	}
-	// Delete logs older than the retention period
-	if err := r.db.WithContext(ctx).
-		Where("started_at < NOW() - INTERVAL ? DAY", retentionDays).
-		Delete(&types.SyncLog{}).Error; err != nil {
+	if retentionDays > 36500 {
+		return errors.New("sync log retention exceeds 100 years")
+	}
+	now, err := processingDBTime(r.db.WithContext(ctx))
+	if err != nil {
 		return err
 	}
-	return nil
+	// Referenced lifecycle runs are audit roots. Unresolved legacy failures and
+	// unfinished runs have no automatic expiry; only safe terminal logs qualify.
+	return r.db.WithContext(ctx).Where("finished_at < ? AND status IN ?", now.AddDate(0, 0, -retentionDays), []string{types.SyncLogStatusSuccess, types.SyncLogStatusCanceled}).
+		Where("NOT EXISTS (?)", r.db.Model(&types.ProcessingJob{}).Select("1").Where("origin_run_id = sync_logs.id")).
+		Where("NOT EXISTS (?)", r.db.Model(&types.SyncRunItem{}).Select("1").Where("run_id = sync_logs.id")).
+		Where("NOT EXISTS (?)", r.db.Model(&types.ProcessingEvent{}).Select("1").Where("run_id = sync_logs.id")).Delete(&types.SyncLog{}).Error
 }

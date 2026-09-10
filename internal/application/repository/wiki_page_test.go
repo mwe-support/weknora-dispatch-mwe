@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS wiki_pages (
     page_metadata     TEXT DEFAULT '{}',
     aliases           TEXT DEFAULT '[]',
     version           INTEGER NOT NULL DEFAULT 1,
+    mutation_revision INTEGER NOT NULL DEFAULT 1,
     last_edit_source  VARCHAR(16) NOT NULL DEFAULT '',
     last_editor_id    VARCHAR(64) NOT NULL DEFAULT '',
     created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,

@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     summary_status  VARCHAR(32) NOT NULL DEFAULT 'none',
     pending_subtasks_count INTEGER NOT NULL DEFAULT 0,
     error_message   TEXT,
+    metadata        TEXT,
     title           TEXT,
     file_type       TEXT,
     enable_status   TEXT NOT NULL DEFAULT 'enabled',

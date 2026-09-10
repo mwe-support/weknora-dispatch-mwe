@@ -55,6 +55,23 @@ func NewKnowledgeRepository(db *gorm.DB) interfaces.KnowledgeRepository {
 
 // CreateKnowledge creates knowledge
 func (r *knowledgeRepository) CreateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
+	if knowledge.Type == types.KnowledgeTypeFAQ {
+		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := lockFAQKnowledgeBase(tx, knowledge.TenantID, knowledge.KnowledgeBaseID); err != nil {
+				return err
+			}
+			var existing types.Knowledge
+			err := tx.Where("tenant_id = ? AND knowledge_base_id = ? AND type = ?", knowledge.TenantID, knowledge.KnowledgeBaseID, types.KnowledgeTypeFAQ).Order("created_at DESC, id ASC").Take(&existing).Error
+			if err == nil {
+				*knowledge = existing
+				return nil
+			}
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			return tx.Create(knowledge).Error
+		})
+	}
 	err := r.db.WithContext(ctx).Create(knowledge).Error
 	return err
 }
@@ -93,7 +110,7 @@ func (r *knowledgeRepository) ListKnowledgeByKnowledgeBaseID(
 ) ([]*types.Knowledge, error) {
 	var knowledges []*types.Knowledge
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
-		Order("created_at DESC").Find(&knowledges).Error; err != nil {
+		Order("created_at DESC, id ASC").Find(&knowledges).Error; err != nil {
 		return nil, err
 	}
 	return knowledges, nil
@@ -354,12 +371,12 @@ func (r *knowledgeRepository) UpdateKnowledgeBatch(ctx context.Context, knowledg
 
 // DeleteKnowledge deletes knowledge
 func (r *knowledgeRepository) DeleteKnowledge(ctx context.Context, tenantID uint64, id string) error {
-	return r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).Delete(&types.Knowledge{}).Error
+	return r.deleteKnowledgeRows(ctx, tenantID, []string{id})
 }
 
 // DeleteKnowledge deletes knowledge
 func (r *knowledgeRepository) DeleteKnowledgeList(ctx context.Context, tenantID uint64, ids []string) error {
-	return r.db.WithContext(ctx).Where("tenant_id = ? AND id in ?", tenantID, ids).Delete(&types.Knowledge{}).Error
+	return r.deleteKnowledgeRows(ctx, tenantID, ids)
 }
 
 // GetKnowledgeBatch gets knowledge in batch
@@ -607,6 +624,7 @@ func (r *knowledgeRepository) FinalizeSubtask(
 	//    so the counter cannot go negative.
 	res := r.db.WithContext(ctx).Model(&types.Knowledge{}).
 		Where("id = ? AND pending_subtasks_count > 0", id).
+		Scopes(LegacyKnowledge).
 		Updates(map[string]interface{}{
 			"pending_subtasks_count": gorm.Expr("pending_subtasks_count - 1"),
 			"updated_at":             now,
@@ -628,6 +646,7 @@ func (r *knowledgeRepository) FinalizeSubtask(
 	//    caller whose decrement actually brought the counter to zero matches,
 	//    and cancel/delete cannot be clobbered by a late promote.
 	promoteRes := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Scopes(LegacyKnowledge).
 		Where(`id = ? AND pending_subtasks_count = 0 AND (
 			parse_status = ? OR
 			(parse_status = ? AND error_message LIKE ?)
@@ -677,6 +696,7 @@ func (r *knowledgeRepository) SetFinalizing(
 	now := time.Now()
 	res := r.db.WithContext(ctx).Model(&types.Knowledge{}).
 		Where("id = ? AND parse_status = ?", id, types.ParseStatusProcessing).
+		Scopes(LegacyKnowledge).
 		Updates(map[string]interface{}{
 			"parse_status":           types.ParseStatusFinalizing,
 			"pending_subtasks_count": expectedSubtasks,
@@ -736,11 +756,12 @@ func (r *knowledgeRepository) sourceMetadataPatch(key, value string) clause.Expr
 	if r.db.Dialector.Name() == "sqlite" {
 		return gorm.Expr("json_set(COALESCE(metadata, '{}'), ?, ?)", "$."+key, value)
 	}
-	return gorm.Expr("jsonb_set(COALESCE(metadata, '{}'::jsonb), ?::text[], to_jsonb(?::text), true)", "{"+key+"}", value)
+	return gorm.Expr("jsonb_set(COALESCE(metadata::jsonb, '{}'::jsonb), ?::text[], to_jsonb(?::text), true)", "{"+key+"}", value)
 }
 
 func (r *knowledgeRepository) MarkDataSourceSubtaskFailed(ctx context.Context, id, source string) error {
 	return r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Scopes(LegacyKnowledge).
 		Where("id = ? AND metadata->>'datasource_version' <> ''", id).
 		UpdateColumn("metadata", r.sourceMetadataPatch("datasource_processing_failed", source)).Error
 }
@@ -751,6 +772,7 @@ func (r *knowledgeRepository) DataSourceProcessingAttempt(ctx context.Context, i
 
 func (r *knowledgeRepository) MarkDataSourceIndexReady(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Scopes(LegacyKnowledge).
 		Where("id = ? AND metadata->>'datasource_candidate' = ? AND COALESCE(metadata->>'datasource_processing_failed', '') = '' AND parse_status = ? AND processed_at IS NOT NULL", id, "true", types.ParseStatusProcessing).
 		UpdateColumn("metadata", r.sourceMetadataPatch("datasource_index_ready", "true")).Error
 }

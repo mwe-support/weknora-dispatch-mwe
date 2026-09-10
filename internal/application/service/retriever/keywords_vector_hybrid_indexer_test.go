@@ -2,6 +2,7 @@ package retriever
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -14,6 +15,44 @@ type capturingEmbedder struct {
 	embedding.Embedder
 	text       string
 	batchTexts []string
+}
+
+type preparedVectorRepository struct {
+	interfaces.RetrieveEngineRepository
+	writes  int
+	vectors map[string][]float32
+}
+
+func (r *preparedVectorRepository) BatchSave(ctx context.Context, items []*types.IndexInfo, params map[string]any) error {
+	r.writes++
+	if r.writes == 1 {
+		return errors.New("synthetic index unavailable")
+	}
+	r.vectors = params["embedding"].(map[string][]float32)
+	return nil
+}
+
+func TestBatchIndexPreparedVectorsNeverRecomputeEmbeddingOnRetry(t *testing.T) {
+	repo := &preparedVectorRepository{}
+	engine := &KeywordsVectorHybridRetrieveEngineService{indexRepository: repo}
+	embedder := &capturingEmbedder{}
+	items := []*types.IndexInfo{{Content: "synthetic", SourceID: "index-1", PreparedEmbedding: []float32{0.25, 0.75}}}
+	if err := engine.BatchIndex(context.Background(), embedder, items, []types.RetrieverType{types.VectorRetrieverType}); err == nil {
+		t.Fatal("expected injected index error")
+	}
+	if err := engine.BatchIndex(context.Background(), embedder, items, []types.RetrieverType{types.VectorRetrieverType}); err != nil {
+		t.Fatal(err)
+	}
+	if len(embedder.batchTexts) != 0 {
+		t.Fatal("index retry called the embedding model")
+	}
+	if got := repo.vectors["index-1"]; len(got) != 2 || got[0] != 0.25 || got[1] != 0.75 {
+		t.Fatalf("prepared vector was not preserved: %v", got)
+	}
+	items = append(items, &types.IndexInfo{SourceID: "index-2"})
+	if err := engine.BatchIndex(context.Background(), embedder, items, []types.RetrieverType{types.VectorRetrieverType}); err == nil {
+		t.Fatal("partial prepared batch must be rejected")
+	}
 }
 
 func (e *capturingEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {

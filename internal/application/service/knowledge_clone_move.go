@@ -281,6 +281,9 @@ func (s *knowledgeService) CloneKnowledgeBase(ctx context.Context, srcID, dstID 
 // It also ensures that the chunk's relationships (like pre and next chunk IDs) are maintained
 // by mapping the source chunk IDs to the new target chunk IDs.
 func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowledge) (err error) {
+	if src.GetMetadata()["processing_protocol"] == "2" || dst.GetMetadata()["processing_protocol"] == "2" {
+		return fmt.Errorf("synced version chunks require the lifecycle copy path")
+	}
 	chunkPage := 1
 	chunkPageSize := 100
 	srcTodst := map[string]string{}
@@ -658,14 +661,14 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 		}
 	}()
 
-	// Get source FAQ knowledge first (FAQ KB has exactly one Knowledge entry)
-	srcKnowledgeList, err := s.repo.ListKnowledgeByKnowledgeBaseID(ctx, srcKB.TenantID, srcKB.ID)
+	// Lifecycle source candidates coexist with the canonical FAQ container.
+	srcKnowledge, err := s.findFAQKnowledge(ctx, srcKB.TenantID, srcKB.ID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get source FAQ knowledge: %v", err)
 		handleError(progress, err, "Failed to get source FAQ knowledge")
 		return err
 	}
-	if len(srcKnowledgeList) == 0 {
+	if srcKnowledge == nil {
 		// Source has no FAQ knowledge, nothing to clone
 		progress.Status = types.KBCloneStatusCompleted
 		progress.Progress = 100
@@ -674,8 +677,6 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 		_ = s.saveKBCloneProgress(ctx, progress)
 		return nil
 	}
-	srcKnowledge := srcKnowledgeList[0]
-
 	// Get chunk-level differences based on content_hash.
 	diff, err := s.chunkRepo.FAQChunkDiff(ctx, srcKB.TenantID, srcKB.ID, dstKB.TenantID, dstKB.ID)
 	if err != nil {
@@ -913,14 +914,13 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 // getOrCreateFAQKnowledge gets or creates the FAQ knowledge entry for a knowledge base
 // If srcKnowledge is provided, it will copy relevant fields from source when creating new knowledge
 func (s *knowledgeService) getOrCreateFAQKnowledge(ctx context.Context, kb *types.KnowledgeBase, srcKnowledge *types.Knowledge) (*types.Knowledge, error) {
-	// FAQ knowledge base should have exactly one Knowledge entry
-	knowledgeList, err := s.repo.ListKnowledgeByKnowledgeBaseID(ctx, kb.TenantID, kb.ID)
+	existing, err := s.findFAQKnowledge(ctx, kb.TenantID, kb.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(knowledgeList) > 0 {
-		return knowledgeList[0], nil
+	if existing != nil {
+		return existing, nil
 	}
 
 	// Create a new FAQ knowledge entry, copying from source if available
@@ -1174,6 +1174,9 @@ func (s *knowledgeService) moveOneKnowledge(
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
 	if err != nil {
 		return fmt.Errorf("failed to get knowledge %s: %w", knowledgeID, err)
+	}
+	if knowledge.GetMetadata()["processing_protocol"] == "2" || sourceKB.Type == types.KnowledgeBaseTypeFAQ {
+		return fmt.Errorf("synced versions and canonical FAQ entries cannot be moved through the legacy document operation; add the source to the destination knowledge base")
 	}
 
 	// Only move completed items

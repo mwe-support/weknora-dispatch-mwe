@@ -291,6 +291,30 @@ func RegisterDataSourceRoutes(
 	}
 }
 
+func RegisterProcessingRoutes(r *gin.RouterGroup, h *handler.ProcessingHandler, g *rbacGuards) {
+	jobs := g.apiKeyGroup(r.Group("/knowledge-bases/:id/processing/jobs"), apiKeyManageDataSources(apiKeyFullAccess()))
+	jobs.GET("", g.Viewer(), g.KBAccessRead("id"), h.History)
+	jobs.GET("/snapshots/:snapshot_id", g.Viewer(), g.KBAccessRead("id"), h.HistoryPage)
+	jobs.GET("/:job_id", g.Viewer(), g.KBAccessRead("id"), h.Detail)
+	jobs.GET("/:job_id/events", g.Viewer(), g.KBAccessRead("id"), h.Events)
+	jobs.POST("/:job_id/retry", g.Admin(), g.KBAccessWrite("id"), h.Retry)
+	jobs.POST("/:job_id/pin", g.Admin(), g.KBAccessWrite("id"), h.Pin)
+	jobs.POST("/:job_id/rollback", g.Admin(), g.KBAccessWrite("id"), h.Rollback)
+	jobs.POST("/:job_id/retire", g.Admin(), g.KBAccessWrite("id"), h.Retire)
+	jobs.POST("/:job_id/rebuild", g.Admin(), g.KBAccessWrite("id"), h.Rebuild)
+	jobs.POST("/:job_id/cancel", g.Admin(), g.KBAccessWrite("id"), h.Cancel)
+	jobs.POST("/:job_id/resolve-export", g.Admin(), g.KBAccessWrite("id"), h.ResolveExport)
+	// Tenant administrators must be able to reconcile retained cleanup evidence
+	// after its KB was deleted. Scoped API keys cannot use this global surface.
+	adminJobs := g.apiKeyGroup(r.Group("/processing/jobs", h.GlobalScope), apiKeyFullAccess())
+	adminJobs.GET("", g.Admin(), h.History)
+	adminJobs.GET("/snapshots/:snapshot_id", g.Admin(), h.HistoryPage)
+	adminJobs.GET("/:job_id", g.Admin(), h.Detail)
+	adminJobs.GET("/:job_id/events", g.Admin(), h.Events)
+	adminJobs.POST("/:job_id/resolve-export", g.Admin(), h.ResolveExport)
+	adminJobs.POST("/:job_id/retry", g.Admin(), h.Retry)
+}
+
 // RegisterWeKnoraCloudRoutes 注册 WeKnoraCloud 初始化路由
 // RegisterWeKnoraCloudRoutes registers the WeKnoraCloud credential
 // management endpoints. SaveCredentials persists external SaaS keys

@@ -82,6 +82,14 @@ var queueDefinitions = []QueueDefinition{
 	{Name: QueueWiki, Pool: WorkerPoolWiki, Weight: 1, TaskTypes: []string{TypeWikiIngest, TypeWikiFinalize}},
 }
 
+func init() {
+	for i := range queueDefinitions {
+		if queueDefinitions[i].Name != QueueChatAttachment {
+			queueDefinitions[i].TaskTypes = append(queueDefinitions[i].TaskTypes, TypeProcessingStep+":"+queueDefinitions[i].Name)
+		}
+	}
+}
+
 // QueueDefinitions returns a copy so callers cannot mutate global topology.
 func QueueDefinitions() []QueueDefinition {
 	definitions := make([]QueueDefinition, len(queueDefinitions))

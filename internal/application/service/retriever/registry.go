@@ -2,8 +2,12 @@ package retriever
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
+	"os"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,9 +40,10 @@ const rebuildCooldown = 30 * time.Second
 //
 // Implements both interfaces.RetrieveEngineRegistry and interfaces.StoreRegistry.
 type RetrieveEngineRegistry struct {
-	byEngineType map[types.RetrieverEngineType]interfaces.RetrieveEngineService
-	byStoreID    map[string]interfaces.RetrieveEngineService
-	mu           sync.RWMutex
+	byEngineType    map[types.RetrieverEngineType]interfaces.RetrieveEngineService
+	envDestinations map[types.RetrieverEngineType]string
+	byStoreID       map[string]interfaces.RetrieveEngineService
+	mu              sync.RWMutex
 
 	// repo and factory let the registry rebuild an engine that is missing from
 	// byStoreID. Both are optional: when either is nil the registry cannot
@@ -123,12 +128,13 @@ func NewRetrieveEngineRegistry(
 	repo interfaces.VectorStoreRepository, factory interfaces.EngineFactory,
 ) interfaces.RetrieveEngineRegistry {
 	return &RetrieveEngineRegistry{
-		byEngineType: make(map[types.RetrieverEngineType]interfaces.RetrieveEngineService),
-		byStoreID:    make(map[string]interfaces.RetrieveEngineService),
-		storeGen:     make(map[string]uint64),
-		failedUntil:  make(map[string]time.Time),
-		repo:         repo,
-		factory:      factory,
+		byEngineType:    make(map[types.RetrieverEngineType]interfaces.RetrieveEngineService),
+		envDestinations: make(map[types.RetrieverEngineType]string),
+		byStoreID:       make(map[string]interfaces.RetrieveEngineService),
+		storeGen:        make(map[string]uint64),
+		failedUntil:     make(map[string]time.Time),
+		repo:            repo,
+		factory:         factory,
 	}
 }
 
@@ -145,7 +151,62 @@ func (r *RetrieveEngineRegistry) Register(repo interfaces.RetrieveEngineService)
 	}
 
 	r.byEngineType[repo.EngineType()] = repo
+	r.envDestinations[repo.EngineType()] = envDestinationFingerprint(repo.EngineType())
 	return nil
+}
+
+// Capture the settings used when the engine is registered, not mutable
+// request-time environment values. Persist only a digest, never credentials.
+func envDestinationFingerprint(engine types.RetrieverEngineType) string {
+	keys := map[types.RetrieverEngineType]string{
+		types.PostgresRetrieverEngineType:        "DB_DRIVER DB_HOST DB_PORT DB_NAME DB_USER",
+		types.SQLiteRetrieverEngineType:          "DB_DRIVER DB_PATH",
+		types.ElasticsearchRetrieverEngineType:   "ELASTICSEARCH_ADDR ELASTICSEARCH_INDEX ELASTICSEARCH_USERNAME",
+		types.OpenSearchRetrieverEngineType:      "OPENSEARCH_ADDR OPENSEARCH_INDEX OPENSEARCH_USERNAME OPENSEARCH_INSECURE_SKIP_VERIFY",
+		types.QdrantRetrieverEngineType:          "QDRANT_HOST QDRANT_PORT QDRANT_USE_TLS QDRANT_COLLECTION",
+		types.MilvusRetrieverEngineType:          "MILVUS_ADDRESS MILVUS_DB_NAME MILVUS_USERNAME MILVUS_COLLECTION MILVUS_METRIC_TYPE",
+		types.WeaviateRetrieverEngineType:        "WEAVIATE_HOST WEAVIATE_GRPC_ADDRESS WEAVIATE_SCHEME WEAVIATE_COLLECTION WEAVIATE_AUTH_ENABLED",
+		types.DorisRetrieverEngineType:           "DORIS_ADDR DORIS_DATABASE DORIS_USERNAME DORIS_HTTP_PORT DORIS_TABLE_PREFIX",
+		types.TencentVectorDBRetrieverEngineType: "TENCENT_VECTORDB_ADDR TENCENT_VECTORDB_USERNAME TENCENT_VECTORDB_DATABASE TENCENT_VECTORDB_COLLECTION",
+	}[engine]
+	if keys == "" {
+		return ""
+	}
+	values := map[string]string{"engine": string(engine)}
+	for _, key := range strings.Fields(keys) {
+		values[key] = os.Getenv(key)
+	}
+	encoded, _ := json.Marshal(values)
+	return fmt.Sprintf("%x", sha256.Sum256(encoded))
+}
+
+// ProcessingEnvDestination identifies every selected engine's original route.
+// Missing routes fail closed: engine type alone cannot authorize deletion.
+func ProcessingEnvDestination(registry interfaces.RetrieveEngineRegistry, engines []types.RetrieverEngineParams, kinds []types.RetrieverType) (string, error) {
+	r, ok := registry.(*RetrieveEngineRegistry)
+	if !ok {
+		return "", fmt.Errorf("INDEX_DESTINATION_UNAVAILABLE")
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	routes := map[types.RetrieverEngineType]string{}
+	for _, engine := range engines {
+		for _, kind := range kinds {
+			if kind != engine.RetrieverType {
+				continue
+			}
+			digest := r.envDestinations[engine.RetrieverEngineType]
+			if digest == "" {
+				return "", fmt.Errorf("INDEX_DESTINATION_UNAVAILABLE")
+			}
+			routes[engine.RetrieverEngineType] = digest
+		}
+	}
+	if len(routes) == 0 {
+		return "", fmt.Errorf("INDEX_DESTINATION_UNAVAILABLE")
+	}
+	encoded, _ := json.Marshal(routes)
+	return fmt.Sprintf("%x", sha256.Sum256(encoded)), nil
 }
 
 // GetRetrieveEngineService retrieves a retrieval engine service by type.

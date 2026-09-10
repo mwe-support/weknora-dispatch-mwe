@@ -19,7 +19,32 @@ func NewResourceRepository(db *gorm.DB) interfaces.ResourceRepository {
 }
 
 func (r *resourceRepository) Create(ctx context.Context, resource *types.StoredResource) error {
-	return r.db.WithContext(ctx).Create(resource).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if lease, ok := types.ProcessingLeaseFromContext(ctx); ok {
+			job, err := lockProcessingLease(tx, resource.TenantID, lease)
+			if err != nil {
+				return err
+			}
+			if job.RetirementState != "retained" || lease.Step.Phase == types.ProcessingPhaseRetire {
+				return ErrProcessingConflict
+			}
+			resource.CreationJobID = job.ID
+		}
+		if resource.StorageBackendID != "" {
+			q := tx.Where("id = ? AND tenant_id = ? AND status = ?", resource.StorageBackendID, resource.TenantID, types.StorageBackendStatusActive)
+			if tx.Dialector.Name() == "postgres" {
+				q = q.Clauses(clause.Locking{Strength: "SHARE"})
+			}
+			var backend types.StorageBackend
+			if err := q.Take(&backend).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Create(resource).Error; err != nil {
+			return err
+		}
+		return commitProcessingStorage(tx, ctx, resource)
+	})
 }
 
 func (r *resourceRepository) GetByID(ctx context.Context, id string) (*types.StoredResource, error) {
@@ -63,12 +88,45 @@ func (r *resourceRepository) GetByTenantLocation(
 }
 
 func (r *resourceRepository) MarkDeleted(ctx context.Context, id string) error {
-	return r.db.WithContext(ctx).Model(&types.StoredResource{}).Where("id = ?", id).
-		Updates(map[string]interface{}{"state": types.ResourceStateDeleted, "deleted_at": time.Now()}).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var resource types.StoredResource
+		if err := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).Take(&resource).Error; err != nil {
+			return err
+		}
+		if err := releaseProcessingResourceStorage(tx, &resource); err != nil {
+			return err
+		}
+		return tx.Unscoped().Model(&resource).Updates(map[string]any{"state": types.ResourceStateDeleted, "deleted_at": time.Now()}).Error
+	})
 }
 
 func (r *resourceRepository) CreateBinding(ctx context.Context, binding *types.ResourceBinding) error {
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(binding).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if tenant, ok := types.TenantIDFromContext(ctx); ok && tenant != binding.TenantID {
+			return ErrProcessingScope
+		}
+		if binding.OwnerType == "processing_job" {
+			lease, ok := types.ProcessingLeaseFromContext(ctx)
+			if !ok || lease.Ref.JobID != binding.OwnerID {
+				return ErrProcessingConflict
+			}
+			job, err := lockProcessingLease(tx, binding.TenantID, lease)
+			if err != nil {
+				return err
+			}
+			if job.RetirementState != "retained" {
+				return ErrProcessingConflict
+			}
+		}
+		resource, err := lockStoredResource(tx, binding.TenantID, binding.ResourceID)
+		if err != nil {
+			return err
+		}
+		if resource.State != types.ResourceStateActive || resource.DeletedAt.Valid {
+			return ErrProcessingConflict
+		}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(binding).Error
+	})
 }
 
 func (r *resourceRepository) CreateGrant(ctx context.Context, grant *types.ResourceAccessGrant) error {

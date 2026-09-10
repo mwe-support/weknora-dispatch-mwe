@@ -43,6 +43,10 @@ type uploadKnowledgeServiceStub struct {
 	moveFolderCalled  bool
 }
 
+func (s *uploadKnowledgeServiceStub) CheckKnowledgeDeletion(context.Context, uint64, []string) error {
+	return nil
+}
+
 func (s *uploadKnowledgeServiceStub) GetKnowledgeBatch(
 	_ context.Context,
 	_ uint64,

@@ -2256,11 +2256,17 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	kbID string,
 	entities, concepts []extractedItem,
 ) ([]extractedItem, []extractedItem) {
+	entities, concepts, _ = s.deduplicateExtractedBatchResult(ctx, chatModel, kbID, entities, concepts, false)
+	return entities, concepts
+}
+
+func (s *wikiIngestService) deduplicateExtractedBatchResult(ctx context.Context, chatModel chat.Chat, kbID string,
+	entities, concepts []extractedItem, strict bool) ([]extractedItem, []extractedItem, error) {
 	if len(entities) == 0 && len(concepts) == 0 {
-		return entities, concepts
+		return entities, concepts, nil
 	}
 	if s.wikiService == nil {
-		return entities, concepts
+		return entities, concepts, errors.New("wiki service unavailable")
 	}
 
 	// Build the candidate set: for each new item, ask the repo for
@@ -2276,6 +2282,7 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	// share no trigram signal and were never candidates for each other).
 	candidatePages := make(map[string]*types.WikiPageLite)
 	itemCandidates := make(map[string]map[string]bool)
+	var probeErr error
 	probe := func(item extractedItem) {
 		queries := make([]string, 0, 1+len(item.Aliases))
 		if item.Name != "" {
@@ -2296,6 +2303,7 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 				[]string{types.WikiPageTypeEntity, types.WikiPageTypeConcept},
 				dedupCandidateTopK)
 			if err != nil {
+				probeErr = errors.Join(probeErr, err)
 				logger.Warnf(ctx, "wiki ingest: dedup FindSimilarPages(%q) failed: %v", q, err)
 				continue
 			}
@@ -2316,11 +2324,14 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	for _, c := range concepts {
 		probe(c)
 	}
+	if strict && probeErr != nil {
+		return nil, nil, probeErr
+	}
 	if len(candidatePages) == 0 {
 		// No similar existing pages — nothing to merge against. The
 		// items pass through unchanged.
 		logger.Infof(ctx, "wiki ingest: no similar existing pages found for %d new items", len(entities)+len(concepts))
-		return entities, concepts
+		return entities, concepts, nil
 	}
 	logger.Infof(ctx, "wiki ingest: %d similar existing pages selected for %d new items",
 		len(candidatePages), len(entities)+len(concepts))
@@ -2373,7 +2384,7 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	if groups == 0 {
 		// Every new item's candidate list is empty after scoping —
 		// nothing the model could safely merge.
-		return entities, concepts
+		return entities, concepts, nil
 	}
 
 	dedupeJSON, err := s.generateWithTemplate(ctx, chatModel, agent.WikiDeduplicationPrompt, map[string]string{
@@ -2381,7 +2392,7 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	})
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: deduplication LLM call failed: %v", err)
-		return entities, concepts
+		return entities, concepts, err
 	}
 
 	dedupeJSON = cleanLLMJSON(dedupeJSON)
@@ -2391,11 +2402,21 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	}
 	if err := json.Unmarshal([]byte(dedupeJSON), &dedupeResult); err != nil {
 		logger.Warnf(ctx, "wiki ingest: failed to parse dedup JSON: %v\nRaw: %s", err, dedupeJSON)
-		return entities, concepts
+		return entities, concepts, err
+	}
+	if strict && dedupeResult.Merges == nil {
+		return nil, nil, errors.New("WIKI_DEDUP_OUTPUT_INVALID")
+	}
+	if strict {
+		for source, target := range dedupeResult.Merges {
+			if dedupMergeRejectReason(source, target, itemCandidates[source]) != "" {
+				return nil, nil, errors.New("WIKI_DEDUP_TARGET_INVALID")
+			}
+		}
 	}
 
 	if len(dedupeResult.Merges) == 0 {
-		return entities, concepts
+		return entities, concepts, nil
 	}
 
 	validMerge := func(srcSlug, dstSlug string) bool {
@@ -2419,7 +2440,7 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 		}
 	}
 
-	return entities, concepts
+	return entities, concepts, nil
 }
 
 // generateWithTemplate executes a prompt template and calls the LLM with
@@ -2507,8 +2528,12 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 		}
 		defer releaseWarmup()
 
+		maxAttempts := wikiLLMMaxAttempts
+		if _, managed := types.ProcessingLeaseFromContext(ctx); managed {
+			maxAttempts = 1 // The durable stage owns the retry budget.
+		}
 		var lastErr error
-		for attempt := 1; attempt <= wikiLLMMaxAttempts; attempt++ {
+		for attempt := 1; attempt <= maxAttempts; attempt++ {
 			response, callErr := chatModel.Chat(ctx, messages, opts)
 			if callErr == nil && response != nil {
 				return response.Content, nil
@@ -2521,13 +2546,13 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 			if !isTransientLLMError(ctx, callErr) {
 				return "", fmt.Errorf("LLM call failed: %w", callErr)
 			}
-			if attempt == wikiLLMMaxAttempts {
+			if attempt == maxAttempts {
 				break
 			}
 
 			backoff := wikiLLMBackoffBase << (attempt - 1)
 			logger.Warnf(ctx, "wiki ingest: LLM call failed (attempt %d/%d), retrying in %s: %v",
-				attempt, wikiLLMMaxAttempts, backoff, callErr)
+				attempt, maxAttempts, backoff, callErr)
 			timer := time.NewTimer(backoff)
 			select {
 			case <-ctx.Done():
@@ -2536,7 +2561,7 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 			case <-timer.C:
 			}
 		}
-		return "", fmt.Errorf("LLM call failed after %d attempts: %w", wikiLLMMaxAttempts, lastErr)
+		return "", fmt.Errorf("LLM call failed after %d attempts: %w", maxAttempts, lastErr)
 	}
 
 	// Missing tenant context is unexpected for production Wiki work. Fail safe

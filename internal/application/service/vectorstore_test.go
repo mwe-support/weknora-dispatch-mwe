@@ -857,6 +857,7 @@ func newGuardTestService(t *testing.T) (*vectorStoreService, *gorm.DB, *mockStor
 	db, err := gorm.Open(sqlitedrv.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(guardTestDDL).Error)
+	require.NoError(t, db.AutoMigrate(&types.ProcessingJob{}))
 
 	registry := newMockStoreRegistry()
 	svc := &vectorStoreService{

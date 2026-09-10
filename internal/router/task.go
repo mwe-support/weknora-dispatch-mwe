@@ -47,6 +47,8 @@ type AsynqTaskParams struct {
 	TemporaryDocument    interfaces.TemporaryDocumentService
 	DeadLetterRepo       interfaces.TaskDeadLetterRepository
 	SpanTracker          service.SpanTracker
+	Processing           *service.ProcessingService
+	Inspector            *asynq.Inspector
 }
 
 // defaultRedisOpTimeout is the previous hard-coded read timeout. The 100ms
@@ -244,8 +246,9 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// a permanently-failing task left its parent knowledge stranded in
 	// "processing" until housekeeping cron caught it minutes later — the
 	// UI signal users actually see.
-	knowledgeFailer := newDeadLetterKnowledgeFailer(params.KnowledgeService, params.SpanTracker)
+	knowledgeFailer := newDeadLetterKnowledgeFailer(params.KnowledgeService, params.SpanTracker, params.Processing.LegacyTaskAllowed)
 	mux.Use(asynqdl.MiddlewareWithCallback(params.DeadLetterRepo, knowledgeFailer))
+	mux.Use(params.Processing.GuardLegacyTask)
 
 	// Mark every asynq worker execution as a background task so the chat
 	// concurrency governor throttles ingestion/enrichment LLM traffic while
@@ -307,6 +310,9 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 
 	// Register data source sync handler
 	mux.HandleFunc(types.TypeDataSourceSync, params.DataSourceService.ProcessSync)
+	for _, queue := range types.QueueDefinitions() {
+		mux.HandleFunc(types.TypeProcessingStep+":"+queue.Name, params.Processing.Process)
+	}
 
 	// Register wiki ingest handler + the debounced KB-global finalize handler.
 	// Both route to the same dispatch (WikiIngest.Handle switches on task type)
@@ -329,6 +335,7 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	runPool("maintenance-pool", params.MaintenanceServer)
 	runPool("shared-pool", params.SharedServer)
 	runPool("wiki-pool", params.WikiServer)
+	go params.Processing.Run(context.Background(), params.Inspector)
 	return mux
 }
 
@@ -380,7 +387,7 @@ type deadLetterKnowledgeListDeletePayload struct {
 // errors are logged and swallowed. The dead-letter record is the source of
 // truth — this is purely a UX shortcut so users don't wait for the
 // housekeeping cron's next sweep.
-func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker service.SpanTracker) asynqdl.OnDeadLetter {
+func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker service.SpanTracker, guards ...func(context.Context, *asynq.Task) (bool, error)) asynqdl.OnDeadLetter {
 	if ks == nil {
 		return nil
 	}
@@ -391,6 +398,11 @@ func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker servic
 	return func(ctx context.Context, t *asynq.Task, taskErr error) {
 		if t == nil {
 			return
+		}
+		for _, guard := range guards {
+			if allowed, err := guard(ctx, t); err != nil || !allowed {
+				return
+			}
 		}
 		if t.Type() == types.TypeKnowledgeListDelete {
 			markKnowledgeListDeleteFailed(ctx, repo, t, taskErr)

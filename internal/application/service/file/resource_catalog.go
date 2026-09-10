@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"mime"
 	"mime/multipart"
 	"os"
@@ -13,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
@@ -67,6 +70,12 @@ func (s *resourceCatalogFileService) register(
 	temporary bool,
 	contentHash string,
 ) (string, error) {
+	reservation := types.ProcessingStorageReservationFromContext(ctx)
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	if err := s.catalog.SetStoragePath(cleanupCtx, tenantID, reservation, physical); err != nil {
+		return "", errors.Join(err, s.cleanReservedFile(cleanupCtx, tenantID, reservation, physical))
+	}
 	kind, mimeType := resourceKind(name)
 	ref, err := s.catalog.Register(ctx, tenantID, physical, interfaces.ResourceRegistration{
 		Kind:         kind,
@@ -77,10 +86,31 @@ func (s *resourceCatalogFileService) register(
 		Temporary:    temporary,
 	})
 	if err != nil {
-		_ = s.inner.DeleteFile(ctx, physical)
-		return "", fmt.Errorf("register stored resource: %w", err)
+		return "", errors.Join(fmt.Errorf("register stored resource: %w", err), s.cleanReservedFile(cleanupCtx, tenantID, reservation, physical))
 	}
 	return ref, nil
+}
+
+func (s *resourceCatalogFileService) cleanReservedFile(ctx context.Context, tenant uint64, reservation, physical string) error {
+	if err := s.inner.DeleteFile(ctx, physical); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return s.catalog.ReleaseStorage(ctx, tenant, reservation)
+}
+
+func (s *resourceCatalogFileService) reserve(ctx context.Context, tenant uint64, size int64) (context.Context, error) {
+	if _, ok := types.ProcessingLeaseFromContext(ctx); !ok {
+		return ctx, nil
+	}
+	backendID := ""
+	if scoped, ok := s.inner.(*backendScopedFileService); ok {
+		backendID = scoped.backendID
+	}
+	id, err := s.catalog.ReserveStorage(ctx, tenant, size, false, backendID)
+	if err != nil {
+		return ctx, err
+	}
+	return types.WithProcessingStorageReservation(ctx, id), nil
 }
 
 func (s *resourceCatalogFileService) SaveFile(
@@ -89,8 +119,16 @@ func (s *resourceCatalogFileService) SaveFile(
 	tenantID uint64,
 	knowledgeID string,
 ) (string, error) {
+	if file == nil || file.Size < 0 {
+		return "", errors.New("invalid file size")
+	}
+	ctx, err := s.reserve(ctx, tenantID, file.Size)
+	if err != nil {
+		return "", err
+	}
 	physical, err := s.inner.SaveFile(ctx, file, tenantID, knowledgeID)
 	if err != nil {
+		// Unknown provider outcomes retain their charge until reconciled.
 		return "", err
 	}
 	ref, err := s.register(ctx, physical, tenantID, file.Filename, file.Size, false, "")
@@ -113,6 +151,10 @@ func (s *resourceCatalogFileService) SaveBytes(
 	fileName string,
 	temp bool,
 ) (string, error) {
+	ctx, err := s.reserve(ctx, tenantID, int64(len(data)))
+	if err != nil {
+		return "", err
+	}
 	physical, err := s.inner.SaveBytes(ctx, data, tenantID, fileName, temp)
 	if err != nil {
 		return "", err

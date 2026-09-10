@@ -172,6 +172,13 @@ var faqHeaderNote = regexp.MustCompile(`\([^)]*\)|（[^）]*）`)
 
 func faqHeader(value string) string {
 	value = strings.ToLower(strings.TrimSpace(faqHeaderNote.ReplaceAllString(value, "")))
+	// DOC export preserves emphasis in table headings. Strip paired wrappers
+	// from headings only; questions and answers keep their original formatting.
+	for _, marker := range []string{"**", "__", "`", "*", "_"} {
+		if len(value) > 2*len(marker) && strings.HasPrefix(value, marker) && strings.HasSuffix(value, marker) {
+			value = strings.TrimSpace(value[len(marker) : len(value)-len(marker)])
+		}
+	}
 	switch value {
 	case "问题", "question":
 		return "standard_question"

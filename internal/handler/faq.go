@@ -1,18 +1,30 @@
 package handler
 
 import (
+	stderrors "errors"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
+
+func faqOperationError(err error) error {
+	if stderrors.Is(err, repository.ErrChunkRevisionConflict) {
+		return errors.NewConflictError("FAQ 条目已被更新或正在回收，请刷新后重试")
+	}
+	if stderrors.Is(err, repository.ErrFAQQuestionConflict) {
+		return errors.NewConflictError("问题或相似问法已被其他 FAQ 条目使用，请刷新后调整")
+	}
+	return err
+}
 
 // FAQHandler handles FAQ knowledge base operations.
 //
@@ -106,7 +118,7 @@ func (h *FAQHandler) ListEntries(c *gin.Context) {
 	result, err := h.knowledgeService.ListFAQEntries(ctx, kbID, &page, tagUUIDs, legacyTagSeqID, keyword, searchField, sortOrder)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		c.Error(faqOperationError(err))
 		return
 	}
 
@@ -145,7 +157,7 @@ func (h *FAQHandler) UpsertEntries(c *gin.Context) {
 	taskID, err := h.knowledgeService.UpsertFAQEntries(ctx, kbID, &req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		c.Error(faqOperationError(err))
 		return
 	}
 
@@ -184,7 +196,7 @@ func (h *FAQHandler) CreateEntry(c *gin.Context) {
 	entry, err := h.knowledgeService.CreateFAQEntry(ctx, kbID, &req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		c.Error(faqOperationError(err))
 		return
 	}
 
@@ -228,7 +240,7 @@ func (h *FAQHandler) UpdateEntry(c *gin.Context) {
 	entry, err := h.knowledgeService.UpdateFAQEntry(ctx, kbID, entrySeqID, &req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		c.Error(faqOperationError(err))
 		return
 	}
 
@@ -263,7 +275,7 @@ func (h *FAQHandler) UpdateEntryTagBatch(c *gin.Context) {
 	}
 	if err := h.knowledgeService.UpdateFAQEntryTagBatch(ctx, kbID, req.Updates); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		c.Error(faqOperationError(err))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -296,7 +308,7 @@ func (h *FAQHandler) UpdateEntryFieldsBatch(c *gin.Context) {
 	}
 	if err := h.knowledgeService.UpdateFAQEntryFieldsBatch(ctx, kbID, &req); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		c.Error(faqOperationError(err))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -330,7 +342,7 @@ func (h *FAQHandler) DeleteEntries(c *gin.Context) {
 
 	if err := h.knowledgeService.DeleteFAQEntries(ctx, kbID, req.IDs); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		c.Error(faqOperationError(err))
 		return
 	}
 
@@ -372,7 +384,7 @@ func (h *FAQHandler) SearchFAQ(c *gin.Context) {
 	entries, err := h.knowledgeService.SearchFAQEntries(ctx, kbID, &req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		c.Error(faqOperationError(err))
 		return
 	}
 
@@ -405,7 +417,7 @@ func (h *FAQHandler) ExportEntries(c *gin.Context) {
 		jsonData, err := h.knowledgeService.ExportFAQEntriesJSON(ctx, kbID)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(err)
+			c.Error(faqOperationError(err))
 			return
 		}
 		c.Header("Content-Type", "application/json; charset=utf-8")
@@ -417,7 +429,7 @@ func (h *FAQHandler) ExportEntries(c *gin.Context) {
 	csvData, err := h.knowledgeService.ExportFAQEntries(ctx, kbID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		c.Error(faqOperationError(err))
 		return
 	}
 
@@ -456,7 +468,7 @@ func (h *FAQHandler) GetEntry(c *gin.Context) {
 	entry, err := h.knowledgeService.GetFAQEntry(ctx, kbID, entrySeqID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		c.Error(faqOperationError(err))
 		return
 	}
 
@@ -482,14 +494,14 @@ func (h *FAQHandler) GetImportProgress(c *gin.Context) {
 	ctx := c.Request.Context()
 	taskID := secutils.SanitizeForLog(c.Param("task_id"))
 	if err := requireTaskProgressTenant(ctx, taskID); err != nil {
-		c.Error(err)
+		c.Error(faqOperationError(err))
 		return
 	}
 
 	progress, err := h.knowledgeService.GetFAQImportProgress(ctx, taskID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		c.Error(faqOperationError(err))
 		return
 	}
 
@@ -526,7 +538,7 @@ func (h *FAQHandler) UpdateLastImportResultDisplayStatus(c *gin.Context) {
 
 	if err := h.knowledgeService.UpdateLastFAQImportResultDisplayStatus(ctx, kbID, req.DisplayStatus); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		c.Error(faqOperationError(err))
 		return
 	}
 
@@ -570,7 +582,7 @@ func (h *FAQHandler) AddSimilarQuestions(c *gin.Context) {
 	entry, err := h.knowledgeService.AddSimilarQuestions(ctx, kbID, entrySeqID, req.SimilarQuestions)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		c.Error(faqOperationError(err))
 		return
 	}
 

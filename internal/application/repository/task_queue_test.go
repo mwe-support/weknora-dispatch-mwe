@@ -32,7 +32,13 @@ CREATE TABLE IF NOT EXISTS task_pending_ops (
     payload     TEXT NOT NULL DEFAULT '{}',
     fail_count  INTEGER NOT NULL DEFAULT 0,
     enqueued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    claimed_at  DATETIME
+    claimed_at  DATETIME,
+    step_id     VARCHAR(64),
+    step_attempt INTEGER,
+    dispatch_seq INTEGER,
+    available_at DATETIME,
+    delivered_at DATETIME,
+    queue_task_id VARCHAR(256) NOT NULL DEFAULT ''
 );
 `
 

@@ -3,6 +3,7 @@ package neo4j
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -73,8 +74,8 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 		for _, node := range graph.Node {
 			nodeData = append(nodeData, map[string]interface{}{
 				"name":         node.Name,
-				"knowledge_id": namespace.Knowledge,
-				"props":        map[string][]string{"attributes": node.Attributes},
+				"knowledge_id": namespace.GraphID(),
+				"props":        map[string]any{"attributes": node.Attributes, "processing_contribution": namespace.ProcessingContribution},
 				"chunks":       node.Chunks,
 				"labels":       n.Labels(namespace),
 			})
@@ -96,7 +97,7 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 			relData = append(relData, map[string]interface{}{
 				"source":        rel.Node1,
 				"target":        rel.Node2,
-				"knowledge_id":  namespace.Knowledge,
+				"knowledge_id":  namespace.GraphID(),
 				"type":          rel.Type,
 				"source_labels": n.Labels(namespace),
 				"target_labels": n.Labels(namespace),
@@ -135,7 +136,7 @@ func (n *Neo4jRepository) DelGraph(ctx context.Context, namespaces []types.NameS
 				) YIELD batches, total
 				RETURN total
         	`
-			if _, err := tx.Run(ctx, deleteRelsQuery, map[string]interface{}{"knowledge_id": namespace.Knowledge}); err != nil {
+			if _, err := tx.Run(ctx, deleteRelsQuery, map[string]interface{}{"knowledge_id": namespace.GraphID()}); err != nil {
 				return nil, fmt.Errorf("failed to delete relationships: %v", err)
 			}
 
@@ -147,7 +148,7 @@ func (n *Neo4jRepository) DelGraph(ctx context.Context, namespaces []types.NameS
 				) YIELD batches, total
 				RETURN total
         	`
-			if _, err := tx.Run(ctx, deleteNodesQuery, map[string]interface{}{"knowledge_id": namespace.Knowledge}); err != nil {
+			if _, err := tx.Run(ctx, deleteNodesQuery, map[string]interface{}{"knowledge_id": namespace.GraphID()}); err != nil {
 				return nil, fmt.Errorf("failed to delete nodes: %v", err)
 			}
 		}
@@ -176,18 +177,21 @@ func (n *Neo4jRepository) SearchNode(
 	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 		labelExpr := n.Label(namespace)
 		query := `
-			MATCH (n:` + labelExpr + `)-[r]-(m:` + labelExpr + `)
+			MATCH (n:` + labelExpr + `)
 			WHERE ANY(nodeText IN $nodes WHERE n.name CONTAINS nodeText)
+			AND ((coalesce(n.processing_contribution, '') = '' AND n.kg IN $legacy) OR n.processing_contribution IN $confirmed)
+			OPTIONAL MATCH (n)-[r]-(m:` + labelExpr + `)
+			WHERE ((coalesce(m.processing_contribution, '') = '' AND m.kg IN $legacy) OR m.processing_contribution IN $confirmed)
 			RETURN n, r, m
 		`
-		params := map[string]interface{}{"nodes": nodes}
+		params := map[string]interface{}{"nodes": nodes, "confirmed": namespace.ConfirmedContributions, "legacy": namespace.VisibleLegacyKnowledge}
 		result, err := tx.Run(ctx, query, params)
 		if err != nil {
 			return nil, fmt.Errorf("failed to run query: %v", err)
 		}
 
 		graphData := &types.GraphData{}
-		nodeSeen := make(map[string]bool)
+		nodeSeen := make(map[string]*types.GraphNode)
 		for result.Next(ctx) {
 			record := result.Record()
 			node, _ := record.Get("n")
@@ -195,30 +199,45 @@ func (n *Neo4jRepository) SearchNode(
 			targetNode, _ := record.Get("m")
 
 			nodeData := node.(neo4j.Node)
-			targetNodeData := targetNode.(neo4j.Node)
+			targetNodeData, hasTarget := targetNode.(neo4j.Node)
+			nodesToMerge := []neo4j.Node{nodeData}
+			if hasTarget {
+				nodesToMerge = append(nodesToMerge, targetNodeData)
+			}
 
 			// Convert node to types.Node
-			for _, n := range []neo4j.Node{nodeData, targetNodeData} {
+			for _, n := range nodesToMerge {
 				nameStr := n.Props["name"].(string)
-				if _, ok := nodeSeen[nameStr]; !ok {
-					nodeSeen[nameStr] = true
-					graphData.Node = append(graphData.Node, &types.GraphNode{
-						Name:       nameStr,
-						Chunks:     listI2listS(n.Props["chunks"].([]interface{})),
-						Attributes: listI2listS(n.Props["attributes"].([]interface{})),
-					})
+				merged := nodeSeen[nameStr]
+				if merged == nil {
+					merged = &types.GraphNode{Name: nameStr}
+					nodeSeen[nameStr] = merged
+					graphData.Node = append(graphData.Node, merged)
 				}
+				chunks, _ := n.Props["chunks"].([]interface{})
+				attributes, _ := n.Props["attributes"].([]interface{})
+				merged.Chunks = append(merged.Chunks, listI2listS(chunks)...)
+				merged.Attributes = append(merged.Attributes, listI2listS(attributes)...)
 			}
 
 			// Convert relationship to types.Relation
-			relData := rel.(neo4j.Relationship)
+			relData, hasRelation := rel.(neo4j.Relationship)
+			if !hasTarget || !hasRelation {
+				continue
+			}
 			graphData.Relation = append(graphData.Relation, &types.GraphRelation{
 				Node1: nodeData.Props["name"].(string),
 				Node2: targetNodeData.Props["name"].(string),
 				Type:  relData.Type,
 			})
 		}
-		return graphData, nil
+		for _, node := range graphData.Node {
+			slices.Sort(node.Chunks)
+			node.Chunks = slices.Compact(node.Chunks)
+			slices.Sort(node.Attributes)
+			node.Attributes = slices.Compact(node.Attributes)
+		}
+		return graphData, result.Err()
 	})
 	if err != nil {
 		logger.Errorf(ctx, "search node failed: %v", err)

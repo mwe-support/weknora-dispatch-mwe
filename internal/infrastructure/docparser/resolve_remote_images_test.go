@@ -2,6 +2,7 @@ package docparser
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -10,6 +11,62 @@ import (
 	"strings"
 	"testing"
 )
+
+type processingImageTransport func(*http.Request) (*http.Response, error)
+
+func (f processingImageTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type processingCountedBody struct {
+	io.Reader
+	reads int
+}
+
+func (b *processingCountedBody) Read(p []byte) (int, error) { b.reads++; return b.Reader.Read(p) }
+func (*processingCountedBody) Close() error                 { return nil }
+
+func TestProcessingDownloadImageSizeEvidenceAndCompleteReferenceRewrite(t *testing.T) {
+	for _, host := range []string{"docimg8.docs.qq.com", "example.com"} {
+		client := &http.Client{Transport: processingImageTransport(func(req *http.Request) (*http.Response, error) {
+			expected := ""
+			if host == "docimg8.docs.qq.com" {
+				expected = "https://docs.qq.com/"
+			}
+			if req.Header.Get("Referer") != expected {
+				t.Errorf("image origin header for %s: %q", host, req.Header.Get("Referer"))
+			}
+			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"image/png"}}, Body: io.NopCloser(strings.NewReader("synthetic"))}, nil
+		})}
+		if _, _, err := downloadImage(context.Background(), client, "https://"+host+"/image"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, declared := range []int64{maxRemoteImageSize + 1, -1} {
+		body := &processingCountedBody{Reader: strings.NewReader(strings.Repeat("x", maxRemoteImageSize+2))}
+		client := &http.Client{Transport: processingImageTransport(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, ContentLength: declared, Header: http.Header{"Content-Type": []string{"image/png"}}, Body: body}, nil
+		})}
+		_, _, err := downloadImage(context.Background(), client, "https://example.com/image?signature=private")
+		var limit *ImageDownloadLimitError
+		if !errors.As(err, &limit) {
+			t.Fatalf("expected size error: %v", err)
+		}
+		if declared > 0 {
+			if body.reads != 0 || limit.ActualBytes == nil || *limit.ActualBytes != declared {
+				t.Fatal("declared oversize must reject before reading")
+			}
+		} else if limit.ActualBytes != nil || limit.ObservedAtLeastBytes != maxRemoteImageSize+1 {
+			t.Fatal("unknown length is a lower bound")
+		}
+	}
+	input := `![one](<images/file one.png> "title") <img src="images/two.png" alt="two"> ![repeat](images/two.png)`
+	output, err := RewriteProcessingImages(input, map[string]string{"images/file one.png": "asset:one", "images/two.png": "asset:two"})
+	if err != nil || strings.Count(output, "asset:two") != 2 || strings.Contains(output, "images/") {
+		t.Fatalf("rewrite: %q %v", output, err)
+	}
+	if _, err := RewriteProcessingImages(input, map[string]string{"images/two.png": "asset:two"}); err == nil {
+		t.Fatal("missing image cannot pass")
+	}
+}
 
 // mockFileService is a minimal FileService implementation for testing.
 type mockFileService struct {

@@ -85,6 +85,9 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	}
 	page.LastEditSource = types.WikiEditSourceFromContext(ctx)
 	page.LastEditorID, _ = types.UserIDFromContext(ctx)
+	if page.LastEditSource != types.WikiEditSourcePipeline && strings.TrimSpace(page.Content) != "" {
+		page.PreserveUntrackedContent()
+	}
 	stripWikiPageInlineChunkCitations(page)
 
 	// Parse outbound links from content
@@ -123,6 +126,9 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	if err != nil {
 		return nil, fmt.Errorf("get existing page: %w", err)
 	}
+	if page.ID != existing.ID || page.Version != existing.Version || page.MutationRevision != existing.MutationRevision {
+		return nil, repository.ErrWikiPageConflict
+	}
 	stripWikiPageInlineChunkCitations(page)
 
 	oldOutLinks := existing.OutLinks
@@ -148,6 +154,12 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	existing.SourceRefs = page.SourceRefs
 	existing.ChunkRefs = page.ChunkRefs
 	existing.PageMetadata = page.PageMetadata
+	if prev.HasManualFolder() || (prev.FolderID != page.FolderID && types.WikiEditSourceFromContext(ctx) != types.WikiEditSourcePipeline) {
+		existing.MarkManualFolder()
+	}
+	if prev.HasUntrackedContent() || (contentChanged && types.WikiEditSourceFromContext(ctx) != types.WikiEditSourcePipeline) {
+		existing.PreserveUntrackedContent()
+	}
 	existing.ParentSlug = page.ParentSlug
 	existing.FolderID = page.FolderID
 	existing.SortOrder = page.SortOrder
@@ -213,6 +225,9 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 	if err != nil {
 		return fmt.Errorf("get existing page: %w", err)
 	}
+	if page.ID != existing.ID || page.Version != existing.Version || page.MutationRevision != existing.MutationRevision {
+		return repository.ErrWikiPageConflict
+	}
 
 	oldOutLinks := existing.OutLinks
 
@@ -223,6 +238,7 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 	if err := s.repo.UpdateAutoLinkedContent(ctx, existing); err != nil {
 		return fmt.Errorf("update auto-linked content: %w", err)
 	}
+	*page = *existing
 
 	s.removeInLinks(ctx, existing.KnowledgeBaseID, existing.Slug, oldOutLinks)
 	s.updateInLinks(ctx, existing.KnowledgeBaseID, existing.Slug, existing.OutLinks)
@@ -235,24 +251,7 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 // page's provenance columns as they stood while the version was current —
 // not whoever is performing the write that supersedes it.
 func revisionFromPage(p *types.WikiPage) *types.WikiPageRevision {
-	return &types.WikiPageRevision{
-		ID:              uuid.New().String(),
-		TenantID:        p.TenantID,
-		KnowledgeBaseID: p.KnowledgeBaseID,
-		PageID:          p.ID,
-		Slug:            p.Slug,
-		Version:         p.Version,
-		Title:           p.Title,
-		PageType:        p.PageType,
-		Status:          p.Status,
-		Content:         p.Content,
-		Summary:         p.Summary,
-		Aliases:         append(types.StringArray(nil), p.Aliases...),
-		EditSource:      types.NormalizeWikiEditSource(p.LastEditSource),
-		EditorID:        p.LastEditorID,
-		EditedAt:        p.UpdatedAt,
-		CreatedAt:       time.Now(),
-	}
+	return repository.WikiRevisionFromPage(p)
 }
 
 // pruneRevisions bounds one page's snapshot history after it advanced to
@@ -1578,6 +1577,7 @@ func (s *wikiPageService) MovePage(
 		return nil, err
 	}
 	page.FolderID = strings.TrimSpace(folderID)
+	page.MarkManualFolder()
 	if err := s.applyFolderToPage(ctx, page); err != nil {
 		return nil, err
 	}

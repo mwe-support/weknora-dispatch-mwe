@@ -213,6 +213,12 @@ func (s *vectorStoreService) DeleteStore(ctx context.Context, tenantID uint64, i
 					"vector store still has %d knowledge base(s) bound to it; "+
 						"unbind or delete them before removing the store", count))
 		}
+		if err := tx.Model(&types.ProcessingJob{}).Where("tenant_id = ? AND retirement_state <> ? AND index_destination->>'vector_store_id' = ?", tenantID, "deleted", id).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return errors.NewBadRequestError("vector store is retained by processing versions; finish their retirement before removing the store")
+		}
 
 		// 3. Soft-delete (gorm.DeletedAt fills automatically).
 		return tx.Delete(&store).Error

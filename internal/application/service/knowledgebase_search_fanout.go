@@ -54,7 +54,11 @@ func (s *knowledgeBaseService) retrieveFromStores(
 		return nil, nil
 	}
 	if len(groups) == 1 {
-		return groups[0].Engine.Retrieve(ctx, paramsWithTopK(groups[0]))
+		results, err := groups[0].Engine.Retrieve(ctx, paramsWithTopK(groups[0]))
+		if err != nil {
+			return nil, err
+		}
+		return s.filterProcessingRetrieval(ctx, groups, results)
 	}
 
 	timeout := multiStoreRetrieveTimeout()
@@ -127,7 +131,47 @@ func (s *knowledgeBaseService) retrieveFromStores(
 			}
 		}
 	}
-	return all, nil
+	return s.filterProcessingRetrieval(ctx, groups, all)
+}
+
+// Every retrieval path, including iterative FAQ expansion, passes through this
+// boundary before fusion or content enrichment. Store queries can over-return
+// retained versions; only the committed publication/attempt is consumable.
+func (s *knowledgeBaseService) filterProcessingRetrieval(ctx context.Context, groups []*storeGroup, results []*types.RetrieveResult) ([]*types.RetrieveResult, error) {
+	filter, ok := s.kgRepo.(interface {
+		FilterProcessingIndexes(context.Context, []types.KnowledgeSearchScope, []*types.IndexWithScore) ([]*types.IndexWithScore, error)
+	})
+	if !ok {
+		return results, nil
+	}
+	var scopes []types.KnowledgeSearchScope
+	for _, group := range groups {
+		for _, kbID := range group.KBIDs {
+			scopes = append(scopes, types.KnowledgeSearchScope{TenantID: group.OwnerTenantID, KBID: kbID})
+		}
+	}
+	var hits []*types.IndexWithScore
+	for _, result := range results {
+		hits = append(hits, result.Results...)
+	}
+	visible, err := filter.FilterProcessingIndexes(ctx, scopes, hits)
+	if err != nil {
+		return nil, err
+	}
+	accepted := make(map[*types.IndexWithScore]bool, len(visible))
+	for _, hit := range visible {
+		accepted[hit] = true
+	}
+	for _, result := range results {
+		filtered := make([]*types.IndexWithScore, 0, len(result.Results))
+		for _, hit := range result.Results {
+			if accepted[hit] {
+				filtered = append(filtered, hit)
+			}
+		}
+		result.Results = filtered
+	}
+	return results, nil
 }
 
 // paramsWithTopK builds a fresh []RetrieveParams for a group. BaseParams

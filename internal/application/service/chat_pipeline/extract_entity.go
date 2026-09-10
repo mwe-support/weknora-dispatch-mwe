@@ -435,26 +435,43 @@ func (f *Formater) ParseGraph(ctx context.Context, text string) (*types.GraphDat
 	for _, group := range matchData {
 		switch {
 		case group[f.nodePrefix] != nil:
+			name, ok := group[f.nodePrefix].(string)
+			if !ok || strings.TrimSpace(name) == "" {
+				return nil, errors.New("invalid graph entity name")
+			}
 			attributes := make([]string, 0)
 			attributesKey := f.nodePrefix + f.attributeSuffix
+			if group[attributesKey] != nil {
+				if _, ok := group[attributesKey].([]interface{}); !ok {
+					return nil, errors.New("invalid graph entity attributes")
+				}
+			}
 			if attr, ok := group[attributesKey].([]interface{}); ok {
 				for _, v := range attr {
-					attributes = append(attributes, fmt.Sprintf("%v", v))
+					value, ok := v.(string)
+					if !ok {
+						return nil, errors.New("invalid graph entity attribute")
+					}
+					attributes = append(attributes, value)
 				}
 			}
 			nodes = append(nodes, &types.GraphNode{
-				Name:       fmt.Sprintf("%v", group[f.nodePrefix]),
+				Name:       name,
 				Attributes: attributes,
 			})
 		case group[f.relationSource] != nil && group[f.relationTarget] != nil:
+			for _, key := range []string{f.relationSource, f.relationTarget, f.relationPrefix} {
+				if value, ok := group[key].(string); !ok || strings.TrimSpace(value) == "" {
+					return nil, errors.New("invalid graph relationship")
+				}
+			}
 			relations = append(relations, &types.GraphRelation{
 				Node1: fmt.Sprintf("%v", group[f.relationSource]),
 				Node2: fmt.Sprintf("%v", group[f.relationTarget]),
 				Type:  fmt.Sprintf("%v", group[f.relationPrefix]),
 			})
 		default:
-			logger.Warnf(ctx, "Unsupported graph group: %v", group)
-			continue
+			return nil, errors.New("unsupported graph output group")
 		}
 	}
 	graph := &types.GraphData{
@@ -470,14 +487,7 @@ func (f *Formater) rebuildGraph(ctx context.Context, graph *types.GraphData) {
 	nodes := make([]*types.GraphNode, 0, len(graph.Node))
 	for _, node := range graph.Node {
 		if prenode, ok := nodeMap[node.Name]; ok {
-			logger.Infof(ctx, "Duplicate node ID: %s, merge attribute", node.Name)
-			// 修复panic：检查Attributes是否为nil
-			if node.Attributes == nil {
-				node.Attributes = make([]string, 0)
-			}
-			if prenode.Attributes != nil {
-				node.Attributes = append(node.Attributes, prenode.Attributes...)
-			}
+			prenode.Attributes = append(prenode.Attributes, node.Attributes...)
 			continue
 		}
 		nodeMap[node.Name] = node

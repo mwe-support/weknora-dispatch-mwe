@@ -1,0 +1,9 @@
+DROP TABLE processing_history_rows;
+DROP TABLE processing_history_snapshots;
+DROP VIEW mwe_processing_lifecycle_inconsistencies;
+DROP VIEW mwe_processing_unresolved_incidents;
+DROP VIEW mwe_processing_attempt_timeline;
+DROP VIEW mwe_processing_stage_retry_queue;
+DROP VIEW mwe_processing_current_run_progress;
+DROP VIEW mwe_processing_current_document_lifecycle;
+DROP VIEW mwe_processing_job_state;

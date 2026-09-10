@@ -2,6 +2,8 @@ package retriever
 
 import (
 	"context"
+	"errors"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -72,11 +74,20 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
 	params := make(map[string]any)
 	embeddingMap := make(map[string][]float32)
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
-		embedding, err := embedder.Embed(ctx, sanitizeForEmbedding(ctx, indexInfo.Content))
+		prepared, err := preparedEmbeddingBatch([]*types.IndexInfo{indexInfo})
 		if err != nil {
 			return err
 		}
-		embeddingMap[indexInfo.SourceID] = embedding
+		var vector []float32
+		if prepared != nil {
+			vector = prepared[0]
+		} else {
+			vector, err = embedder.Embed(ctx, sanitizeForEmbedding(ctx, indexInfo.Content))
+		}
+		if err != nil {
+			return err
+		}
+		embeddingMap[indexInfo.SourceID] = vector
 	}
 	params["embedding"] = embeddingMap
 	return v.indexRepository.Save(ctx, indexInfo, params)
@@ -92,11 +103,17 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 	}
 
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
-		var contentList []string
-		for _, indexInfo := range indexInfoList {
-			contentList = append(contentList, sanitizeForEmbedding(ctx, indexInfo.Content))
+		embeddings, err := preparedEmbeddingBatch(indexInfoList)
+		if err != nil {
+			return err
 		}
-		embeddings, err := batchEmbedWithBackoff(ctx, embedder, contentList)
+		if embeddings == nil {
+			var contentList []string
+			for _, indexInfo := range indexInfoList {
+				contentList = append(contentList, sanitizeForEmbedding(ctx, indexInfo.Content))
+			}
+			embeddings, err = batchEmbedWithBackoff(ctx, embedder, contentList)
+		}
 		if err != nil {
 			return err
 		}
@@ -123,6 +140,42 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 		return v.concurrentBatchSaveNoEmbedding(ctx, chunks)
 	}
 	return v.boundedConcurrentBatchSaveNoEmbedding(ctx, chunks, maxConcurrency)
+}
+
+func preparedEmbeddingBatch(items []*types.IndexInfo) ([][]float32, error) {
+	prepared := false
+	for _, item := range items {
+		if item == nil {
+			return nil, errors.New("nil index input")
+		}
+		prepared = prepared || item.PreparedEmbedding != nil
+	}
+	if !prepared {
+		return nil, nil
+	}
+	vectors := make([][]float32, len(items))
+	dimension := len(items[0].PreparedEmbedding)
+	for i, item := range items {
+		if len(item.PreparedEmbedding) == 0 || len(item.PreparedEmbedding) != dimension {
+			return nil, errors.New("incomplete or inconsistent prepared embeddings")
+		}
+		for _, value := range item.PreparedEmbedding {
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+				return nil, errors.New("non-finite prepared embedding")
+			}
+		}
+		vectors[i] = item.PreparedEmbedding
+	}
+	return vectors, nil
+}
+
+// PrepareProcessingEmbeddingInput shares legacy image-payload removal while
+// rejecting truncation: protocol 2 must not silently discard document text.
+func PrepareProcessingEmbeddingInput(ctx context.Context, content string) (string, error) {
+	if utf8.RuneCountInString(content) > safetyMaxChars {
+		return "", errors.New("processing embedding input exceeds 20000 characters")
+	}
+	return sanitizeForEmbedding(ctx, content), nil
 }
 
 // batchEmbedWithBackoff calls BatchEmbedWithPool with exponential backoff on
@@ -306,7 +359,11 @@ func (v *KeywordsVectorHybridRetrieveEngineService) EstimateStorageSize(
 		embeddingMap := make(map[string][]float32)
 		// just for estimate storage size
 		for _, indexInfo := range indexInfoList {
-			embeddingMap[indexInfo.ChunkID] = make([]float32, embedder.GetDimensions())
+			if len(indexInfo.PreparedEmbedding) > 0 {
+				embeddingMap[indexInfo.SourceID] = indexInfo.PreparedEmbedding
+			} else if embedder != nil {
+				embeddingMap[indexInfo.SourceID] = make([]float32, embedder.GetDimensions())
+			}
 		}
 		params["embedding"] = embeddingMap
 	}

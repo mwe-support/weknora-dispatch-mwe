@@ -24,6 +24,7 @@ type stubFileService struct {
 }
 
 type stubResourceCatalog struct {
+	interfaces.ResourceCatalog
 	resource *types.StoredResource
 }
 

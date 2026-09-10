@@ -223,6 +223,9 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
 	ctx context.Context, tenantID uint64, ids []string,
 ) (string, error) {
+	if err := h.kgService.CheckKnowledgeDeletion(ctx, tenantID, ids); err != nil {
+		return "", err
+	}
 	payload := types.KnowledgeListDeletePayload{
 		TenantID:     tenantID,
 		KnowledgeIDs: ids,
@@ -1285,6 +1288,10 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 	logger.Infof(ctx, "Enqueuing knowledge delete, ID: %s", secutils.SanitizeForLog(id))
 	taskID, err := h.enqueueKnowledgeListDelete(effCtx, effectiveTenantID, []string{id})
 	if err != nil {
+		if goerrors.Is(err, repository.ErrProcessingConflict) {
+			c.Error(errors.NewConflictError("A version is held for rollback or its history needs verification. Open processing history before deleting."))
+			return
+		}
 		logger.Errorf(ctx, "Failed to enqueue knowledge delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue delete task"))
 		return
@@ -1375,6 +1382,10 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 
 	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, ids)
 	if err != nil {
+		if goerrors.Is(err, repository.ErrProcessingConflict) {
+			c.Error(errors.NewConflictError("A version is held for rollback or its history needs verification. Open processing history before deleting."))
+			return
+		}
 		logger.Errorf(ctx, "Failed to enqueue batch knowledge delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue batch delete task"))
 		return
@@ -1449,6 +1460,10 @@ func (h *KnowledgeHandler) ClearKnowledgeBaseContents(c *gin.Context) {
 
 	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, knowledgeIDs)
 	if err != nil {
+		if goerrors.Is(err, repository.ErrProcessingConflict) {
+			c.Error(errors.NewConflictError("A version is held for rollback or its history needs verification. Open processing history before deleting."))
+			return
+		}
 		logger.Errorf(ctx, "Failed to enqueue knowledge list delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue cleanup task"))
 		return
@@ -2483,6 +2498,10 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 		knowledge, err := h.kgService.GetKnowledgeByID(ctx, kID)
 		if err != nil {
 			c.Error(errors.NewBadRequestError(fmt.Sprintf("Knowledge item %s not found", kID)))
+			return
+		}
+		if knowledge.GetMetadata()["processing_protocol"] == "2" || sourceKB.Type == types.KnowledgeBaseTypeFAQ {
+			c.Error(errors.NewConflictError("Synced versions and canonical FAQ entries cannot be moved; add the source to the destination knowledge base"))
 			return
 		}
 		if knowledge.KnowledgeBaseID != req.SourceKBID {

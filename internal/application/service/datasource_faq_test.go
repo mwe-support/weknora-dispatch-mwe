@@ -48,6 +48,18 @@ func TestFAQSourceFormats(t *testing.T) {
 	}
 }
 
+func TestFAQSourceFormattedMarkdownHeaders(t *testing.T) {
+	item := &types.FetchedItem{FileName: "source.md", Content: []byte("| **问题** | **机器人回答** |\n| --- | --- |\n| **Who owns Atlas?** | **Alice** owns Atlas. |")}
+	entries, err := parseFAQFetchedItem(item)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, "**Who owns Atlas?**", entries[0].StandardQuestion)
+	require.Equal(t, []string{"**Alice** owns Atlas."}, entries[0].Answers)
+	item.Content = []byte("| **问题** | question | **机器人回答** |\n| --- | --- | --- |\n| Q | Q | A |")
+	_, err = parseFAQFetchedItem(item)
+	require.ErrorContains(t, err, "duplicate column")
+}
+
 func TestFAQSourceSheetRowNumbersAndAllSheets(t *testing.T) {
 	item := &types.FetchedItem{FileName: "FAQ.md", Metadata: map[string]string{"sheet_export_mode": "cell_ranges"}, Content: []byte("## Sheet: Main\n\n| Source row | A | B |\n|---|---|---|\n| 3 | question | answers |\n| 119 | Q | A<br>line |\n\n## Sheet: Other\n\n| Source row | A | B |\n|---|---|---|\n| 1 | question | answers |\n| 201 | Broken | |\n")}
 	entries, err := parseFAQFetchedItem(item)

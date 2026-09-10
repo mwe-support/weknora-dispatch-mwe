@@ -29,6 +29,18 @@ func NewResourceCatalog(repo interfaces.ResourceRepository) interfaces.ResourceC
 	return &resourceCatalog{repo: repo}
 }
 
+func (s *resourceCatalog) ReserveStorage(ctx context.Context, tenant uint64, bytes int64, temporary bool, backendID string) (string, error) {
+	return s.repo.ReserveStorage(ctx, tenant, bytes, temporary, backendID)
+}
+
+func (s *resourceCatalog) SetStoragePath(ctx context.Context, tenant uint64, id, path string) error {
+	return s.repo.SetStoragePath(ctx, tenant, id, path)
+}
+
+func (s *resourceCatalog) ReleaseStorage(ctx context.Context, tenant uint64, id string) error {
+	return s.repo.ReleaseStorage(ctx, tenant, id)
+}
+
 func randomResourceToken() (string, error) {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {

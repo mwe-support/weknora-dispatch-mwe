@@ -56,11 +56,24 @@ func deleteExtractedImages(ctx context.Context, fileSvc interfaces.FileService, 
 }
 
 // DeleteKnowledge deletes a knowledge entry and all related resources
+func (s *knowledgeService) CheckKnowledgeDeletion(ctx context.Context, tenantID uint64, ids []string) error {
+	guard, ok := s.repo.(interface {
+		CheckKnowledgeDeletion(context.Context, uint64, []string) error
+	})
+	if !ok {
+		return errors.New("knowledge deletion verification is unavailable")
+	}
+	return guard.CheckKnowledgeDeletion(ctx, tenantID, ids)
+}
+
 func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error {
 	// Get the knowledge entry
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, ctx.Value(types.TenantIDContextKey).(uint64), id)
 	if err != nil {
 		return err
+	}
+	if knowledge.GetMetadata()["processing_protocol"] == "2" {
+		return s.repo.DeleteKnowledge(ctx, knowledge.TenantID, id)
 	}
 
 	// Mark as deleting first to prevent async task conflicts
@@ -497,6 +510,26 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 	knowledgeList, err := s.repo.GetKnowledgeBatch(ctx, tenantInfo.ID, ids)
 	if err != nil {
 		return err
+	}
+	var managedIDs []string
+	legacy := knowledgeList[:0]
+	ids = nil
+	for _, knowledge := range knowledgeList {
+		if knowledge.GetMetadata()["processing_protocol"] == "2" {
+			managedIDs = append(managedIDs, knowledge.ID)
+		} else {
+			legacy = append(legacy, knowledge)
+			ids = append(ids, knowledge.ID)
+		}
+	}
+	if len(managedIDs) > 0 {
+		if err := s.repo.DeleteKnowledgeList(ctx, tenantInfo.ID, managedIDs); err != nil {
+			return err
+		}
+	}
+	knowledgeList = legacy
+	if len(ids) == 0 {
+		return nil
 	}
 
 	// Mark all as deleting first to prevent async task conflicts.

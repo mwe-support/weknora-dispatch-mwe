@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"io"
 	"runtime"
-	"slices"
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -1838,302 +1838,86 @@ func runningFAQImportInfoMatches(info *runningFAQImportInfo, taskID, instanceID 
 	return enqueuedAt == 0 || info.EnqueuedAt == 0 || info.EnqueuedAt == enqueuedAt
 }
 
-// incrementalIndexFAQEntry 增量更新FAQ条目的索引
-// 只对内容变化的部分进行embedding计算和索引更新，跳过未变化的部分
+// ponytail: publish a complete immutable entry version; reuse unchanged vectors
+// within an entry if measured FAQ reindex volume warrants the extra manifest.
 func (s *knowledgeService) incrementalIndexFAQEntry(
-	ctx context.Context,
-	kb *types.KnowledgeBase,
-	knowledge *types.Knowledge,
-	chunk *types.Chunk,
-	embeddingModel embedding.Embedder,
-	oldStandardQuestion string,
-	oldSimilarQuestions []string,
-	oldAnswers []string,
-	newMeta *types.FAQChunkMetadata,
+	ctx context.Context, kb *types.KnowledgeBase, knowledge *types.Knowledge,
+	chunk *types.Chunk, embeddingModel embedding.Embedder,
+	_ string, _ []string, _ []string, _ *types.FAQChunkMetadata,
 ) error {
-	indexStartTime := time.Now()
-	logger.Debugf(ctx, "incrementalIndexFAQEntry: starting for chunk=%s, oldSimilarQuestions=%d, newSimilarQuestions=%d",
-		chunk.ID, len(oldSimilarQuestions), len(newMeta.SimilarQuestions))
-
-	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
-		ctx, s.retrieveEngine, s.ownership, types.MustTenantIDFromContext(ctx), kb.VectorStoreID)
-	if err != nil {
-		return err
-	}
-
-	indexMode := types.FAQIndexModeQuestionAnswer
-	if kb.FAQConfig != nil && kb.FAQConfig.IndexMode != "" {
-		indexMode = kb.FAQConfig.IndexMode
-	}
-
-	// 对新旧数据进行归一化处理，确保与 buildFAQIndexInfoList 的行为一致
-	// 旧数据归一化
-	oldStandardQuestion = types.NormalizeQuestion(oldStandardQuestion)
-	normalizedOldSimilarQuestions := make([]string, 0, len(oldSimilarQuestions))
-	for _, q := range oldSimilarQuestions {
-		if nq := types.NormalizeQuestion(q); nq != "" {
-			normalizedOldSimilarQuestions = append(normalizedOldSimilarQuestions, nq)
-		}
-	}
-	oldSimilarQuestions = normalizedOldSimilarQuestions
-	oldAnswers = types.SanitizeStrings(oldAnswers)
-	// 新数据归一化
-	normalizedNewMeta := newMeta.Normalize()
-
-	// 构建索引内容
-	buildContent := func(question string, answers []string) string {
-		if indexMode == types.FAQIndexModeQuestionAnswer && len(answers) > 0 {
-			var builder strings.Builder
-			builder.WriteString(question)
-			for _, ans := range answers {
-				builder.WriteString("\n")
-				builder.WriteString(ans)
-			}
-			return builder.String()
-		}
-		return question
-	}
-
-	// 检查答案是否变化（仅在 QuestionAnswer 模式下才影响索引）
-	answersChanged := indexMode == types.FAQIndexModeQuestionAnswer && !slices.Equal(oldAnswers, normalizedNewMeta.Answers)
-	logger.Debugf(ctx, "incrementalIndexFAQEntry: answersChanged=%v (indexMode=%s), oldAnswers=%d, newAnswers=%d",
-		answersChanged, indexMode, len(oldAnswers), len(normalizedNewMeta.Answers))
-
-	// 收集需要更新的索引项
-	var indexInfoToUpdate []*types.IndexInfo
-
-	// 1. 检查标准问是否需要更新
-	oldStdContent := buildContent(oldStandardQuestion, oldAnswers)
-	newStdContent := buildContent(normalizedNewMeta.StandardQuestion, normalizedNewMeta.Answers)
-	stdQuestionChanged := oldStdContent != newStdContent
-	if stdQuestionChanged {
-		logger.Debugf(ctx, "incrementalIndexFAQEntry: standard question changed, sourceID=%s", chunk.ID)
-		indexInfoToUpdate = append(indexInfoToUpdate, &types.IndexInfo{
-			Content:         newStdContent,
-			SourceID:        chunk.ID,
-			SourceType:      types.ChunkSourceType,
-			ChunkID:         chunk.ID,
-			KnowledgeID:     chunk.KnowledgeID,
-			KnowledgeBaseID: chunk.KnowledgeBaseID,
-			KnowledgeType:   types.KnowledgeTypeFAQ,
-			TagID:           chunk.TagID,
-			IsEnabled:       chunk.IsEnabled,
-			IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
-		})
-	}
-
-	// 2. 基于内容哈希处理相似问的增删改
-	// 构建旧问题集合 (问题 -> 是否存在)
-	oldQuestionsSet := make(map[string]struct{}, len(oldSimilarQuestions))
-	for _, q := range oldSimilarQuestions {
-		oldQuestionsSet[q] = struct{}{}
-	}
-
-	// 构建新问题集合
-	newQuestionsSet := make(map[string]struct{}, len(normalizedNewMeta.SimilarQuestions))
-	for _, q := range normalizedNewMeta.SimilarQuestions {
-		newQuestionsSet[q] = struct{}{}
-	}
-
-	// 找出需要删除的问题（在旧集合中但不在新集合中）
-	var sourceIDsToDelete []string
-	var deletedQuestions []string
-	for oldQ := range oldQuestionsSet {
-		if _, exists := newQuestionsSet[oldQ]; !exists {
-			sourceID := fmt.Sprintf("%s-%s", chunk.ID, hashQuestion(oldQ))
-			sourceIDsToDelete = append(sourceIDsToDelete, sourceID)
-			deletedQuestions = append(deletedQuestions, oldQ)
-		}
-	}
-
-	// 找出需要新增或更新的问题
-	var addedQuestions, updatedQuestions []string
-	for newQ := range newQuestionsSet {
-		_, existedBefore := oldQuestionsSet[newQ]
-		// 需要更新的条件：
-		// 1. 新问题（之前不存在）
-		// 2. 答案变化（需要重新embedding）
-		if !existedBefore || answersChanged {
-			sourceID := fmt.Sprintf("%s-%s", chunk.ID, hashQuestion(newQ))
-			indexInfoToUpdate = append(indexInfoToUpdate, &types.IndexInfo{
-				Content:         buildContent(newQ, normalizedNewMeta.Answers),
-				SourceID:        sourceID,
-				SourceType:      types.ChunkSourceType,
-				ChunkID:         chunk.ID,
-				KnowledgeID:     chunk.KnowledgeID,
-				KnowledgeBaseID: chunk.KnowledgeBaseID,
-				KnowledgeType:   types.KnowledgeTypeFAQ,
-				TagID:           chunk.TagID,
-				IsEnabled:       chunk.IsEnabled,
-				IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
-			})
-			if !existedBefore {
-				addedQuestions = append(addedQuestions, newQ)
-			} else {
-				updatedQuestions = append(updatedQuestions, newQ)
-			}
-		}
-	}
-
-	// 输出详细的变化日志
-	if len(deletedQuestions) > 0 {
-		logger.Debugf(ctx, "incrementalIndexFAQEntry: deleted similar questions: %v", deletedQuestions)
-	}
-	if len(addedQuestions) > 0 {
-		logger.Debugf(ctx, "incrementalIndexFAQEntry: added similar questions: %v", addedQuestions)
-	}
-	if len(updatedQuestions) > 0 {
-		logger.Debugf(ctx, "incrementalIndexFAQEntry: updated similar questions (answers changed): %v", updatedQuestions)
-	}
-
-	// 3. 删除不再存在的相似问索引
-	if len(sourceIDsToDelete) > 0 {
-		logger.Debugf(ctx, "incrementalIndexFAQEntry: deleting %d obsolete sourceIDs: %v", len(sourceIDsToDelete), sourceIDsToDelete)
-		if delErr := retrieveEngine.DeleteBySourceIDList(ctx, sourceIDsToDelete, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); delErr != nil {
-			logger.Warnf(ctx, "incrementalIndexFAQEntry: failed to delete obsolete source IDs: %v", delErr)
-		}
-	}
-
-	// 4. 批量索引需要更新的内容
-	newCount := len(normalizedNewMeta.SimilarQuestions)
-	if len(indexInfoToUpdate) > 0 {
-		logger.Debugf(ctx, "incrementalIndexFAQEntry: updating %d index entries (skipped %d unchanged)",
-			len(indexInfoToUpdate), 1+newCount-len(indexInfoToUpdate))
-		if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoToUpdate); err != nil {
-			return err
-		}
-	} else {
-		logger.Debugf(ctx, "incrementalIndexFAQEntry: all %d entries unchanged, skipping index update", 1+newCount)
-	}
-
-	// 5. 更新 knowledge 记录
-	now := time.Now()
-	knowledge.UpdatedAt = now
-	knowledge.ProcessedAt = &now
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
-		return err
-	}
-
-	totalDuration := time.Since(indexStartTime)
-	logger.Debugf(ctx, "incrementalIndexFAQEntry: completed in %v, updated %d/%d entries",
-		totalDuration, len(indexInfoToUpdate), 1+newCount)
-
-	return nil
+	return s.indexFAQChunks(ctx, kb, knowledge, []*types.Chunk{chunk}, embeddingModel, false, false)
 }
 
+// Indexes remain private until the caller saves the manifest with the entry.
 func (s *knowledgeService) indexFAQChunks(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge,
 	chunks []*types.Chunk, embeddingModel embedding.Embedder,
-	adjustStorage bool, needDelete bool,
+	_ bool, _ bool,
 ) error {
 	if len(chunks) == 0 {
 		return nil
 	}
-	indexStartTime := time.Now()
-	logger.Debugf(ctx, "indexFAQChunks: starting to index %d chunks", len(chunks))
-
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
-		ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
+	if embeddingModel == nil {
+		return errors.New("FAQ embedding model is unavailable")
+	}
+	destination, err := knowledgeIndexDestination(ctx, s, kb, embeddingModel.GetDimensions())
 	if err != nil {
 		return err
 	}
-
-	// 构建索引信息
-	buildIndexInfoStartTime := time.Now()
-	indexInfo := make([]*types.IndexInfo, 0)
-	chunkIDs := make([]string, 0, len(chunks))
-	for _, chunk := range chunks {
-		infoList, err := s.buildFAQIndexInfoList(ctx, kb, chunk)
+	engine, err := processingIndexEngine(ctx, s, tenantInfo.ID, destination)
+	if err != nil {
+		return err
+	}
+	attempt := uuid.NewString()
+	indexes := make([]*types.IndexInfo, 0)
+	manifests := make([]string, len(chunks))
+	writes := make([]types.FAQIndexWrite, 0, len(chunks))
+	writeIDs := make([]string, 0, len(chunks))
+	encodedDestination, err := json.Marshal(destination)
+	if err != nil {
+		return err
+	}
+	for i, chunk := range chunks {
+		entries, err := s.buildFAQIndexInfoList(ctx, kb, chunk)
 		if err != nil {
 			return err
 		}
-		indexInfo = append(indexInfo, infoList...)
-		chunkIDs = append(chunkIDs, chunk.ID)
-	}
-	buildIndexInfoDuration := time.Since(buildIndexInfoStartTime)
-	logger.Debugf(
-		ctx,
-		"indexFAQChunks: built %d index info entries for %d chunks in %v",
-		len(indexInfo),
-		len(chunks),
-		buildIndexInfoDuration,
-	)
-
-	var size int64
-	if adjustStorage {
-		estimateStartTime := time.Now()
-		size = retrieveEngine.EstimateStorageSize(ctx, embeddingModel, indexInfo)
-		estimateDuration := time.Since(estimateStartTime)
-		logger.Debugf(ctx, "indexFAQChunks: estimated storage size %d bytes in %v", size, estimateDuration)
-		if tenantInfo.StorageQuota > 0 && tenantInfo.StorageUsed+size > tenantInfo.StorageQuota {
-			return types.NewStorageQuotaExceededError()
+		manifests[i], err = types.VersionFAQIndexes(attempt, chunk, entries)
+		if err != nil {
+			return err
 		}
-	}
-
-	// 删除旧向量
-	var deleteDuration time.Duration
-	if needDelete {
-		deleteStartTime := time.Now()
-		if err := retrieveEngine.DeleteByChunkIDList(ctx, chunkIDs, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); err != nil {
-			logger.Warnf(ctx, "Delete FAQ vectors failed: %v", err)
+		var manifest types.FAQIndexManifest
+		if err := json.Unmarshal([]byte(manifests[i]), &manifest); err != nil {
+			return err
 		}
-		deleteDuration = time.Since(deleteStartTime)
-		if deleteDuration > 100*time.Millisecond {
-			logger.Debugf(ctx, "indexFAQChunks: deleted old vectors for %d chunks in %v", len(chunkIDs), deleteDuration)
+		keys, err := json.Marshal(manifest.SourceIDs)
+		if err != nil {
+			return err
 		}
+		writes = append(writes, types.FAQIndexWrite{ID: manifest.WriteIDs[0], TenantID: chunk.TenantID, KnowledgeBaseID: chunk.KnowledgeBaseID, KnowledgeID: chunk.KnowledgeID, ChunkID: chunk.ID, BaseRevision: chunk.ContentRevision, ContentDigest: manifest.ContentDigest, SourceIDs: keys, Destination: encodedDestination, EstimatedBytes: engine.EstimateStorageSize(ctx, embeddingModel, entries)})
+		writeIDs = append(writeIDs, manifest.WriteIDs[0])
+		indexes = append(indexes, entries...)
 	}
-
-	// 批量索引（这里可能是性能瓶颈）
-	batchIndexStartTime := time.Now()
-	if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfo); err != nil {
+	if err := s.chunkRepo.RegisterFAQIndexWrites(ctx, writes); err != nil {
 		return err
 	}
-	batchIndexDuration := time.Since(batchIndexStartTime)
-	var avgPerEntry time.Duration
-	if len(indexInfo) > 0 {
-		avgPerEntry = batchIndexDuration / time.Duration(len(indexInfo))
+	if err := engine.BatchIndex(ctx, embeddingModel, indexes); err != nil {
+		return err
 	}
-	logger.Debugf(ctx, "indexFAQChunks: batch indexed %d index info entries in %v (avg: %v per entry)",
-		len(indexInfo), batchIndexDuration, avgPerEntry)
-
-	if adjustStorage && size > 0 {
-		adjustStartTime := time.Now()
-		if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, size); err == nil {
-			tenantInfo.StorageUsed += size
-		}
-		knowledge.StorageSize += size
-		adjustDuration := time.Since(adjustStartTime)
-		if adjustDuration > 50*time.Millisecond {
-			logger.Debugf(ctx, "indexFAQChunks: adjusted storage in %v", adjustDuration)
-		}
+	if err := s.chunkRepo.ConfirmFAQIndexWrites(ctx, tenantInfo.ID, writeIDs); err != nil {
+		return err
 	}
-
-	updateStartTime := time.Now()
 	now := time.Now()
-	knowledge.UpdatedAt = now
-	knowledge.ProcessedAt = &now
-	err = s.repo.UpdateKnowledge(ctx, knowledge)
-	updateDuration := time.Since(updateStartTime)
-	if updateDuration > 50*time.Millisecond {
-		logger.Debugf(ctx, "indexFAQChunks: updated knowledge in %v", updateDuration)
+	knowledge.UpdatedAt, knowledge.ProcessedAt = now, &now
+	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+		return err
 	}
-
-	totalDuration := time.Since(indexStartTime)
-	logger.Debugf(
-		ctx,
-		"indexFAQChunks: completed indexing %d chunks in %v (build: %v, delete: %v, batchIndex: %v, update: %v)",
-		len(chunks),
-		totalDuration,
-		buildIndexInfoDuration,
-		deleteDuration,
-		batchIndexDuration,
-		updateDuration,
-	)
-
-	return err
+	for i, chunk := range chunks {
+		chunk.FAQIndexManifest = manifests[i]
+	}
+	return nil
 }
-
 func (s *knowledgeService) deleteFAQChunkVectors(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []*types.Chunk,
 ) error {
@@ -2158,7 +1942,10 @@ func (s *knowledgeService) deleteFAQChunkVectors(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		indexInfo = append(indexInfo, infoList...)
+		if chunk.FAQIndexManifest == "" {
+			// Versioned writes keep their charge until exact cleanup is confirmed.
+			indexInfo = append(indexInfo, infoList...)
+		}
 		chunkIDs = append(chunkIDs, chunk.ID)
 	}
 
@@ -2658,6 +2445,9 @@ func (s *knowledgeService) executeFAQMergeOperations(
 			if !ok {
 				logger.Errorf(ctx, "FAQ import task %s: chunk %s not found during batch reload", taskID, op.ExistingChunk.ID)
 				return mergedCount, fmt.Errorf("chunk %s not found during batch reload", op.ExistingChunk.ID)
+			}
+			if fullChunk.ContentRevision != op.ExistingChunk.ContentRevision {
+				return mergedCount, repository.ErrChunkRevisionConflict
 			}
 
 			if err := fullChunk.SetFAQMetadata(op.MergedMeta); err != nil {

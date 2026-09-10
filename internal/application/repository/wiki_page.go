@@ -90,48 +90,58 @@ func (r *wikiPageRepository) UpdateWithRevision(
 // (plain connection or transaction). On failure page.Version is restored so
 // the caller never observes a bumped version for a write that did not land.
 func updateWikiPageRow(db *gorm.DB, page *types.WikiPage) error {
-	expectedVersion := page.Version
-	page.Version = expectedVersion + 1
+	err := updateWikiPageCAS(db, page, map[string]interface{}{
+		"title":            page.Title,
+		"content":          page.Content,
+		"summary":          page.Summary,
+		"page_type":        page.PageType,
+		"status":           page.Status,
+		"aliases":          page.Aliases,
+		"out_links":        page.OutLinks,
+		"source_refs":      page.SourceRefs,
+		"chunk_refs":       page.ChunkRefs,
+		"page_metadata":    page.PageMetadata,
+		"parent_slug":      page.ParentSlug,
+		"folder_id":        page.FolderID,
+		"category_path":    page.CategoryPath,
+		"wiki_path":        page.WikiPath,
+		"depth":            page.Depth,
+		"sort_order":       page.SortOrder,
+		"last_edit_source": page.LastEditSource,
+		"last_editor_id":   page.LastEditorID,
+		"version":          page.Version + 1,
+		"updated_at":       page.UpdatedAt,
+	})
+	if err == nil {
+		page.Version++
+	}
+	return err
+}
 
-	result := db.
-		Model(page).
-		Where("id = ? AND version = ?", page.ID, expectedVersion).
-		Updates(map[string]interface{}{
-			"title":            page.Title,
-			"content":          page.Content,
-			"summary":          page.Summary,
-			"page_type":        page.PageType,
-			"status":           page.Status,
-			"aliases":          page.Aliases,
-			"out_links":        page.OutLinks,
-			"source_refs":      page.SourceRefs,
-			"chunk_refs":       page.ChunkRefs,
-			"page_metadata":    page.PageMetadata,
-			"parent_slug":      page.ParentSlug,
-			"folder_id":        page.FolderID,
-			"category_path":    page.CategoryPath,
-			"wiki_path":        page.WikiPath,
-			"depth":            page.Depth,
-			"sort_order":       page.SortOrder,
-			"last_edit_source": page.LastEditSource,
-			"last_editor_id":   page.LastEditorID,
-			"version":          page.Version,
-			"updated_at":       page.UpdatedAt,
-		})
+func updateWikiPageCAS(db *gorm.DB, page *types.WikiPage, fields map[string]interface{}) error {
+	if page.ID == "" || page.Version < 1 || page.MutationRevision < 1 {
+		return ErrWikiPageConflict
+	}
+	fields["mutation_revision"] = page.MutationRevision + 1
+	result := db.Model(&types.WikiPage{}).
+		Where("id = ? AND knowledge_base_id = ? AND tenant_id = ? AND version = ? AND mutation_revision = ?",
+			page.ID, page.KnowledgeBaseID, page.TenantID, page.Version, page.MutationRevision).
+		Updates(fields)
 	if result.Error != nil {
-		page.Version = expectedVersion
 		return result.Error
 	}
-	if result.RowsAffected == 0 {
-		page.Version = expectedVersion
-		// Could be not found or version conflict — check which
+	if result.RowsAffected != 1 {
 		var count int64
-		db.Model(&types.WikiPage{}).Where("id = ?", page.ID).Count(&count)
+		if err := db.Model(&types.WikiPage{}).Where("id = ? AND knowledge_base_id = ? AND tenant_id = ?",
+			page.ID, page.KnowledgeBaseID, page.TenantID).Count(&count).Error; err != nil {
+			return err
+		}
 		if count == 0 {
 			return ErrWikiPageNotFound
 		}
 		return ErrWikiPageConflict
 	}
+	page.MutationRevision++
 	return nil
 }
 
@@ -226,21 +236,11 @@ func (r *wikiPageRepository) DeleteRevisionsByPage(ctx context.Context, pageID s
 // pages appear as v2 on first view and confuse users who expect `version` to
 // correspond to the number of intentional revisions.
 func (r *wikiPageRepository) UpdateAutoLinkedContent(ctx context.Context, page *types.WikiPage) error {
-	result := r.db.WithContext(ctx).
-		Model(page).
-		Where("id = ?", page.ID).
-		Updates(map[string]interface{}{
-			"content":    page.Content,
-			"out_links":  page.OutLinks,
-			"updated_at": page.UpdatedAt,
-		})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return ErrWikiPageNotFound
-	}
-	return nil
+	return updateWikiPageCAS(r.db.WithContext(ctx), page, map[string]interface{}{
+		"content":    page.Content,
+		"out_links":  page.OutLinks,
+		"updated_at": page.UpdatedAt,
+	})
 }
 
 // UpdateMeta updates bookkeeping / provenance fields WITHOUT incrementing the
@@ -251,32 +251,22 @@ func (r *wikiPageRepository) UpdateAutoLinkedContent(ctx context.Context, page *
 //
 // Used by link maintenance, re-ingest (same-content case), and status changes.
 func (r *wikiPageRepository) UpdateMeta(ctx context.Context, page *types.WikiPage) error {
-	result := r.db.WithContext(ctx).
-		Model(page).
-		Where("id = ?", page.ID).
-		Updates(map[string]interface{}{
-			"in_links":      page.InLinks,
-			"out_links":     page.OutLinks,
-			"aliases":       page.Aliases,
-			"status":        page.Status,
-			"source_refs":   page.SourceRefs,
-			"chunk_refs":    page.ChunkRefs,
-			"page_metadata": page.PageMetadata,
-			"parent_slug":   page.ParentSlug,
-			"folder_id":     page.FolderID,
-			"category_path": page.CategoryPath,
-			"wiki_path":     page.WikiPath,
-			"depth":         page.Depth,
-			"sort_order":    page.SortOrder,
-			"updated_at":    page.UpdatedAt,
-		})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return ErrWikiPageNotFound
-	}
-	return nil
+	return updateWikiPageCAS(r.db.WithContext(ctx), page, map[string]interface{}{
+		"in_links":      page.InLinks,
+		"out_links":     page.OutLinks,
+		"aliases":       page.Aliases,
+		"status":        page.Status,
+		"source_refs":   page.SourceRefs,
+		"chunk_refs":    page.ChunkRefs,
+		"page_metadata": page.PageMetadata,
+		"parent_slug":   page.ParentSlug,
+		"folder_id":     page.FolderID,
+		"category_path": page.CategoryPath,
+		"wiki_path":     page.WikiPath,
+		"depth":         page.Depth,
+		"sort_order":    page.SortOrder,
+		"updated_at":    page.UpdatedAt,
+	})
 }
 
 // GetByID retrieves a wiki page by its unique ID
@@ -1037,6 +1027,23 @@ func (r *wikiPageRepository) FindSimilarPages(
 	q := strings.ToLower(strings.TrimSpace(query))
 
 	var rows []types.WikiPageLite
+	if r.db.Dialector.Name() == "sqlite" {
+		// ponytail: Lite uses bounded substring candidates; use trigram search
+		// when typo-tolerant candidate retrieval is needed on SQLite.
+		err := r.db.WithContext(ctx).Model(&types.WikiPage{}).
+			Select("slug", "title", "page_type", "status", "aliases", "out_links").
+			Where("knowledge_base_id = ? AND page_type IN ? AND status <> ?", kbID, pageTypes, types.WikiPageStatusArchived).
+			Where("instr(lower(title), ?) > 0 OR instr(lower(COALESCE(aliases, '')), ?) > 0", q, q).
+			Order("title, slug").Limit(limit).Scan(&rows).Error
+		if err != nil {
+			return nil, err
+		}
+		out := make([]*types.WikiPageLite, len(rows))
+		for i := range rows {
+			out[i] = &rows[i]
+		}
+		return out, nil
+	}
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
 		Select("slug, title, page_type, status, aliases, out_links, similarity(lower(title), ?) AS sim", q).

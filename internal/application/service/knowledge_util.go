@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -102,6 +103,10 @@ func isValidURL(url string) bool {
 
 // calculateFileHash calculates MD5 hash of a file
 func calculateFileHash(file *multipart.FileHeader) (string, error) {
+	limit, err := validateKnowledgeFileSize(file)
+	if err != nil {
+		return "", err
+	}
 	f, err := file.Open()
 	if err != nil {
 		return "", err
@@ -109,9 +114,14 @@ func calculateFileHash(file *multipart.FileHeader) (string, error) {
 	defer f.Close()
 
 	h := md5.New()
-	if _, err := io.Copy(h, f); err != nil {
+	actual, err := io.Copy(h, io.LimitReader(f, limit+1))
+	if err != nil {
 		return "", err
 	}
+	if actual > limit {
+		return "", werrors.NewBadRequestError("FILE_SIZE_EXCEEDED").WithDetails(map[string]any{"limit_bytes": limit, "observed_at_least_bytes": actual})
+	}
+	file.Size = actual
 
 	// Reset file pointer for subsequent operations
 	if _, err := f.Seek(0, 0); err != nil {
@@ -119,6 +129,23 @@ func calculateFileHash(file *multipart.FileHeader) (string, error) {
 	}
 
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// API, connector and internal callers share the same source ceiling. A lower
+// configured reader ceiling also applies; a larger HTTP upload limit cannot
+// bypass the 100 MiB processing limit.
+func validateKnowledgeFileSize(file *multipart.FileHeader) (int64, error) {
+	limit := int64(processingArtifactLimit)
+	if mb, err := strconv.ParseInt(os.Getenv("MAX_FILE_SIZE_MB"), 10, 64); err == nil && mb > 0 && mb < 100 {
+		limit = mb << 20
+	}
+	if file == nil || file.Size < 0 {
+		return limit, werrors.NewBadRequestError("a file with a valid size is required")
+	}
+	if file.Size > limit {
+		return limit, werrors.NewBadRequestError("FILE_SIZE_EXCEEDED").WithDetails(map[string]any{"limit_bytes": limit, "declared_bytes": file.Size})
+	}
+	return limit, nil
 }
 
 func calculateStr(strList ...string) string {

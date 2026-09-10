@@ -93,6 +93,14 @@ func NewTencentDocsMCPClient(config MCPClientConfig) (*TencentDocsMCPClient, err
 	return newTencentDocsMCPClient(config, internalmcp.NewMCPClient)
 }
 
+func NewConfiguredMCPClient(config *types.DataSourceConfig) (*TencentDocsMCPClient, error) {
+	client, err := parseMCPClientConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	return NewTencentDocsMCPClient(client)
+}
+
 func newTencentDocsMCPClient(
 	config MCPClientConfig,
 	factory mcpClientFactory,
@@ -395,6 +403,8 @@ func (c *TencentDocsMCPClient) GetExportProgress(
 // The URL is not authenticated with the MCP token. Restricting scheme, host,
 // redirects and size prevents the remote tool response from becoming an SSRF
 // or unbounded-download primitive inside WeKnora.
+var ErrExportDownloadURLExpired = errors.New("EXPORT_DOWNLOAD_URL_EXPIRED")
+
 func (c *TencentDocsMCPClient) DownloadExport(ctx context.Context, fileURL string) ([]byte, error) {
 	if err := validateExportURL(fileURL); err != nil {
 		return nil, err
@@ -415,7 +425,10 @@ func (c *TencentDocsMCPClient) DownloadExport(ctx context.Context, fileURL strin
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("download Tencent Docs export: HTTP status %d", response.StatusCode)
+		if response.StatusCode == 403 || response.StatusCode == 404 || response.StatusCode == 410 {
+			return nil, fmt.Errorf("%w: HTTP status %d", ErrExportDownloadURLExpired, response.StatusCode)
+		}
+		return nil, &mcpHTTPStatusError{StatusCode: response.StatusCode}
 	}
 	return readExportBody(response.Body, response.ContentLength, maxExportBytes)
 }
@@ -478,6 +491,9 @@ func (c *TencentDocsMCPClient) callToolJSON(
 	args map[string]interface{},
 	out interface{},
 ) error {
+	if managed, _ := ctx.Value(managedRetriesKey{}).(bool); managed {
+		return c.callToolJSONOnce(ctx, tool, args, out)
+	}
 	for attempt := 0; ; attempt++ {
 		err := c.callToolJSONOnce(ctx, tool, args, out)
 		if err == nil || ctx.Err() != nil || attempt >= maxMCPTransientRetries || !isRetryableTencentDocsMCPError(tool, err) {
@@ -513,6 +529,13 @@ func (c *TencentDocsMCPClient) callToolJSONOnce(
 	if result == nil {
 		return fmt.Errorf("Tencent Docs MCP tool %s returned no result", tool)
 	}
+	var responseBytes int64
+	for _, item := range result.Content {
+		responseBytes += int64(len(item.Text))
+	}
+	if responseBytes > maxNativeResponseBytes {
+		return &NativeLimitError{Kind: "response", LimitBytes: maxNativeResponseBytes, ActualBytes: &responseBytes}
+	}
 	if result.IsError {
 		return classifyCredentialError(&MCPToolError{Tool: tool, Message: toolResultText(result)})
 	}
@@ -522,17 +545,17 @@ func (c *TencentDocsMCPClient) callToolJSONOnce(
 		if item.Type != "text" || strings.TrimSpace(item.Text) == "" {
 			continue
 		}
-		var envelope toolEnvelope
-		if err := json.Unmarshal([]byte(item.Text), &envelope); err != nil {
-			decodeErr = err
+		if !json.Valid([]byte(item.Text)) {
+			decodeErr = errors.New("tool content is not valid JSON")
 			continue
 		}
-		if envelope.Error != "" {
-			toolErr := &MCPToolError{
-				Tool: tool, Code: envelope.businessCode(),
-				Message: envelope.Error, TraceID: envelope.TraceID,
+		if err := tencentEnvelopeError(tool, []byte(item.Text), "", 0); err != nil {
+			var toolErr *MCPToolError
+			if errors.As(err, &toolErr) {
+				return err
 			}
-			return classifyCredentialError(toolErr)
+			decodeErr = err
+			continue
 		}
 		if err := json.Unmarshal([]byte(item.Text), out); err != nil {
 			return fmt.Errorf("decode JSON response from Tencent Docs MCP tool %s: %w", tool, err)
@@ -561,11 +584,11 @@ func isRetryableTencentDocsMCPError(tool string, err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
-	if isRateLimited(message) {
-		return true
-	}
 	if tool == toolExportFile {
 		return false
+	}
+	if isRateLimited(message) {
+		return true
 	}
 	var toolErr *MCPToolError
 	if errors.As(err, &toolErr) {
@@ -676,6 +699,7 @@ func classifyCredentialError(err error) error {
 
 type mcpHTTPStatusError struct {
 	StatusCode int
+	RetryAfter time.Duration
 }
 
 func (e *mcpHTTPStatusError) Error() string {
@@ -694,6 +718,13 @@ func (t preserveForbiddenTransport) RoundTrip(request *http.Request) (*http.Resp
 	if response.StatusCode == http.StatusForbidden {
 		_ = response.Body.Close()
 		return nil, &mcpHTTPStatusError{StatusCode: response.StatusCode}
+	}
+	if response.ContentLength > maxNativeResponseBytes {
+		_ = response.Body.Close()
+		return nil, &NativeLimitError{Kind: "response", LimitBytes: maxNativeResponseBytes, ActualBytes: &response.ContentLength}
+	}
+	if response.Body != nil {
+		response.Body = &boundedMCPBody{ReadCloser: response.Body, remaining: maxNativeResponseBytes, limit: maxNativeResponseBytes}
 	}
 	return response, nil
 }
@@ -716,20 +747,6 @@ func requireID(name string, value string) error {
 		return fmt.Errorf("Tencent Docs %s is required", name)
 	}
 	return nil
-}
-
-type toolEnvelope struct {
-	Error   string `json:"error"`
-	Code    int    `json:"code"`
-	Ret     int    `json:"ret"`
-	TraceID string `json:"trace_id"`
-}
-
-func (e toolEnvelope) businessCode() int {
-	if e.Code != 0 {
-		return e.Code
-	}
-	return e.Ret
 }
 
 type listSpacesResponse struct {

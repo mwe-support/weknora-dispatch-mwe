@@ -8,6 +8,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrKnowledgeBaseNotFound = errors.New("knowledge base not found")
@@ -174,7 +175,58 @@ func (r *knowledgeBaseRepository) UpdateKnowledgeBase(ctx context.Context, kb *t
 
 // DeleteKnowledgeBase deletes a knowledge base
 func (r *knowledgeBaseRepository) DeleteKnowledgeBase(ctx context.Context, id string) error {
-	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&types.KnowledgeBase{}).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Unscoped().Where("id = ?", id)
+		if tx.Dialector.Name() == "postgres" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		var kb types.KnowledgeBase
+		if err := query.Take(&kb).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		if kb.DeletedAt.Valid {
+			return nil
+		}
+		var pins int64
+		if err := tx.Model(&types.ProcessingJob{}).Where("knowledge_base_id = ? AND tenant_id = ? AND rollback_pin = ?", id, kb.TenantID, true).Count(&pins).Error; err != nil {
+			return err
+		}
+		if pins > 0 {
+			return ErrProcessingConflict
+		}
+		// Same KB -> source order as workers. Tombstone and lease invalidation
+		// commit together; a later best-effort queue scrub is only an optimization.
+		if err := tx.Delete(&kb).Error; err != nil {
+			return err
+		}
+		var sourceIDs []string
+		if err := tx.Unscoped().Model(&types.DataSource{}).Where("knowledge_base_id = ? AND tenant_id = ?", id, kb.TenantID).
+			Order("id").Pluck("id", &sourceIDs).Error; err != nil {
+			return err
+		}
+		for _, sourceID := range sourceIDs {
+			source, err := lockProcessingSource(tx, sourceID)
+			if err != nil {
+				return err
+			}
+			if err := invalidateProcessingSource(tx, source, types.ProcessingCanceled, "KNOWLEDGE_BASE_DELETED"); err != nil {
+				return err
+			}
+			var jobs []types.ProcessingJob
+			if err := tx.Where("datasource_id = ? AND tenant_id = ? AND knowledge_base_id = ?", source.ID, kb.TenantID, kb.ID).Order("id").Find(&jobs).Error; err != nil {
+				return err
+			}
+			for i := range jobs {
+				if err := deleteProcessingKnowledge(tx, &jobs[i], "KNOWLEDGE_BASE_DELETED"); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 // CountByVectorStoreID counts active knowledge bases that are bound to the

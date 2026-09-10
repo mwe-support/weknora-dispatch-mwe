@@ -4,7 +4,9 @@ package tencentdocs
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
+	"time"
 )
 
 // Space is a Tencent Docs knowledge-base space visible to the configured token.
@@ -166,4 +168,33 @@ type ExportStatus struct {
 	FileURL  string `json:"file_url"`
 	Error    string `json:"error"`
 	TraceID  string `json:"trace_id"`
+}
+
+// Export progress may supply the filename only in the signed URL's content
+// disposition. Resolve it in memory; callers must not persist that URL.
+func (s *ExportStatus) ResolvedFileName() string {
+	return exportFileName(s.FileName, s.FileURL)
+}
+
+func (s *ExportStatus) DownloadExpiresAt(received time.Time) time.Time {
+	// Reserve five minutes of the documented thirty-minute URL lifetime;
+	// an explicit S3 signature expiry always takes precedence when earlier.
+	expires := received.Add(25 * time.Minute)
+	parsed, err := url.Parse(s.FileURL)
+	if err != nil {
+		return received
+	}
+	query := parsed.Query()
+	if query.Get("X-Amz-Date") != "" || query.Get("X-Amz-Expires") != "" {
+		issued, err := time.Parse("20060102T150405Z", query.Get("X-Amz-Date"))
+		seconds, countErr := strconv.ParseInt(query.Get("X-Amz-Expires"), 10, 32)
+		if err != nil || countErr != nil || seconds <= 0 {
+			return received
+		}
+		signed := issued.Add(time.Duration(seconds)*time.Second - time.Minute)
+		if signed.Before(expires) {
+			expires = signed
+		}
+	}
+	return expires
 }

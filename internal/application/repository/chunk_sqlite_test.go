@@ -18,6 +18,10 @@ func setupChunkTestDB(t *testing.T) *gorm.DB {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&types.Chunk{}, &types.KnowledgeTag{}))
+	require.NoError(t, db.AutoMigrate(&types.KnowledgeBase{}))
+	for _, id := range []string{"kb-1", "kb-tag", "kb-explicit", "kb-other"} {
+		require.NoError(t, db.Create(&types.KnowledgeBase{ID: id, TenantID: 1}).Error)
+	}
 	return db
 }
 
@@ -40,6 +44,7 @@ func TestCreateChunks_SQLite_SeqIDAutoAssigned(t *testing.T) {
 
 	kbID := uuid.New().String()
 	knowledgeID := uuid.New().String()
+	require.NoError(t, db.Create(&types.KnowledgeBase{ID: kbID, TenantID: 1}).Error)
 
 	// Create a batch of 5 chunks
 	chunks := []*types.Chunk{
@@ -70,6 +75,7 @@ func TestCreateChunks_SQLite_SeqIDContinuesFromExisting(t *testing.T) {
 
 	kbID := uuid.New().String()
 	knowledgeID := uuid.New().String()
+	require.NoError(t, db.Create(&types.KnowledgeBase{ID: kbID, TenantID: 1}).Error)
 
 	// Create first batch
 	batch1 := []*types.Chunk{
@@ -104,6 +110,8 @@ func TestCreateChunks_SQLite_SeqIDUniqueAcrossKBs(t *testing.T) {
 	kb2 := uuid.New().String()
 	k1 := uuid.New().String()
 	k2 := uuid.New().String()
+	require.NoError(t, db.Create(&types.KnowledgeBase{ID: kb1, TenantID: 1}).Error)
+	require.NoError(t, db.Create(&types.KnowledgeBase{ID: kb2, TenantID: 1}).Error)
 
 	// Create chunks in two different knowledge bases
 	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{
@@ -164,6 +172,7 @@ func TestCreateChunks_SQLite_SeqIDAfterSoftDelete(t *testing.T) {
 
 	kbID := uuid.New().String()
 	knowledgeID := uuid.New().String()
+	require.NoError(t, db.Create(&types.KnowledgeBase{ID: kbID, TenantID: 1}).Error)
 
 	// Create first batch
 	batch1 := []*types.Chunk{
@@ -203,6 +212,7 @@ func TestUpdateChunk_SQLite_NoNOWError(t *testing.T) {
 
 	kbID := uuid.New().String()
 	knowledgeID := uuid.New().String()
+	require.NoError(t, db.Create(&types.KnowledgeBase{ID: kbID, TenantID: 1}).Error)
 
 	chunk := makeChunk(kbID, knowledgeID, "faq")
 	require.NoError(t, db.WithContext(ctx).Create(chunk).Error)

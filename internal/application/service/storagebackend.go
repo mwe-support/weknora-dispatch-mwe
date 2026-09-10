@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -102,10 +103,10 @@ func (s *StorageBackendService) Update(ctx context.Context, incoming *types.Stor
 		if references == 0 {
 			if err := s.db.WithContext(ctx).Model(&types.StoredResource{}).
 				Where(
-					"tenant_id = ? AND storage_backend_id = ? AND state = ?",
+					"tenant_id = ? AND storage_backend_id = ? AND state <> ?",
 					incoming.TenantID,
 					incoming.ID,
-					types.ResourceStateActive,
+					types.ResourceStateDeleted,
 				).
 				Count(&references).Error; err != nil {
 				return err
@@ -113,6 +114,9 @@ func (s *StorageBackendService) Update(ctx context.Context, incoming *types.Stor
 		}
 		if references > 0 {
 			return apperrors.NewBadRequestError("a default or bound storage backend cannot be disabled")
+		}
+		if err := checkProcessingStorageReservations(s.db.WithContext(ctx), incoming.TenantID, incoming.ID); err != nil {
+			return err
 		}
 	}
 	if err := incoming.Validate(); err != nil {
@@ -125,6 +129,31 @@ func (s *StorageBackendService) Update(ctx context.Context, incoming *types.Stor
 		return apperrors.NewBadRequestError("storage connection test failed").WithDetails(secutils.SanitizeStorageConnectivityError(err))
 	}
 	incoming.UpdatedAt = time.Now()
+	if incoming.Status == types.StorageBackendStatusDisabled {
+		return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var current types.StorageBackend
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("tenant_id = ? AND id = ?", incoming.TenantID, incoming.ID).Take(&current).Error; err != nil {
+				return err
+			}
+			if err := checkProcessingStorageReservations(tx, incoming.TenantID, incoming.ID); err != nil {
+				return err
+			}
+			for _, query := range []*gorm.DB{
+				tx.Model(&types.Tenant{}).Where("id = ? AND default_storage_backend_id = ?", incoming.TenantID, incoming.ID),
+				tx.Model(&types.KnowledgeBase{}).Where("tenant_id = ? AND storage_backend_id = ?", incoming.TenantID, incoming.ID),
+				tx.Model(&types.StoredResource{}).Where("tenant_id = ? AND storage_backend_id = ? AND state <> ?", incoming.TenantID, incoming.ID, types.ResourceStateDeleted),
+			} {
+				var count int64
+				if err := query.Count(&count).Error; err != nil {
+					return err
+				}
+				if count > 0 {
+					return apperrors.NewBadRequestError("a default or bound storage backend cannot be disabled")
+				}
+			}
+			return repository.NewStorageBackendRepository(tx).Update(ctx, incoming)
+		})
+	}
 	return s.repo.Update(ctx, incoming)
 }
 
@@ -160,18 +189,34 @@ func (s *StorageBackendService) Delete(ctx context.Context, tenantID uint64, id 
 		}
 		var resourceCount int64
 		if err := tx.Model(&types.StoredResource{}).
-			Where("tenant_id = ? AND storage_backend_id = ? AND state = ?", tenantID, id, types.ResourceStateActive).
+			Where("tenant_id = ? AND storage_backend_id = ? AND state <> ?", tenantID, id, types.ResourceStateDeleted).
 			Count(&resourceCount).Error; err != nil {
 			return err
 		}
 		if resourceCount > 0 {
 			return apperrors.NewBadRequestError(fmt.Sprintf("storage backend still has %d active resource(s)", resourceCount))
 		}
+		if err := checkProcessingStorageReservations(tx, tenantID, id); err != nil {
+			return err
+		}
 		if backend.LegacyAlias {
 			return apperrors.NewBadRequestError("legacy storage backend cannot be deleted while old file paths may reference it")
 		}
 		return tx.Delete(&backend).Error
 	})
+}
+
+func checkProcessingStorageReservations(db *gorm.DB, tenant uint64, backendID string) error {
+	var count int64
+	if err := db.Model(&types.ProcessingStorageReservation{}).
+		Where("tenant_id = ? AND state = ? AND storage_backend_id = ?", tenant, "reserved", backendID).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return apperrors.NewBadRequestError("storage backend still has reserved writes awaiting completion or reconciliation")
+	}
+	return nil
 }
 
 func (s *StorageBackendService) SetDefault(ctx context.Context, tenantID uint64, id string) error {

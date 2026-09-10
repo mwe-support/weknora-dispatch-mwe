@@ -72,6 +72,11 @@ type ChunkRepository interface {
 	SaveChunks(ctx context.Context, chunks []*types.Chunk) error
 	// DeleteChunk deletes a chunk
 	DeleteChunk(ctx context.Context, tenantID uint64, id string) error
+	// DeleteChunkSnapshot rolls back only the unchanged row owned by this writer.
+	DeleteChunkSnapshot(ctx context.Context, chunk *types.Chunk) error
+	RegisterFAQIndexWrites(ctx context.Context, writes []types.FAQIndexWrite) error
+	ConfirmFAQIndexWrites(ctx context.Context, tenantID uint64, ids []string) error
+	FAQIndexGarbageDeleted(ctx context.Context, tenantID uint64, id string) error
 	// DeleteChunks deletes chunks by IDs in batch
 	DeleteChunks(ctx context.Context, tenantID uint64, ids []string) error
 	// DeleteChunksByKnowledgeID deletes chunks by knowledge id

@@ -17,12 +17,13 @@ type FAQChunkDiffResult struct {
 
 // FAQChunkStatus holds lightweight fields for clone status sync.
 type FAQChunkStatus struct {
-	ID             string
-	TagID          string
-	IsEnabled      bool
-	Flags          ChunkFlags
-	AnswerStrategy AnswerStrategy
-	Metadata       JSON
+	ID              string
+	ContentRevision int
+	TagID           string
+	IsEnabled       bool
+	Flags           ChunkFlags
+	AnswerStrategy  AnswerStrategy
+	Metadata        JSON
 }
 
 // FAQChunkStatusFieldsEqual compares status fields (tag excluded).

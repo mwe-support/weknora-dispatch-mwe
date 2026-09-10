@@ -848,6 +848,23 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 		})
 		return err
 	}
+	// Old queued payloads also pass this boundary. Lifecycle versions retain
+	// their captured destinations, quota reservations and contribution ledger.
+	var managedIDs []string
+	legacy := knowledgeList[:0]
+	for _, knowledge := range knowledgeList {
+		if knowledge.GetMetadata()["processing_protocol"] == "2" {
+			managedIDs = append(managedIDs, knowledge.ID)
+		} else {
+			legacy = append(legacy, knowledge)
+		}
+	}
+	if len(managedIDs) > 0 {
+		if err := s.kgRepo.DeleteKnowledgeList(ctx, tenantID, managedIDs); err != nil {
+			return err
+		}
+	}
+	knowledgeList = legacy
 	logger.Infof(ctx, "Found %d knowledge entries to delete", len(knowledgeList))
 	knowledgeIDs = make([]string, 0, len(knowledgeList))
 	for _, knowledge := range knowledgeList {
@@ -1133,6 +1150,24 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 		return nil, nil, err
 	}
 	sourceKB.EnsureDefaults()
+	if sourceKB.Type != types.KnowledgeBaseTypeFAQ {
+		if guard, ok := s.kgRepo.(interface {
+			HasProcessingKnowledge(context.Context, uint64, string) (bool, error)
+		}); ok {
+			for _, kbID := range []string{srcKB, dstKB} {
+				if kbID == "" {
+					continue
+				}
+				managed, err := guard.HasProcessingKnowledge(ctx, tenantID, kbID)
+				if err != nil {
+					return nil, nil, err
+				}
+				if managed {
+					return nil, nil, apperrors.NewConflictError("Synced versions cannot use legacy knowledge-base cloning; duplicate the configuration and add the source to the destination")
+				}
+			}
+		}
+	}
 	var targetKB *types.KnowledgeBase
 	if dstKB != "" {
 		// Load target KB with tenant scope so we only clone into the caller's tenant

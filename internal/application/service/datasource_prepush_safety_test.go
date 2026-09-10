@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
@@ -240,10 +241,12 @@ func TestPrepushFAQStopsBeforeImportAfterSourceChanges(t *testing.T) {
 
 func TestPrepushFAQScopeChangeDuringIndexingKeepsOldAnswer(t *testing.T) {
 	old := &types.FAQChunkMetadata{StandardQuestion: "Q", Answers: []string{"old answer"}}
-	row := &types.Chunk{ID: "faq", KnowledgeID: "knowledge", KnowledgeBaseID: "kb", IsEnabled: true}
+	row := &types.Chunk{ID: "faq", TenantID: 1, KnowledgeID: "knowledge", KnowledgeBaseID: "kb", ChunkType: types.ChunkTypeFAQ, IsEnabled: true}
 	require.NoError(t, row.SetFAQMetadata(old))
 	r := &faqPublishChunks{row: row}
-	s := &knowledgeService{chunkRepo: r, repo: &sourcePathRepo{}, retrieveEngine: &faqPublishRegistry{engine: &faqPublishEngine{}}}
+	registry := retriever.NewRetrieveEngineRegistry(nil, nil)
+	require.NoError(t, registry.Register(&faqPublishEngine{}))
+	s := &knowledgeService{chunkRepo: r, repo: &sourcePathRepo{}, retrieveEngine: registry}
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, &types.Tenant{ID: 1, RetrieverEngines: types.RetrieverEngines{Engines: []types.RetrieverEngineParams{{RetrieverEngineType: types.PostgresRetrieverEngineType, RetrieverType: types.VectorRetrieverType}}}})
 	checks := 0
@@ -255,7 +258,7 @@ func TestPrepushFAQScopeChangeDuringIndexingKeepsOldAnswer(t *testing.T) {
 		return nil
 	})
 	ops := []faqMergeOperation{{ExistingChunk: row, MergedMeta: &types.FAQChunkMetadata{StandardQuestion: "Q", Answers: []string{"new answer"}}}}
-	_, err := s.executeFAQMergeOperations(ctx, "test", &types.KnowledgeBase{ID: "kb", Type: types.KnowledgeBaseTypeFAQ}, &types.Knowledge{ID: "knowledge"}, nil, types.FAQIndexModeQuestionAnswer, ops, &types.FAQImportProgress{})
+	_, err := s.executeFAQMergeOperations(ctx, "test", &types.KnowledgeBase{ID: "kb", TenantID: 1, Type: types.KnowledgeBaseTypeFAQ, IndexingStrategy: types.IndexingStrategy{VectorEnabled: true}}, &types.Knowledge{ID: "knowledge"}, &processingPipelineEmbedder{}, types.FAQIndexModeQuestionAnswer, ops, &types.FAQImportProgress{})
 	require.ErrorIs(t, err, datasource.ErrInvalidConfig)
 	require.Zero(t, r.saves)
 	meta, err := r.row.FAQMetadata()

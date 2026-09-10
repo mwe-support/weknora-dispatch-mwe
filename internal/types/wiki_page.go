@@ -170,7 +170,7 @@ type WikiPage struct {
 	// Workspace ID for multi-workspace isolation
 	TenantID uint64 `json:"tenant_id" gorm:"index"`
 	// Knowledge base this page belongs to
-	KnowledgeBaseID string `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
+	KnowledgeBaseID string `json:"knowledge_base_id" gorm:"type:varchar(36);index;uniqueIndex:idx_kb_slug"`
 	// URL-friendly slug for addressing, e.g. "entity/acme-corp", "concept/rag"
 	// Unique within a knowledge base
 	Slug string `json:"slug" gorm:"type:varchar(255);uniqueIndex:idx_kb_slug"`
@@ -233,6 +233,9 @@ type WikiPage struct {
 	// sync from background jobs) leave it untouched so it can be used as a
 	// real "the page was edited" signal.
 	Version int `json:"version" gorm:"default:1"`
+	// MutationRevision fences every row change, including provenance and link
+	// maintenance that intentionally does not increment the visible version.
+	MutationRevision int64 `json:"mutation_revision" gorm:"not null;default:1"`
 	// LastEditSource records who authored the CURRENT version: pipeline |
 	// agent | user | revert. Empty for legacy rows (treated as pipeline).
 	// When the version is superseded this value travels into the revision
@@ -282,6 +285,38 @@ func NormalizeWikiEditSource(source string) string {
 	default:
 		return WikiEditSourcePipeline
 	}
+}
+
+// Untracked content belongs to a manual or pre-ledger author. Keep this marker
+// on the shared page so it survives replacement by a different contributor.
+func (p *WikiPage) HasUntrackedContent() bool {
+	var metadata map[string]json.RawMessage
+	_ = json.Unmarshal(p.PageMetadata, &metadata)
+	return string(metadata["preserve_untracked_content"]) == "true" ||
+		(p.MutationRevision > 0 && strings.TrimSpace(p.Content) != "" &&
+			(len(p.SourceRefs) == 0 || NormalizeWikiEditSource(p.LastEditSource) != WikiEditSourcePipeline))
+}
+
+func (p *WikiPage) PreserveUntrackedContent() {
+	p.setOwnershipFlag("preserve_untracked_content")
+}
+
+func (p *WikiPage) HasManualFolder() bool {
+	var metadata map[string]json.RawMessage
+	_ = json.Unmarshal(p.PageMetadata, &metadata)
+	return string(metadata["manual_folder"]) == "true"
+}
+
+func (p *WikiPage) MarkManualFolder() { p.setOwnershipFlag("manual_folder") }
+
+func (p *WikiPage) setOwnershipFlag(key string) {
+	metadata := map[string]json.RawMessage{}
+	_ = json.Unmarshal(p.PageMetadata, &metadata)
+	if metadata == nil {
+		metadata = map[string]json.RawMessage{}
+	}
+	metadata[key] = json.RawMessage("true")
+	p.PageMetadata, _ = json.Marshal(metadata)
 }
 
 // WikiPageRevision is one immutable snapshot of a superseded page version.

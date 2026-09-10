@@ -27,6 +27,43 @@ func newWikiRevisionTestService(t *testing.T) (context.Context, wikiRevisionTest
 	return context.Background(), wikiRevisionTestHarness{svc: svc}, db
 }
 
+func TestProcessingWikiRejectsStaleContentLinksAndProvenance(t *testing.T) {
+	for _, operation := range []string{"content", "links", "metadata"} {
+		t.Run(operation, func(t *testing.T) {
+			ctx, h, _ := newWikiRevisionTestService(t)
+			page, err := h.svc.CreatePage(ctx, &types.WikiPage{TenantID: 1, KnowledgeBaseID: "kb-cas", Slug: "concept/shared",
+				Title: "Shared", PageType: types.WikiPageTypeConcept, Content: "original", SourceRefs: types.StringArray{"old|Old"}})
+			require.NoError(t, err)
+			stale := *page
+			// Metadata changes intentionally keep the visible version unchanged.
+			page.SourceRefs = types.StringArray{"old|Old", "other|Other"}
+			require.NoError(t, h.svc.UpdatePageMeta(ctx, page))
+			switch operation {
+			case "content":
+				stale.Content = "generated before the other contribution"
+				_, err = h.svc.UpdatePage(ctx, &stale)
+			case "links":
+				stale.Content = "stale [[concept/other]]"
+				err = h.svc.UpdateAutoLinkedContent(ctx, &stale)
+			case "metadata":
+				stale.SourceRefs = nil
+				err = h.svc.UpdatePageMeta(ctx, &stale)
+			}
+			require.ErrorIs(t, err, repository.ErrWikiPageConflict)
+			current, err := h.svc.GetPageBySlug(ctx, page.KnowledgeBaseID, page.Slug)
+			require.NoError(t, err)
+			require.Equal(t, "original", current.Content)
+			require.Equal(t, types.StringArray{"old|Old", "other|Other"}, current.SourceRefs)
+			require.Equal(t, 1, current.Version)
+			// A current read still supports normal edits and their history.
+			current.Content = "manual edit"
+			current, err = h.svc.UpdatePage(types.WithWikiEditSource(ctx, types.WikiEditSourceUser), current)
+			require.NoError(t, err)
+			require.Equal(t, 2, current.Version)
+		})
+	}
+}
+
 func TestUpdateWikiPageSnapshotsSupersededVersion(t *testing.T) {
 	ctx, h, _ := newWikiRevisionTestService(t)
 	const kb = "kb-rev"

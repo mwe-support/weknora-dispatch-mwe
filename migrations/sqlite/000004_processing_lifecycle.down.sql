@@ -1,0 +1,1 @@
+SELECT lifecycle_artifact_references_must_be_retained_for_binary_rollback();

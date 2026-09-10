@@ -31,6 +31,9 @@ func (s *knowledgeService) cloneKnowledge(
 	src *types.Knowledge,
 	targetKB *types.KnowledgeBase,
 ) (err error) {
+	if src.GetMetadata()["processing_protocol"] == "2" {
+		return werrors.NewConflictError("Synced versions cannot be cloned through the legacy copy operation; add the source to the destination knowledge base")
+	}
 	if src.ParseStatus != "completed" {
 		logger.GetLogger(ctx).WithField("knowledge_id", src.ID).Errorf("MoveKnowledge parse status is not completed")
 		return nil
@@ -969,7 +972,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		logger.GetLogger(ctx).WithField("error", err).Warnf("GetSummary returned no usable content")
 		return "", err
 	}
-	logger.GetLogger(ctx).WithField("summary", content).Infof("GetSummary success")
+	logger.GetLogger(ctx).WithField("summary_chars", len([]rune(content))).Infof("GetSummary success")
 	return content, nil
 }
 
@@ -2426,6 +2429,9 @@ func (s *knowledgeService) ReparseKnowledge(
 		logger.Errorf(ctx, "Failed to load knowledge: %v", err)
 		return nil, err
 	}
+	if existing.GetMetadata()["processing_protocol"] == "2" {
+		return nil, werrors.NewConflictError("Use processing history to retry a failed stage or rebuild this synced version")
+	}
 
 	// Allocate a fresh span tree attempt up front. Doing this BEFORE
 	// the cleanup + enqueue means: (a) the UI immediately sees a new
@@ -2762,6 +2768,15 @@ func (s *knowledgeService) CancelKnowledgeParse(
 	}
 	if existing == nil {
 		return nil, werrors.NewNotFoundError("knowledge not found")
+	}
+	if existing.GetMetadata()["processing_protocol"] == "2" {
+		controller, ok := s.repo.(interface {
+			CancelProcessingKnowledge(context.Context, uint64, string) (*types.Knowledge, error)
+		})
+		if !ok {
+			return nil, werrors.NewInternalServerError("Processing lifecycle control is unavailable")
+		}
+		return controller.CancelProcessingKnowledge(ctx, tenantID, knowledgeID)
 	}
 
 	switch existing.ParseStatus {
