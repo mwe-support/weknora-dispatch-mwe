@@ -374,7 +374,9 @@ func ProcessingQueue(stage string, metadata ...JSON) string {
 		}
 	}
 	switch stage {
-	case "scan_page", "scan_document", "discover", "metadata", "fetch", "native_read", "export_start", "export_poll", "download", "normalize", "legacy_snapshot":
+	case "export_start", "export_poll", "download":
+		return QueueExport
+	case "scan_page", "scan_document", "discover", "metadata", "fetch", "native_read", "normalize", "legacy_snapshot":
 		return QueueSync
 	case "summary", "embedding", "faq_embedding":
 		return QueueSummary

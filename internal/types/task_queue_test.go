@@ -2,6 +2,27 @@ package types
 
 import "testing"
 
+func TestExportReceiptsDoNotWaitBehindSourceScanFIFO(t *testing.T) {
+	for _, stage := range []string{"export_start", "export_poll", "download"} {
+		if ProcessingQueue(stage) != QueueExport {
+			t.Fatalf("%s shares the scan FIFO", stage)
+		}
+	}
+	if ProcessingQueue("scan_page") != QueueSync || ProcessingQueue("native_read") != QueueSync {
+		t.Fatal("scan routing changed")
+	}
+	weights := QueueWeightsForPool(WorkerPoolMaintenance)
+	if weights[QueueExport] <= weights[QueueSync] {
+		t.Fatal("expiring exports must have a dequeue preference")
+	}
+	if queue, ok := QueueForTaskType(TypeProcessingStep + ":" + QueueExport); !ok || queue != QueueExport {
+		t.Fatal("export processing task has no consumer")
+	}
+	if QueueWeightsForSharedPool()[QueueExport] != 0 {
+		t.Fatal("export calls escaped the maintenance capacity limit")
+	}
+}
+
 func TestQueueDefinitionsAreUniqueAndConsumable(t *testing.T) {
 	definitions := QueueDefinitions()
 	if len(definitions) == 0 {

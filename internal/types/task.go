@@ -40,6 +40,7 @@ const (
 	QueueGraph          = "graph"
 	QueueQuestion       = "question"
 	QueueSync           = "sync"
+	QueueExport         = "sync_export"
 	QueueMaintenance    = "low"
 	QueueWiki           = "wiki"
 )
@@ -75,6 +76,9 @@ var queueDefinitions = []QueueDefinition{
 	{Name: QueueGraph, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeChunkExtract}},
 	{Name: QueueQuestion, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeQuestionGeneration}},
 	{Name: QueueSync, Pool: WorkerPoolMaintenance, Weight: 2, TaskTypes: []string{TypeDataSourceSync}},
+	// Export receipts and download URLs expire; keep them out of the scan FIFO
+	// while preserving the same maintenance worker and provider concurrency.
+	{Name: QueueExport, Pool: WorkerPoolMaintenance, Weight: 3},
 	{Name: QueueMaintenance, Pool: WorkerPoolMaintenance, Weight: 1, TaskTypes: []string{
 		TypeFAQImport, TypeKBClone, TypeIndexDelete, TypeKBDelete,
 		TypeKnowledgeListDelete, TypeKnowledgeListReparse, TypeKnowledgeMove,
