@@ -27,35 +27,21 @@ WITH valid_sources AS (
   SELECT e.*, COALESCE(e.file_id,a.file_id) AS canonical_file_id,
          CASE WHEN COALESCE(e.file_id,a.file_id) IS NOT NULL THEN 'file:'||COALESCE(e.file_id,a.file_id)
               WHEN e.external_id IS NOT NULL THEN 'external:'||e.external_id
-              WHEN e.item->>'title' IS NOT NULL AND e.item->>'title'<>'' THEN 'legacy-title:'||e.title
               ELSE 'legacy-log:'||e.sync_log_id||':'||e.error_index::text END AS file_key
   FROM raw_file_errors e LEFT JOIN file_aliases a ON a.id=e.id AND a.external_id=e.external_id
-), latest_file_errors AS (
-  SELECT DISTINCT ON (id,file_key) * FROM keyed_file_errors
-  ORDER BY id,file_key,failed_at DESC,sync_log_id DESC,error_index DESC
 ), unresolved_file_errors AS (
-  SELECT e.* FROM latest_file_errors e
+  SELECT e.* FROM keyed_file_errors e
   WHERE NOT EXISTS (
-    SELECT 1 FROM sync_logs completed
-    WHERE completed.data_source_id=e.id AND completed.tenant_id=e.tenant_id
-      AND e.external_id IS NOT NULL
-      AND CASE WHEN pg_input_is_valid(completed.result->'faq_completed'->>e.external_id,'timestamp with time zone')
-          THEN (completed.result->'faq_completed'->>e.external_id)::timestamptz>e.failed_at ELSE false END
-  ) AND NOT EXISTS (
-    SELECT 1 FROM knowledges k
-    WHERE k.tenant_id=e.tenant_id AND k.knowledge_base_id=e.knowledge_base_id
-      AND k.deleted_at IS NULL AND k.metadata->>'datasource_id'=e.id
-      AND k.parse_status='completed'
-	  AND COALESCE(k.metadata->>'datasource_candidate','')<>'true'
-	  AND COALESCE(k.metadata->>'datasource_processing_failed','')=''
-      AND ((e.canonical_file_id IS NOT NULL AND k.metadata->>'file_id'=e.canonical_file_id)
-        OR (e.canonical_file_id IS NULL AND e.external_id IS NOT NULL AND k.metadata->>'external_id'=e.external_id))
-      -- Updated timestamps or an old completed row are NOT source-read proof.
-      -- A newly created matching row is historical evidence of re-ingestion.
-      AND (k.created_at>e.failed_at OR
-        CASE WHEN pg_input_is_valid(k.metadata->>'source_fetch_completed_at','timestamp with time zone')
-             THEN (k.metadata->>'source_fetch_completed_at')::timestamptz>e.failed_at ELSE false END)
+    SELECT 1 FROM processing_legacy_evidence proof
+    WHERE proof.tenant_id=e.tenant_id AND proof.knowledge_base_id=e.knowledge_base_id
+      AND proof.datasource_id=e.id AND proof.run_id=e.sync_log_id AND proof.error_ordinal=e.error_index
+      AND proof.error_digest=encode(sha256(convert_to(e.item::text,'UTF8')),'hex')
+      AND proof.action IN ('late_completion','manual_confirmed','recovered','policy_skipped')
   )
+), latest_file_errors AS (
+  -- Resolving a newer occurrence must not hide an earlier unresolved error.
+  SELECT DISTINCT ON (id,file_key) * FROM unresolved_file_errors
+  ORDER BY id,file_key,failed_at DESC,sync_log_id DESC,error_index DESC
 ), sync_failures AS (
   SELECT e.failed_at, e.tenant_id, e.workspace, e.kb_name, e.name AS ds_name,
          COALESCE(e.item->>'space_id','') AS space, e.title,
@@ -74,9 +60,9 @@ WITH valid_sources AS (
          COALESCE(e.item->>'limit_bytes',substring(e.message from 'download Tencent Docs export exceeds ([0-9]+) bytes')) AS limit_bytes,
          e.item->>'actual_bytes' AS actual_bytes, e.item->>'observed_at_least_bytes' AS observed_at_least_bytes,
          CASE WHEN e.canonical_file_id IS NOT NULL THEN 'file_id' WHEN e.external_id IS NOT NULL THEN 'external_id' ELSE 'legacy_title_only' END AS identity_basis,
-         CASE WHEN e.canonical_file_id IS NULL AND e.external_id IS NULL THEN '恢复待核实：历史记录缺少稳定文件ID' ELSE '未解决：尚无后续重新抓取并完成的证据' END AS resolution,
+         CASE WHEN e.canonical_file_id IS NULL AND e.external_id IS NULL THEN '恢复待核实：历史记录缺少稳定文件ID' ELSE '未解决：尚无对应原错误的显式核验消解记录' END AS resolution,
          e.file_key, NULLIF(e.item->>'source_path','') AS source_path
-  FROM unresolved_file_errors e
+  FROM latest_file_errors e
 ), knowledge_failures AS (
   SELECT k.updated_at AS failed_at, k.tenant_id, COALESCE(t.name,k.tenant_id::text) AS workspace,
          kb.name AS kb_name, COALESCE(ds.name,'手工/API上传') AS ds_name,

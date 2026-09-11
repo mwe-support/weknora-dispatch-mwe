@@ -40,6 +40,15 @@ CREATE OR REPLACE VIEW :"observer_schema".sync_logs AS
  'faq_completed',COALESCE((SELECT jsonb_object_agg(key,value) FROM jsonb_each_text(CASE WHEN jsonb_typeof(s.result->'faq_completed')='object' THEN s.result->'faq_completed' ELSE '{}'::jsonb END)
  WHERE pg_input_is_valid(value,'timestamp with time zone')),'{}'::jsonb)) AS result
  FROM :"app_schema".sync_logs s WHERE COALESCE(s.result->>'protocol','')<>'2';
+-- Match the original error before mapping its digest to the redacted row.
+-- The observer never needs raw messages, operator notes or evidence locations.
+CREATE OR REPLACE VIEW :"observer_schema".processing_legacy_evidence AS
+ SELECT p.tenant_id,p.knowledge_base_id,p.datasource_id,p.run_id,p.error_ordinal,p.action,
+ encode(sha256(convert_to((safe.result->'errors'->(p.error_ordinal-1))::text,'UTF8')),'hex') AS error_digest
+ FROM :"app_schema".processing_legacy_evidence p
+ JOIN :"app_schema".sync_logs original ON original.id=p.run_id AND original.tenant_id=p.tenant_id AND original.data_source_id=p.datasource_id
+ JOIN :"observer_schema".sync_logs safe ON safe.id=original.id AND safe.tenant_id=original.tenant_id AND safe.data_source_id=original.data_source_id
+ WHERE p.error_digest=encode(sha256(convert_to((original.result->'errors'->(p.error_ordinal-1))::text,'UTF8')),'hex');
 CREATE OR REPLACE VIEW :"observer_schema".task_dead_letters AS
  SELECT id,tenant_id,task_type,scope,scope_id,related_id,fail_count,failed_at,'LEGACY_UNVERIFIED'::text AS last_error,
  jsonb_build_object('data_source_id',payload->>'data_source_id') AS payload

@@ -91,9 +91,18 @@ def render():
     panel_line = next(i for i, line in enumerate(lines) if line.strip() == '"id": 10,')
     field_line = next(i for i in range(panel_line-1, -1, -1) if '"fieldConfig":' in lines[i])
     options_line = next(i for i in range(panel_line+1, len(lines)) if '"options":' in lines[i])
-    for index, key in ((field_line, "fieldConfig"), (options_line, "options")):
-        lines[index] = '      "' + key + '": ' + json.dumps(document_panel[key], ensure_ascii=False) + ',\n'
-    text = ''.join(lines)
+    # Decode the complete value: current dashboards may format an object over
+    # many lines, so replacing only its first line leaves invalid JSON behind.
+    original_panel = next(p for p in before["panels"] if p["id"] == 10)
+    for index, key in sorted(((field_line, "fieldConfig"), (options_line, "options")), reverse=True):
+        if original_panel[key] == document_panel[key]:
+            continue
+        start = sum(map(len, lines[:index])) + lines[index].index(":") + 1
+        while text[start].isspace():
+            start += 1
+        _, length = json.JSONDecoder().raw_decode(text[start:])
+        value = json.dumps(document_panel[key], ensure_ascii=False, indent=2).replace("\n", "\n      ")
+        text = text[:start] + value + text[start + length:]
     assert json.loads(text) == after, "unexpected dashboard mutation"
     if text != DASHBOARD.read_text(encoding="utf-8"):
         DASHBOARD.write_text(text, encoding="utf-8")

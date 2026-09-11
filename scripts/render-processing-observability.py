@@ -23,7 +23,8 @@ def query(view, detail):
         filters.append('$__timeFilter(observed_at)')
     fields = ["'job_id',job_id", "'knowledge_base_id',knowledge_base_id", "'datasource_id',datasource_id", "'source_revision',source_revision", "'revision',revision", "'publication_epoch',publication_epoch"]
     fields += [f"'{field}',{field}" for field in detail]
-    order = 'event_id DESC' if view in ('attempt_timeline','unresolved_incidents') else 'observed_at DESC,row_id DESC'
+    fields += [f"'{field}',{field}" for field in ['run_id','original_error_ordinal','original_error_digest','linked_job_id','legacy_action','legacy_actor','legacy_evidence_at','legacy_dead_letter_id','legacy_run_status']]
+    order = 'observed_at DESC,row_id DESC'
     return f"""-- All pages use this one result set. Above the bound, return an explicit
 -- lower-bound notice, never a truncated list with a fabricated complete count.
 WITH candidates AS MATERIALIZED (
