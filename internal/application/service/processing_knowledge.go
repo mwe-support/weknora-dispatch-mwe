@@ -35,7 +35,7 @@ type ProcessingDocumentSpec struct {
 // The version changes when parser/normalizer behavior changes. App prompts and
 // parser configuration are also fixed inputs, separate from live KB/model data.
 func ProcessingPipelineFingerprint(cfg *config.Config) string {
-	inputs := []any{"tencent-lifecycle-20260910-1"}
+	inputs := []any{"tencent-lifecycle-20260911-2"}
 	if cfg != nil {
 		inputs = append(inputs, cfg.Conversation, cfg.KnowledgeBase, cfg.DocReader, cfg.ExtractManager, cfg.PromptTemplates)
 	}
@@ -165,6 +165,9 @@ func (e *processingDocumentExecution) success(ctx context.Context, kind string, 
 }
 
 func (e *processingDocumentExecution) execute(ctx context.Context) (types.ProcessingOutcome, error) {
+	if outcome, reused, err := e.reuseOutput(ctx); reused || err != nil {
+		return outcome, err
+	}
 	switch e.lease.Step.Stage {
 	case "native_read", "export_start", "export_poll", "download":
 		source, err := e.sources.FindByID(ctx, e.lease.Job.DataSourceID)

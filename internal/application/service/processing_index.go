@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -80,7 +79,11 @@ func (e *processingDocumentExecution) indexBarrier(ctx context.Context) (types.P
 				return types.ProcessingOutcome{}, err
 			}
 			unit := fmt.Sprintf("%s/%06d", stage, start/processingEmbeddingBatchSize)
-			fingerprint := fmt.Sprintf("%x", sha256.Sum256(input))
+			var contents []string
+			for _, item := range items[start:min(start+processingEmbeddingBatchSize, len(items))] {
+				contents = append(contents, item.Content)
+			}
+			fingerprint := processingFingerprint(e.lease.Step.InputFingerprint, stage, contents)
 			specs = append(specs,
 				types.ProcessingStepSpec{Stage: "embedding", UnitKey: unit, Phase: e.lease.Step.Phase, Input: input, InputFingerprint: fingerprint},
 				types.ProcessingStepSpec{Stage: "index", UnitKey: unit, Phase: e.lease.Step.Phase, Input: input, InputFingerprint: fingerprint, DependsOn: []string{"embedding/" + unit}})
@@ -202,6 +205,13 @@ func (e *processingDocumentExecution) embedBatch(ctx context.Context) (types.Pro
 		}
 		delete(byID, id)
 		items = append(items, item)
+	}
+	if reused, err := e.reuseEmbeddings(ctx, items); err != nil {
+		return types.ProcessingOutcome{}, err
+	} else if reused {
+		out, err := e.success(ctx, "embedding", items)
+		out.CopiedArtifact = true
+		return out, err
 	}
 	if err := e.prepareEmbeddings(ctx, items); err != nil {
 		return types.ProcessingOutcome{}, err
@@ -396,13 +406,26 @@ func (e *processingDocumentExecution) summarize(ctx context.Context) (types.Proc
 	if err != nil {
 		return types.ProcessingOutcome{}, err
 	}
-	model, err := e.s.modelService.GetChatModel(ctx, e.kb.SummaryModelID)
+	var summary string
+	data, _, _, reused, err := e.reusableBytes(ctx, "summary")
 	if err != nil {
 		return types.ProcessingOutcome{}, err
 	}
-	summary, err := e.s.getSummary(ctx, model, knowledge, chunks)
-	if err != nil {
-		return types.ProcessingOutcome{}, err
+	if reused {
+		var saved []*types.Chunk
+		if json.Unmarshal(data, &saved) != nil || len(saved) != 1 || saved[0] == nil || saved[0].Content == "" {
+			return types.ProcessingOutcome{}, errors.New("REUSE_SUMMARY_INVALID")
+		}
+		summary = saved[0].Content
+	} else {
+		model, err := e.s.modelService.GetChatModel(ctx, e.kb.SummaryModelID)
+		if err != nil {
+			return types.ProcessingOutcome{}, err
+		}
+		summary, err = e.s.getSummary(ctx, model, knowledge, chunks)
+		if err != nil {
+			return types.ProcessingOutcome{}, err
+		}
 	}
 	stamp, _ := json.Marshal(map[string]any{"processing_job_id": e.lease.Job.ID, "processing_step_id": e.lease.Step.ID, "processing_attempt": fmt.Sprint(e.lease.Ref.Attempt)})
 	chunk := &types.Chunk{ID: uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("%s/%d/summary", e.lease.Step.ID, e.lease.Ref.Attempt))).String(),
@@ -410,5 +433,6 @@ func (e *processingDocumentExecution) summarize(ctx context.Context) (types.Proc
 		Content: summary, SourceContent: summary, ChunkType: types.ChunkTypeSummary, IsEnabled: true, Status: int(types.ChunkStatusStored), IndexStatus: "processing", Metadata: stamp}
 	outcome, err := e.success(ctx, "summary", []*types.Chunk{chunk})
 	outcome.Chunks, outcome.Description = []*types.Chunk{chunk}, &summary
+	outcome.CopiedArtifact = reused
 	return outcome, err
 }

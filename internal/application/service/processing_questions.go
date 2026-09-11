@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,10 +20,22 @@ func (e *processingDocumentExecution) questionBarrier(ctx context.Context) (type
 		return types.ProcessingOutcome{}, err
 	}
 	if !e.lease.Step.PlanSealed {
-		var specs []types.ProcessingStepSpec
+		images, err := e.indexChunks(ctx, "images")
+		if err != nil {
+			return types.ProcessingOutcome{}, err
+		}
+		var contents []string
 		for _, chunk := range chunks {
+			contents = append(contents, chunk.Content)
+		}
+		for _, image := range images {
+			contents = append(contents, image.Content, image.ImageInfo)
+		}
+		contextFingerprint := processingFingerprint(contents)
+		var specs []types.ProcessingStepSpec
+		for i, chunk := range chunks {
 			input, _ := json.Marshal(map[string]string{"chunk_id": chunk.ID})
-			specs = append(specs, types.ProcessingStepSpec{Stage: "question", UnitKey: chunk.ID, Phase: e.lease.Step.Phase, Input: input, InputFingerprint: fmt.Sprintf("%x", sha256.Sum256(input))})
+			specs = append(specs, types.ProcessingStepSpec{Stage: "question", UnitKey: chunk.ID, Phase: e.lease.Step.Phase, Input: input, InputFingerprint: processingFingerprint(e.lease.Step.InputFingerprint, contextFingerprint, i, chunk.ContentRevision, chunk.Content)})
 		}
 		next := time.Now().UTC().Add(time.Second)
 		return types.ProcessingOutcome{Status: types.ProcessingWaitingExternal, NextRunAt: &next, SealPlan: true, ChildSteps: specs}, nil
@@ -117,13 +128,28 @@ func (e *processingDocumentExecution) generateChunkQuestions(ctx context.Context
 		count = 3
 	}
 	count = min(count, 10)
-	model, err := e.s.modelService.GetChatModel(ctx, e.kb.SummaryModelID)
+	var questions []string
+	data, _, _, reused, err := e.reusableBytes(ctx, "question")
 	if err != nil {
 		return types.ProcessingOutcome{}, err
 	}
-	questions, err := e.s.generateQuestionsWithContext(ctx, model, content(index), content(index-1), content(index+1), e.document.Title, count, cfg.CustomInstructions)
-	if err != nil {
-		return types.ProcessingOutcome{}, err
+	if reused {
+		var saved types.ProcessingChunkQuestions
+		if json.Unmarshal(data, &saved) != nil || len(saved.Questions) == 0 {
+			return types.ProcessingOutcome{}, errors.New("REUSE_QUESTIONS_INVALID")
+		}
+		for _, question := range saved.Questions {
+			questions = append(questions, question.Question)
+		}
+	} else {
+		model, err := e.s.modelService.GetChatModel(ctx, e.kb.SummaryModelID)
+		if err != nil {
+			return types.ProcessingOutcome{}, err
+		}
+		questions, err = e.s.generateQuestionsWithContext(ctx, model, content(index), content(index-1), content(index+1), e.document.Title, count, cfg.CustomInstructions)
+		if err != nil {
+			return types.ProcessingOutcome{}, err
+		}
 	}
 	questions = types.SanitizeStrings(questions)
 	if len(questions) == 0 {
@@ -140,5 +166,6 @@ func (e *processingDocumentExecution) generateChunkQuestions(ctx context.Context
 	}
 	outcome, err := e.success(ctx, "question", group)
 	outcome.Questions = &group
+	outcome.CopiedArtifact = reused
 	return outcome, err
 }

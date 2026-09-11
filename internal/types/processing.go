@@ -290,6 +290,7 @@ type ProcessingLease struct {
 }
 
 type ProcessingOutcome struct {
+	CopiedArtifact    bool
 	FAQMutations      []ProcessingFAQMutation
 	FAQConflicts      []string
 	WikiPage          *ProcessingWikiMutation

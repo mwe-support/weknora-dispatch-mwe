@@ -104,7 +104,7 @@ func (e *processingDocumentExecution) assetBarrier(ctx context.Context) (types.P
 		var specs []types.ProcessingStepSpec
 		for _, asset := range parsed.Assets {
 			input, _ := json.Marshal(map[string]string{"asset_id": asset.ID})
-			specs = append(specs, types.ProcessingStepSpec{Stage: "asset_download", UnitKey: processingAssetUnit(asset.ID), Phase: e.lease.Step.Phase, Input: input, InputFingerprint: fmt.Sprintf("%x", sha256.Sum256(input))})
+			specs = append(specs, types.ProcessingStepSpec{Stage: "asset_download", UnitKey: processingAssetUnit(asset.ID), Phase: e.lease.Step.Phase, Input: input, InputFingerprint: processingFingerprint(e.lease.Step.InputFingerprint, asset.ID)})
 		}
 		next := time.Now().UTC().Add(time.Second)
 		return types.ProcessingOutcome{Status: types.ProcessingWaitingExternal, NextRunAt: &next, SealPlan: true, ChildSteps: specs}, nil

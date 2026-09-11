@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -88,7 +87,7 @@ func (e *processingDocumentExecution) imageBarrier(ctx context.Context) (types.P
 		for _, asset := range parsed.Assets {
 			input, _ := json.Marshal(map[string]string{"asset_id": asset.ID})
 			for _, stage := range []string{"image_ocr", "image_caption"} {
-				specs = append(specs, types.ProcessingStepSpec{Stage: stage, UnitKey: processingAssetUnit(asset.ID), Phase: e.lease.Step.Phase, Input: input, InputFingerprint: fmt.Sprintf("%x", sha256.Sum256(input))})
+				specs = append(specs, types.ProcessingStepSpec{Stage: stage, UnitKey: processingAssetUnit(asset.ID), Phase: e.lease.Step.Phase, Input: input, InputFingerprint: processingFingerprint(e.lease.Step.InputFingerprint, stage, asset.ID, asset.Digest)})
 			}
 		}
 		next := time.Now().UTC().Add(time.Second)

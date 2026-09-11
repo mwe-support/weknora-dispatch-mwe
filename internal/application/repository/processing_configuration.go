@@ -23,13 +23,51 @@ func (r *ProcessingRepository) ConfigurationRevision(ctx context.Context, tenant
 }
 
 func lockProcessingConfiguration(tx *gorm.DB, tenant uint64, id string) (string, error) {
+	inputs, err := lockProcessingConfigurationInputs(tx, tenant, id)
+	if err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal(inputs)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(encoded)), nil
+}
+
+// Return only input digests; model credentials never leave this boundary.
+// The complete revision still fences a running generation at every commit.
+func (r *ProcessingRepository) ConfigurationDigests(ctx context.Context, tenant uint64, id string) (revision string, digests map[string]string, err error) {
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		inputs, readErr := lockProcessingConfigurationInputs(tx, tenant, id)
+		if readErr != nil {
+			return readErr
+		}
+		encoded, readErr := json.Marshal(inputs)
+		if readErr != nil {
+			return readErr
+		}
+		revision = fmt.Sprintf("%x", sha256.Sum256(encoded))
+		digests = make(map[string]string, len(inputs))
+		for key, value := range inputs {
+			encoded, readErr = json.Marshal(value)
+			if readErr != nil {
+				return readErr
+			}
+			digests[key] = fmt.Sprintf("%x", sha256.Sum256(encoded))
+		}
+		return nil
+	})
+	return
+}
+
+func lockProcessingConfigurationInputs(tx *gorm.DB, tenant uint64, id string) (map[string]any, error) {
 	query := tx.Where("id = ? AND tenant_id = ?", id, tenant)
 	if tx.Dialector.Name() == "postgres" {
 		query = query.Clauses(clause.Locking{Strength: "SHARE"})
 	}
 	var kb types.KnowledgeBase
 	if err := query.Take(&kb).Error; err != nil {
-		return "", err
+		return nil, err
 	}
 	kb.EnsureDefaults()
 	kb.ApplyDeploymentModelDefaults()
@@ -53,7 +91,7 @@ func lockProcessingConfiguration(tx *gorm.DB, tenant uint64, id string) (string,
 		}
 		var model types.Model
 		if err := q.Take(&model).Error; err != nil {
-			return "", err
+			return nil, err
 		}
 		inputs["model/"+modelID] = struct {
 			Name       string
@@ -63,9 +101,5 @@ func lockProcessingConfiguration(tx *gorm.DB, tenant uint64, id string) (string,
 			Parameters types.ModelParameters
 		}{model.Name, model.Type, model.Source, model.Status, model.Parameters}
 	}
-	encoded, err := json.Marshal(inputs)
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%x", sha256.Sum256(encoded)), nil
+	return inputs, nil
 }

@@ -92,9 +92,9 @@ func (e *processingDocumentExecution) graphBarrier(ctx context.Context) (types.P
 	}
 	if !e.lease.Step.PlanSealed {
 		var specs []types.ProcessingStepSpec
-		for _, chunk := range chunks {
+		for i, chunk := range chunks {
 			input, _ := json.Marshal(processingGraphOutput{ChunkID: chunk.ID, ContentRevision: chunk.ContentRevision})
-			fingerprint := fmt.Sprintf("%x", sha256.Sum256(input))
+			fingerprint := processingFingerprint(e.lease.Step.InputFingerprint, i, chunk.ContentRevision, chunk.Content)
 			specs = append(specs,
 				types.ProcessingStepSpec{Stage: "graph_extract", UnitKey: chunk.ID, Phase: e.lease.Step.Phase, Input: input, InputFingerprint: fingerprint},
 				types.ProcessingStepSpec{Stage: "graph_apply", UnitKey: chunk.ID, Phase: e.lease.Step.Phase, Input: input, InputFingerprint: fingerprint, DependsOn: []string{"graph_extract/" + chunk.ID}})
@@ -147,6 +147,20 @@ func (e *processingDocumentExecution) extractGraph(ctx context.Context) (types.P
 	cfg := e.kb.ExtractConfig
 	if !e.kb.IsGraphEnabled() || cfg == nil || !cfg.Enabled || e.kb.SummaryModelID == "" || e.s.config.ExtractManager == nil || e.s.config.ExtractManager.ExtractGraph == nil {
 		return types.ProcessingOutcome{}, errors.New("GRAPH_CONFIGURATION_INVALID")
+	}
+	if data, _, _, reused, err := e.reusableBytes(ctx, "graph_extract"); err != nil {
+		return types.ProcessingOutcome{}, err
+	} else if reused {
+		var saved processingGraphOutput
+		if json.Unmarshal(data, &saved) != nil {
+			return types.ProcessingOutcome{}, errors.New("REUSE_GRAPH_INVALID")
+		}
+		if err := validateProcessingGraph(saved.Graph, chunk.ID); err != nil {
+			return types.ProcessingOutcome{}, err
+		}
+		out, err := e.success(ctx, "graph_extract", processingGraphOutput{ChunkID: chunk.ID, ContentRevision: chunk.ContentRevision, Graph: saved.Graph})
+		out.CopiedArtifact = true
+		return out, err
 	}
 	model, err := e.s.modelService.GetChatModel(ctx, e.kb.SummaryModelID)
 	if err != nil {

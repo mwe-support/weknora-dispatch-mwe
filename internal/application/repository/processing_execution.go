@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -365,6 +366,30 @@ func finishProcessingStep(tx *gorm.DB, job *types.ProcessingJob, step *types.Pro
 	step.LeaseToken, step.LeaseExpiresAt = "", nil
 	if err := tx.Save(step).Error; err != nil {
 		return err
+	}
+	if outcome.CopiedArtifact {
+		if step.Status != types.ProcessingSucceeded || step.OutputManifestRef == "" || len(step.OutputDigest) != 64 {
+			return ErrProcessingConflict
+		}
+		var references []types.ProcessingArtifactReference
+		if err := tx.Where("tenant_id = ? AND consumer_job_id = ? AND consumer_step_id = ?", job.TenantID, job.ID, step.ID).Find(&references).Error; err != nil {
+			return err
+		}
+		if len(references) == 0 {
+			return ErrProcessingConflict
+		}
+		for _, ref := range references {
+			detail, _ := json.Marshal(ref)
+			if err := appendProcessingEvent(tx, job, types.ProcessingEvent{Type: "artifact_copied", StepID: step.ID, Attempt: step.Attempt, Detail: detail}); err != nil {
+				return err
+			}
+		}
+		// The new authenticated artifact and any shared-media bindings are now
+		// durable. Release temporary holds so repeated rebuilds cannot retain
+		// an unbounded chain of complete old versions.
+		if err := tx.Where("tenant_id = ? AND consumer_job_id = ? AND consumer_step_id = ?", job.TenantID, job.ID, step.ID).Delete(&types.ProcessingArtifactReference{}).Error; err != nil {
+			return err
+		}
 	}
 	if step.Status == types.ProcessingSkipped {
 		if err := stopProcessingSteps(tx, job, types.ProcessingSkipped, "VERIFIED_EMPTY", now); err != nil {

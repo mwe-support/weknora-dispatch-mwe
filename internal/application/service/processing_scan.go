@@ -132,7 +132,7 @@ func (e *processingDocumentExecution) scanDocument(ctx context.Context, read ten
 	if (info.Type == "resource" || (types.IsSupportedKnowledgeFileExtension(info.Type) && !slices.Contains([]string{"doc", "sheet", "smartcanvas", "smartsheet"}, strings.ToLower(info.Type)))) && len(listing) == 1 {
 		return e.scanResource(ctx, entry, listing[0])
 	}
-	plan, err := ProcessingDocumentPlan(e.kb, info.Type, e.lease.Job.PipelineFingerprint+"/"+e.lease.Job.ConfigurationRevision)
+	plan, err := e.documentPlan(ctx, info.Type)
 	if err != nil {
 		return types.ProcessingOutcome{}, err
 	}
@@ -179,7 +179,7 @@ func (e *processingDocumentExecution) scanResource(ctx context.Context, entry te
 	if err := tencentdocs.VerifyNativeResource(ctx, entry, read); err != nil {
 		return types.ProcessingOutcome{}, err
 	}
-	plan, err := ProcessingDocumentPlan(e.kb, "resource", e.lease.Job.PipelineFingerprint+"/"+e.lease.Job.ConfigurationRevision)
+	plan, err := e.documentPlan(ctx, "resource")
 	if err != nil {
 		return types.ProcessingOutcome{}, err
 	}

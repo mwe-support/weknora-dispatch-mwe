@@ -32,6 +32,9 @@ func (r *ProcessingRepository) ReferenceArtifact(ctx context.Context, tenant uin
 		if consumer.RetirementState != "retained" || (!consumer.IsCurrent && !consumer.IsPublished) || consumer.ScopeRevision != producer.ScopeRevision || consumer.AuthRevision != producer.AuthRevision {
 			return ErrProcessingScope
 		}
+		if consumer.ExternalID != producer.ExternalID || consumer.SourceRevision != producer.SourceRevision || consumer.SourceDigest != producer.SourceDigest || consumer.Kind != producer.Kind {
+			return ErrProcessingScope
+		}
 		var source types.DataSource
 		if err := tx.Where("id = ? AND tenant_id = ? AND status NOT IN ?", consumer.DataSourceID, tenant, []string{types.DataSourceStatusPaused, types.DataSourceStatusDeleted}).Take(&source).Error; err != nil {
 			return err
@@ -78,4 +81,37 @@ func (r *ProcessingRepository) ReferenceArtifact(ctx context.Context, tenant uin
 		}
 		return appendProcessingEvent(tx, producer, types.ProcessingEvent{Type: "artifact_referenced", StepID: output.ID, Attempt: output.Attempt, Message: consumer.ID})
 	})
+}
+
+// Acquire the retention reference while the consumer's exact lease is valid.
+// The source lock excludes deletion between lookup and reference creation.
+func (r *ProcessingRepository) ReusableArtifact(ctx context.Context, tenant uint64, lease types.ProcessingLease) (producer types.ProcessingJob, output types.ProcessingStep, found bool, err error) {
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		consumer, err := lockProcessingLease(tx, tenant, lease)
+		if err != nil {
+			return err
+		}
+		if consumer.Kind != types.ProcessingJobDocument {
+			return nil
+		}
+		q := tx.Table("processing_steps AS s").Select("s.*").Joins("JOIN processing_jobs AS j ON j.id = s.job_id").
+			Where("j.tenant_id = ? AND j.knowledge_base_id = ? AND j.datasource_id = ? AND j.external_id = ? AND j.kind = ? AND j.source_revision = ? AND j.scope_revision = ? AND j.auth_revision = ? AND j.generation < ? AND j.retirement_state = ?", tenant, consumer.KnowledgeBaseID, consumer.DataSourceID, consumer.ExternalID, consumer.Kind, consumer.SourceRevision, consumer.ScopeRevision, consumer.AuthRevision, consumer.Generation, "retained").
+			Where("s.stage = ? AND s.input_fingerprint = ? AND s.status = ? AND s.output_manifest_ref <> '' AND s.output_digest <> ''", lease.Step.Stage, lease.Step.InputFingerprint, types.ProcessingSucceeded).
+			Order("j.generation DESC, s.id").Limit(1)
+		q = q.Where("j.source_digest = ?", consumer.SourceDigest)
+		if err = q.Take(&output).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		if err = tx.Where("id = ? AND tenant_id = ?", output.JobID, tenant).Take(&producer).Error; err != nil {
+			return err
+		}
+		if err = NewProcessingRepository(tx).ReferenceArtifact(ctx, tenant, producer.ID, output.ID, consumer.ID, lease.Step.ID); err != nil {
+			return err
+		}
+		found = true
+		return nil
+	})
+	return
 }

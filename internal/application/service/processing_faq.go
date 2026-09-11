@@ -16,9 +16,10 @@ import (
 )
 
 type processingFAQInput struct {
-	Row   int `json:"row"`
-	Start int `json:"start,omitempty"`
-	Count int `json:"count,omitempty"`
+	FingerprintBase string `json:"fingerprint_base,omitempty"`
+	Row             int    `json:"row"`
+	Start           int    `json:"start,omitempty"`
+	Count           int    `json:"count,omitempty"`
 }
 
 func processingFAQInvalid(row int) types.ProcessingOutcome {
@@ -86,7 +87,7 @@ func (e *processingDocumentExecution) faqStage(ctx context.Context) (types.Proce
 			var specs []types.ProcessingStepSpec
 			for i := range entries {
 				input, _ := json.Marshal(processingFAQInput{Row: i})
-				specs = append(specs, types.ProcessingStepSpec{Stage: "faq_entry", UnitKey: fmt.Sprintf("%06d", i), Kind: "barrier", Phase: e.lease.Step.Phase, Input: input, InputFingerprint: fmt.Sprintf("%x", sha256.Sum256(input))})
+				specs = append(specs, types.ProcessingStepSpec{Stage: "faq_entry", UnitKey: fmt.Sprintf("%06d", i), Kind: "barrier", Phase: e.lease.Step.Phase, Input: input, InputFingerprint: processingFingerprint(e.lease.Step.InputFingerprint, i, entries[i])})
 			}
 			next := time.Now().UTC().Add(time.Second)
 			return types.ProcessingOutcome{Status: types.ProcessingWaitingExternal, NextRunAt: &next, SealPlan: true, ChildSteps: specs}, nil
@@ -232,8 +233,9 @@ func (e *processingDocumentExecution) faqEntry(ctx context.Context) (types.Proce
 		for start := 0; start < len(items); start += processingEmbeddingBatchSize {
 			count := min(processingEmbeddingBatchSize, len(items)-start)
 			input.Start, input.Count = start, count
+			input.FingerprintBase = e.lease.Step.InputFingerprint
 			encoded, _ := json.Marshal(input)
-			fingerprint := processingFAQBatchDigest(items[start : start+count])
+			fingerprint := processingFAQBatchFingerprint(items[start:start+count], input.FingerprintBase)
 			unit := fmt.Sprintf("%s/%d/%06d", e.lease.Step.UnitKey, e.lease.Step.Attempt, start/processingEmbeddingBatchSize)
 			specs = append(specs, types.ProcessingStepSpec{Stage: "faq_embedding", UnitKey: unit, Phase: e.lease.Step.Phase, Input: encoded, InputFingerprint: fingerprint},
 				types.ProcessingStepSpec{Stage: "faq_write", UnitKey: unit, Phase: e.lease.Step.Phase, Input: encoded, InputFingerprint: fingerprint, DependsOn: []string{"faq_embedding/" + unit}})
@@ -319,6 +321,21 @@ func processingFAQBatchDigest(items []*types.IndexInfo) string {
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 
+func processingFAQBatchFingerprint(items []*types.IndexInfo, base string) string {
+	if base == "" {
+		return processingFAQBatchDigest(items)
+	}
+	return processingFingerprint(base, processingFAQBatchDigest(items))
+}
+
+func (e *processingDocumentExecution) faqBatchFingerprint(items []*types.IndexInfo) string {
+	var input processingFAQInput
+	if json.Unmarshal(e.lease.Step.Input, &input) != nil {
+		return ""
+	}
+	return processingFAQBatchFingerprint(items, input.FingerprintBase)
+}
+
 func (e *processingDocumentExecution) faqBatch(ctx context.Context) (types.ProcessingFAQMutation, []*types.IndexInfo, error) {
 	var proposal types.ProcessingFAQMutation
 	var parent *types.ProcessingStep
@@ -347,7 +364,7 @@ func (e *processingDocumentExecution) faqBatch(ctx context.Context) (types.Proce
 		return proposal, nil, errors.New("FAQ_BATCH_INVALID")
 	}
 	items = items[batch.Start : batch.Start+batch.Count]
-	if processingFAQBatchDigest(items) != e.lease.Step.InputFingerprint {
+	if processingFAQBatchFingerprint(items, batch.FingerprintBase) != e.lease.Step.InputFingerprint {
 		return proposal, nil, errors.New("FAQ_BATCH_INPUT_CHANGED")
 	}
 	return proposal, items, nil
@@ -368,7 +385,7 @@ func (e *processingDocumentExecution) faqEmbedding(ctx context.Context) (types.P
 			continue
 		} // An unavailable optional cache is recomputed.
 		var saved []*types.IndexInfo
-		if json.Unmarshal(data, &saved) != nil || len(saved) != len(items) || processingFAQBatchDigest(saved) != e.lease.Step.InputFingerprint {
+		if json.Unmarshal(data, &saved) != nil || len(saved) != len(items) || e.faqBatchFingerprint(saved) != e.lease.Step.InputFingerprint {
 			continue
 		}
 		valid := true
@@ -382,6 +399,13 @@ func (e *processingDocumentExecution) faqEmbedding(ctx context.Context) (types.P
 		if valid {
 			return e.success(ctx, "faq_embedding", items)
 		}
+	}
+	if reused, err := e.reuseEmbeddings(ctx, items); err != nil {
+		return types.ProcessingOutcome{}, err
+	} else if reused {
+		out, err := e.success(ctx, "faq_embedding", items)
+		out.CopiedArtifact = true
+		return out, err
 	}
 	if err := e.prepareEmbeddings(ctx, items); err != nil {
 		return types.ProcessingOutcome{}, err
@@ -398,7 +422,7 @@ func (e *processingDocumentExecution) faqWrite(ctx context.Context) (outcome typ
 	if err := e.dependency(ctx, "faq_embedding", e.lease.Step.UnitKey, "faq_embedding", &items); err != nil {
 		return types.ProcessingOutcome{}, err
 	}
-	if len(items) != len(expected) || processingFAQBatchDigest(items) != e.lease.Step.InputFingerprint {
+	if len(items) != len(expected) || e.faqBatchFingerprint(items) != e.lease.Step.InputFingerprint {
 		return types.ProcessingOutcome{}, errors.New("FAQ_EMBEDDING_INVALID")
 	}
 	for _, item := range items {

@@ -381,6 +381,6 @@ func (e *processingDocumentExecution) downloadExport(ctx context.Context, client
 	if err != nil {
 		return types.ProcessingOutcome{}, err
 	}
-	result, _ := json.Marshal(map[string]any{"bytes": len(data), "file_type": strings.TrimPrefix(path.Ext(ready.FileName), ".")})
+	result, _ := json.Marshal(map[string]any{"bytes": len(data), "file_type": strings.TrimPrefix(path.Ext(ready.FileName), "."), "body_sha256": fmt.Sprintf("%x", sha256.Sum256(data))})
 	return types.ProcessingOutcome{Status: types.ProcessingSucceeded, OutputManifestRef: ref, OutputDigest: digest, Result: result}, nil
 }

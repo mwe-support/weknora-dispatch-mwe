@@ -65,7 +65,7 @@ func processingScanSpec(stage, parent string, input any, barrier bool) types.Pro
 	return spec
 }
 
-func ProcessingDocumentPlan(kb *types.KnowledgeBase, kind, input string) ([]types.ProcessingStepSpec, error) {
+func ProcessingDocumentPlan(kb *types.KnowledgeBase, kind, input string, stageInputs ...map[string]string) ([]types.ProcessingStepSpec, error) {
 	if kb == nil || input == "" {
 		return nil, errors.New("PROCESSING_PLAN_INPUT_INVALID")
 	}
@@ -82,8 +82,12 @@ func ProcessingDocumentPlan(kb *types.KnowledgeBase, kind, input string) ([]type
 	}
 	var plan []types.ProcessingStepSpec
 	add := func(stage, phase string, barrier bool, dependencies ...string) {
+		stageInput := input
+		if len(stageInputs) == 1 && stageInputs[0][stage] != "" {
+			stageInput = stageInputs[0][stage]
+		}
 		spec := types.ProcessingStepSpec{Stage: stage, UnitKey: "body", Phase: phase, RequiredForReady: phase == types.ProcessingPhasePrepare, RequiredForCompletion: true,
-			InputFingerprint: fmt.Sprintf("%x", sha256.Sum256([]byte(input+"/"+stage)))}
+			InputFingerprint: fmt.Sprintf("%x", sha256.Sum256([]byte(stageInput+"/"+stage)))}
 		if barrier {
 			spec.Kind = "barrier"
 		}

@@ -109,6 +109,9 @@ func TestProcessingArtifactReferencesHoldProducerUntilConsumerRetires(t *testing
 	require.NoError(t, err)
 	require.NoError(t, r.FinishStep(ctx, 1, *lease, types.ProcessingOutcome{Status: types.ProcessingSucceeded, OutputManifestRef: "synthetic/confirmed-body", OutputDigest: "verified", Completeness: "complete"}))
 	consumer, input := makeJob("v2")
+	require.ErrorIs(t, r.ReferenceArtifact(ctx, 1, producer.ID, output.ID, consumer.ID, input.ID), repository.ErrProcessingScope)
+	// Equivalent configuration generations may reuse one verified revision.
+	require.NoError(t, db.Model(consumer).Update("source_revision", producer.SourceRevision).Error)
 	require.Error(t, r.ReferenceArtifact(ctx, 2, producer.ID, output.ID, consumer.ID, input.ID))
 	require.Error(t, r.ReferenceArtifact(ctx, 1, producer.ID, output.ID, consumer.ID, "wrong-step"))
 	require.NoError(t, r.ReferenceArtifact(ctx, 1, producer.ID, output.ID, consumer.ID, input.ID))
