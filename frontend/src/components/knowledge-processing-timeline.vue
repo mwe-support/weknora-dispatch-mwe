@@ -505,7 +505,8 @@ const cancelling = ref(false)
 // finalizing). Uses the freshest status we have: live span data first,
 // the parent's hint before the first fetch lands.
 const canCancelParse = computed<boolean>(() => {
-  const status = data.value?.parse_status ?? props.parseStatus
+	if (!identityChecked.value || processingRef.value) return false
+	const status = data.value?.parse_status ?? props.parseStatus
   return isPolling(status)
 })
 

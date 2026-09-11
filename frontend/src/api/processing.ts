@@ -17,7 +17,7 @@ export interface ProcessingStep {
   required_for_ready: boolean; required_for_completion: boolean; result?: Record<string, unknown>
 }
 export interface JobDetail {
-  job: { id: string; knowledge_base_id: string; revision: number; generation: number; status: string; readiness: string; completeness: string; is_current: boolean; is_published: boolean; retirement_state: string; rollback_pin: boolean; source_revision: string; publication_epoch: number }
+  job: { id: string; tenant_id: number; knowledge_base_id: string; revision: number; generation: number; status: string; readiness: string; completeness: string; is_current: boolean; is_published: boolean; retirement_state: string; rollback_pin: boolean; source_revision: string; publication_epoch: number }
   document: { title: string; file_id: string; kind: string }
   steps: ProcessingStep[]
   external_intents: { step_id: string; file_id: string; source_revision: string; request_digest: string }[]

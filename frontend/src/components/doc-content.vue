@@ -972,6 +972,7 @@ const channelLabelMap: Record<string, string> = {
   feishu_drive: 'knowledgeBase.channelFeishuDrive',
   lark_drive: 'knowledgeBase.channelLarkDrive',
   dingtalk: 'knowledgeBase.channelDingtalk',
+  tencent_docs: 'knowledgeBase.channelTencentDocs',
   slack: 'knowledgeBase.channelSlack',
   im: 'knowledgeBase.channelIm',
 };

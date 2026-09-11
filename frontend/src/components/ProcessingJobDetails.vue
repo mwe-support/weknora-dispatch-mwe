@@ -29,7 +29,7 @@ let operationID = ''
 let expectedRevision = 0
 const label = (value: unknown) => typeof value === 'boolean' ? t(value ? 'processing.yes' : 'processing.no') : value == null || value === '' ? '—' : te(`processing.${value}`) ? t(`processing.${value}`) : String(value)
 const time = (value?: unknown) => value ? new Date(String(value)).toLocaleString() : '—'
-const canManage = computed(() => auth.hasRole('admin'))
+const canManage = computed(() => auth.hasRole('admin') && detail.value?.job.tenant_id === auth.effectiveTenantId)
 watch(canManage, value => { if (!value) { ++actionRequest; action.value = undefined; submitted.value = undefined; busy.value = false } })
 const intent = computed(() => detail.value?.external_intents?.find(item => item.step_id === step.value?.id))
 

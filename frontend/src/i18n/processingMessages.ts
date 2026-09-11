@@ -1,4 +1,7 @@
 export const processingEN = {
+  policy_skipped:'Fresh source verified empty; skipped by policy',
+  originalErrorOrdinal:'Original error number',originalErrorDigest:'Original error digest',legacyAction:'Recovery evidence',legacyActor:'Recorded by',legacyDeadLetter:'Original dead letter',linkedRecovery:'Open linked recovery task',
+  legacy_record:'Original legacy record',legacy_error:'Original failure',legacy_evidence:'Recovery evidence',late_completion:'Verified late completion',manual_confirmed:'Manually verified completion',candidate_adopted:'Candidate adopted',retry_requested:'Restricted retry requested',retry_admitted:'File admitted to retry',recovered:'Verified recovery',scheduled:'Retry scheduled (delivery unverified)',LEGACY_DEAD_LETTER_RUNNING:'Original run is running with a dead letter',LEGACY_SCHEDULED_UNVERIFIED:'Old scheduled retry has no verified delivery',
   retryBudget: 'Automatic retries used / budget', deadline: 'Recovery deadline', previous: 'Previous', next: 'Next', stepPage: 'Page {page} / {pages} · {count} stages',
   docType: 'Document type', nativeBytes: 'Read response bytes', nativePages: 'Read pages', nativeUnits: 'Read units', images: 'Images', mediaBytes: 'Media bytes',
   sourceId: 'Source ID', runId: 'Run ID',
@@ -12,10 +15,13 @@ export const processingEN = {
   retry: 'Retry this stage', rebuild: 'Rebuild this source version', cancel: 'Cancel version', pin: 'Keep for rollback', unpin: 'Release rollback hold', rollback: 'Restore this version', retire: 'Retire version', resolve: 'Verify export outcome', reason: 'Reason (required)', submit: 'Submit', dismiss: 'Back', done: 'Operation accepted; status refreshed.', actionError: 'Operation could not be confirmed. Refresh the status or retry the same request.',
   operatorNotice: 'Changes use the revision shown here. A changed version must be refreshed before another action.', exportNotice: 'Only submit after checking the provider. This records your verification; it does not independently verify the remote task.', taskId: 'Verified export task ID', notStarted: 'Verified that export never started', evidence: 'Audit reference (required)',
   current_available: 'Current version available', previous_available: 'Previous version available', not_published: 'Not published', legacy_available: 'Previous version available (unverified stages)', legacy_unverified: 'Historical state unverified',
-  planned: 'Planned', enqueue_pending: 'Waiting for dispatch', queued: 'Queued', running: 'Running', waiting_external: 'Waiting for provider', retry_wait: 'Waiting to retry', succeeded: 'Succeeded', failed: 'Failed', blocked: 'Needs attention', canceled: 'Canceled', superseded: 'Superseded', skipped: 'Skipped',
+  planned: 'Planned', enqueue_pending: 'Waiting for dispatch', queued: 'Queued', running: 'Running', waiting_external: 'Waiting for provider', retry_wait: 'Waiting to retry', succeeded: 'Succeeded', failed: 'Failed', blocked: 'Needs attention', canceled: 'Canceled', superseded: 'Superseded', skipped: 'Skipped', verified_empty: 'Verified empty source',
   countDocuments: 'Documents', countContainers: 'Containers', countLinks: 'External links', countUnadmitted: 'Not admitted', originalResult: 'Original run result', cleanupProblems: 'Cleanup problems', resources: 'Resources', chargedBytes: 'Reserved quota bytes (includes estimates)', estimatedIndexBytes: 'Estimated index bytes', unknown: 'Unknown',
 }
 export const processingZH: typeof processingEN = {
+  policy_skipped:'已核实新源为空，按策略跳过',
+  originalErrorOrdinal:'原错误序号',originalErrorDigest:'原错误摘要',legacyAction:'恢复证据',legacyActor:'记录人',legacyDeadLetter:'原死信编号',linkedRecovery:'查看关联恢复任务',
+  legacy_record:'旧协议原始记录',legacy_error:'原始失败',legacy_evidence:'恢复证据',late_completion:'迟到完成已核实',manual_confirmed:'人工核实完成',candidate_adopted:'候选已接管',retry_requested:'已请求限定重试',retry_admitted:'文件已准入重试',recovered:'恢复完成已核实',scheduled:'已计划重试（投递未核实）',LEGACY_DEAD_LETTER_RUNNING:'原批次仍为 running 且存在死信',LEGACY_SCHEDULED_UNVERIFIED:'旧计划重试尚无投递证据',
   retryBudget: '自动重试已用 / 预算', deadline: '恢复截止时间', previous: '上一页', next: '下一页', stepPage: '第 {page} / {pages} 页 · 共 {count} 个阶段',
   docType: '文档类型', nativeBytes: '原生响应字节', nativePages: '已读页数', nativeUnits: '已读单元', images: '图片数', mediaBytes: '媒体字节',
   sourceId: '数据源 ID', runId: '同步批次 ID',
@@ -29,6 +35,6 @@ export const processingZH: typeof processingEN = {
   retry: '重试此阶段', rebuild: '重建此源版本', cancel: '取消此版本', pin: '保留供回滚', unpin: '解除回滚保留', rollback: '恢复此版本', retire: '清理此版本', resolve: '确认导出结果', reason: '操作原因（必填）', submit: '提交', dismiss: '返回', done: '操作已受理，状态已刷新。', actionError: '尚未确认操作结果。请刷新状态，或重试同一请求。',
   operatorNotice: '操作以页面显示的版本修订号为准；状态变化后需要刷新。', exportNotice: '请先在源端核实导出结果。本操作记录人工核实依据，不会独立验证远端任务。', taskId: '已核实的导出任务 ID', notStarted: '已核实导出从未开始', evidence: '审计依据编号（必填）',
   current_available: '当前版本可用', previous_available: '旧版本仍可用', not_published: '尚未发布', legacy_available: '旧版本可用（阶段尚未核实）', legacy_unverified: '历史状态尚未核实',
-  planned: '已规划', enqueue_pending: '待投递', queued: '已排队', running: '处理中', waiting_external: '等待源端', retry_wait: '等待重试', succeeded: '已成功', failed: '已失败', blocked: '需要处理', canceled: '已取消', superseded: '已被新版本替代', skipped: '已跳过',
+  planned: '已规划', enqueue_pending: '待投递', queued: '已排队', running: '处理中', waiting_external: '等待源端', retry_wait: '等待重试', succeeded: '已成功', failed: '已失败', blocked: '需要处理', canceled: '已取消', superseded: '已被新版本替代', skipped: '已跳过', verified_empty: '已验证源为空',
   countDocuments: '文档数', countContainers: '目录数', countLinks: '外部链接数', countUnadmitted: '未准入文档', originalResult: '批次结束时结果', cleanupProblems: '清理异常数', resources: '资源数', chargedBytes: '配额占用字节（含估算）', estimatedIndexBytes: '索引估算字节', unknown: '未知',
 }
