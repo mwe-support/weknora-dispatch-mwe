@@ -2,6 +2,9 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -25,10 +28,18 @@ func (r *DataSourceRepository) Create(ctx context.Context, ds *types.DataSource)
 	if ds == nil {
 		return errors.New("data source is nil")
 	}
-	if err := r.db.WithContext(ctx).Create(ds).Error; err != nil {
-		return err
-	}
-	return nil
+	syncDeletions := ds.SyncDeletions
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(ds).Error; err != nil {
+			return err
+		}
+		// GORM applies default:true to a false bool during Create.
+		ds.SyncDeletions = syncDeletions
+		if !syncDeletions {
+			return tx.Model(ds).Update("sync_deletions", false).Error
+		}
+		return nil
+	})
 }
 
 // FindByID retrieves a data source by ID
@@ -46,7 +57,15 @@ func (r *DataSourceRepository) FindByID(ctx context.Context, id string) (*types.
 		}
 		return nil, err
 	}
+	ds.SettingsFingerprint = dataSourceSettingsFingerprint(&ds)
 	return &ds, nil
+}
+
+func dataSourceSettingsFingerprint(ds *types.DataSource) string {
+	// Execution cursors, counters and timestamps do not invalidate settings.
+	values, _ := json.Marshal([]any{ds.Name, ds.Type, string(ds.Config), ds.SyncSchedule, ds.SyncMode, ds.Status, ds.ConflictStrategy, ds.SyncDeletions, ds.SyncLogRetentionDays})
+	digest := sha256.Sum256(values)
+	return hex.EncodeToString(digest[:])
 }
 
 // FindByKnowledgeBase lists all data sources for a knowledge base
@@ -81,9 +100,15 @@ func (r *DataSourceRepository) Update(ctx context.Context, ds *types.DataSource)
 		if before.DeletedAt.Valid || (ds.TenantID != 0 && ds.TenantID != before.TenantID) || (ds.KnowledgeBaseID != "" && ds.KnowledgeBaseID != before.KnowledgeBaseID) {
 			return ErrProcessingScope
 		}
+		if ds.SettingsFingerprint != "" && ds.SettingsFingerprint != dataSourceSettingsFingerprint(before) {
+			return errors.New("data source settings changed; reload and retry")
+		}
 		// Execution state is server-managed; settings cannot overwrite a newer
 		// cursor. Scope edits and revocation of execution commit atomically.
-		if err := tx.Model(ds).Omit("last_sync_cursor", "last_sync_result", "last_sync_at").Updates(ds).Error; err != nil {
+		if err := tx.Model(ds).Omit("last_sync_cursor", "last_sync_result", "last_sync_at", "sync_schedule", "sync_deletions").Updates(ds).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(ds).Updates(map[string]any{"sync_schedule": ds.SyncSchedule, "sync_deletions": ds.SyncDeletions}).Error; err != nil {
 			return err
 		}
 		var after types.DataSource
@@ -91,10 +116,16 @@ func (r *DataSourceRepository) Update(ctx context.Context, ds *types.DataSource)
 			return err
 		}
 		status, reason, err := processingSourceEditReason(before, &after)
-		if err != nil || status == "" {
+		if err != nil {
 			return err
 		}
-		return invalidateProcessingSource(tx, &after, status, reason)
+		if status != "" {
+			if err := invalidateProcessingSource(tx, &after, status, reason); err != nil {
+				return err
+			}
+		}
+		ds.SettingsFingerprint = dataSourceSettingsFingerprint(&after)
+		return nil
 	})
 }
 

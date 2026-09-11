@@ -70,6 +70,65 @@ func TestDataSourceSettingsCannotOverwriteRetryCursor(t *testing.T) {
 	assert.Equal(t, `{"server":"newer"}`, stored.LastSyncCursor.ToString())
 }
 
+func TestDataSourceSettingsPersistExplicitFalseAndEmptySchedule(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewDataSourceRepository(db)
+	ctx := context.Background()
+	ds := &types.DataSource{ID: "settings-zero", TenantID: 1, KnowledgeBaseID: "kb", Type: types.ConnectorTypeTencentDocs, Name: "synthetic", SyncDeletions: false}
+	require.NoError(t, repo.Create(ctx, ds))
+	saved, err := repo.FindByID(ctx, ds.ID)
+	require.NoError(t, err)
+	require.False(t, saved.SyncDeletions, "explicit false must override the database default")
+	ds.SyncSchedule, ds.SyncDeletions = "*/10 * * * * *", true
+	require.NoError(t, repo.Update(ctx, ds))
+	require.NoError(t, db.Model(ds).Update("last_sync_cursor", types.JSON(`{"server":"new"}`)).Error)
+	ds.SyncSchedule, ds.SyncDeletions = "", false
+	require.NoError(t, repo.Update(ctx, ds))
+	saved, err = repo.FindByID(ctx, ds.ID)
+	require.NoError(t, err)
+	require.Empty(t, saved.SyncSchedule)
+	require.False(t, saved.SyncDeletions)
+	require.JSONEq(t, `{"server":"new"}`, string(saved.LastSyncCursor))
+}
+
+func TestDataSourceSettingsRejectStaleRenameAndCredentials(t *testing.T) {
+	checkDataSourceSettingsConflict(t, setupDataSourceRepoTestDB(t))
+}
+
+func checkDataSourceSettingsConflict(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	ctx := context.Background()
+	repo := NewDataSourceRepository(db)
+	source := &types.DataSource{ID: "settings-conflict", TenantID: 1, KnowledgeBaseID: "kb", Type: types.ConnectorTypeTencentDocs, Name: "before", SyncSchedule: "* * * * * *", SyncDeletions: true}
+	require.NoError(t, repo.Create(ctx, source))
+	rename, err := repo.FindByID(ctx, source.ID)
+	require.NoError(t, err)
+	credentials := *rename
+	closing := *rename
+	closing.SyncSchedule, closing.SyncDeletions, closing.Status = "", false, types.DataSourceStatusPaused
+	require.NoError(t, repo.Update(ctx, &closing))
+	rename.Name = "stale rename"
+	require.ErrorContains(t, repo.Update(ctx, rename), "settings changed")
+	credentials.Config = types.JSON(`{"settings":{"changed":true}}`)
+	require.ErrorContains(t, repo.Update(ctx, &credentials), "settings changed")
+	current, err := repo.FindByID(ctx, source.ID)
+	require.NoError(t, err)
+	require.Empty(t, current.SyncSchedule)
+	require.False(t, current.SyncDeletions)
+	require.Equal(t, types.DataSourceStatusPaused, current.Status)
+	require.Equal(t, "before", current.Name)
+	// Advancing a worker cursor alone does not invalidate a settings form.
+	require.NoError(t, db.Model(&types.DataSource{}).Where("id = ?", source.ID).Update("last_sync_cursor", types.JSON(`{"page":2}`)).Error)
+	current.Name = "fresh rename"
+	require.NoError(t, repo.Update(ctx, current))
+	current, err = repo.FindByID(ctx, source.ID)
+	require.NoError(t, err)
+	require.Equal(t, "fresh rename", current.Name)
+	require.Empty(t, current.SyncSchedule)
+	require.False(t, current.SyncDeletions)
+	require.JSONEq(t, `{"page":2}`, string(current.LastSyncCursor))
+}
+
 func TestDataSourceCheckpointPreservesPauseAndRejectsChangedScope(t *testing.T) {
 	db := setupDataSourceRepoTestDB(t)
 	repo := NewDataSourceRepository(db)

@@ -391,7 +391,7 @@ func (s *DataSourceService) ValidateConnection(ctx context.Context, dsID string)
 		// Update data source with error
 		ds.Status = types.DataSourceStatusError
 		ds.ErrorMessage = err.Error()
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return err
 	}
 
@@ -399,7 +399,7 @@ func (s *DataSourceService) ValidateConnection(ctx context.Context, dsID string)
 	if ds.Status == types.DataSourceStatusError {
 		ds.Status = types.DataSourceStatusActive
 		ds.ErrorMessage = ""
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 	}
 
 	return nil
@@ -526,7 +526,7 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = fmt.Sprintf("Failed to enqueue sync: %v", err)
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, types.AuditActionDataSourceSyncFailed,
 			"data_source", ds.ID, types.AuditOutcomeFailed,
 			map[string]any{"name": ds.Name, "type": ds.Type, "sync_log_id": syncLog.ID, "trigger": "manual"})
@@ -712,7 +712,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) (
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return err
 	}
 
@@ -728,7 +728,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) (
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return err
 	}
 	// Surface the KB's multimodal/VLM state to the connector so it only extracts
@@ -789,7 +789,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) (
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return fetchErr
 	}
 
@@ -812,7 +812,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) (
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return err
 	}
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)

@@ -117,9 +117,10 @@ func (s *Scheduler) addEntry(ds *types.DataSource) error {
 func (s *Scheduler) addEntryLocked(ds *types.DataSource) error {
 	dsID := ds.ID
 	tenantID := ds.TenantID
+	schedule := ds.SyncSchedule
 
 	entryID, err := s.cron.AddFunc(ds.SyncSchedule, func() {
-		s.triggerSync(dsID, tenantID)
+		s.triggerSync(dsID, tenantID, schedule)
 	})
 	if err != nil {
 		return fmt.Errorf("invalid cron expression %q: %w", ds.SyncSchedule, err)
@@ -137,12 +138,16 @@ func (s *Scheduler) addEntryLocked(ds *types.DataSource) error {
 // Layer 2 — Redis: deterministic asynq.TaskID = "dssync:<dsID>:<minute>".
 // Since robfig/cron fires at absolute wall-clock times, all instances trigger
 // at the same minute. The first Enqueue wins; others get ErrTaskIDConflict.
-func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64) {
+func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64, schedule string) {
 	ctx := context.Background()
 
 	ds, err := s.dsRepo.FindByID(ctx, dataSourceID)
 	if err != nil || ds == nil || ds.Status != types.DataSourceStatusActive {
 		logger.Infof(ctx, "[Scheduler] skipping sync for ds=%s (not active or not found)", dataSourceID)
+		return
+	}
+	// A different instance may have removed or replaced this cron entry.
+	if ds.SyncSchedule == "" || ds.SyncSchedule != schedule {
 		return
 	}
 

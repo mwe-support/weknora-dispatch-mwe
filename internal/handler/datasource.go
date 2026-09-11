@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -98,7 +99,7 @@ func (h *DataSourceHandler) CreateDataSource(c *gin.Context) {
 		return
 	}
 
-	var req types.DataSource
+	req := types.DataSource{SyncDeletions: true}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
@@ -207,7 +208,8 @@ func (h *DataSourceHandler) UpdateDataSource(c *gin.Context) {
 	id := c.Param("id")
 
 	var req types.DataSource
-	if err := c.ShouldBindJSON(&req); err != nil {
+	var patch json.RawMessage
+	if err := c.ShouldBindJSON(&patch); err != nil || json.Unmarshal(patch, &req) != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
@@ -217,6 +219,15 @@ func (h *DataSourceHandler) UpdateDataSource(c *gin.Context) {
 		c.JSON(status, gin.H{"error": msg})
 		return
 	}
+	// Omitted settings keep their existing value; explicit empty/false values
+	// remain meaningful (notably disabling cron or deletion synchronization).
+	req = *existing
+	if err := json.Unmarshal(patch, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	req.CreatedAt, req.DeletedAt = existing.CreatedAt, existing.DeletedAt
+	req.ErrorMessage = "" // Execution owns this field; generic Updates skips its zero value.
 
 	req.ID = id
 	req.TenantID = existing.TenantID

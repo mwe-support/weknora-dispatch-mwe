@@ -229,13 +229,48 @@ func TestScheduler_CronFires(t *testing.T) {
 
 func TestScheduler_DoesNotDispatchWhenActivityCannotBeVerified(t *testing.T) {
 	repo := newFakeDataSourceRepo()
-	_ = repo.Create(context.Background(), &types.DataSource{ID: "query-failure", TenantID: 1, Status: types.DataSourceStatusActive})
+	_ = repo.Create(context.Background(), &types.DataSource{ID: "query-failure", TenantID: 1, Status: types.DataSourceStatusActive, SyncSchedule: "* * * * * *"})
 	logs := newFakeSyncLogRepo()
 	logs.runningErr = context.DeadlineExceeded
 	queue := &fakeTaskEnqueuer{}
-	NewScheduler(repo, logs, queue).triggerSync("query-failure", 1)
+	NewScheduler(repo, logs, queue).triggerSync("query-failure", 1, "* * * * * *")
 	if queue.count.Load() != 0 || len(logs.logs) != 0 {
 		t.Fatal("activity-query failure must not create a run or delivery")
+	}
+}
+
+func TestScheduler_StaleReplicaHonorsPersistedSchedule(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeDataSourceRepo()
+	logs := newFakeSyncLogRepo()
+	queue := &fakeTaskEnqueuer{}
+	source := &types.DataSource{ID: "replicated-schedule", TenantID: 1, Status: types.DataSourceStatusActive, SyncSchedule: "* * * * * *"}
+	_ = repo.Create(ctx, source)
+	first, second := NewScheduler(repo, logs, queue), NewScheduler(repo, logs, queue)
+	if err := first.AddOrUpdate(source); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.AddOrUpdate(source); err != nil {
+		t.Fatal(err)
+	}
+	oldFirst := first.cron.Entry(first.entries[source.ID]).Job
+	oldSecond := second.cron.Entry(second.entries[source.ID]).Job
+	for _, schedule := range []string{"", "0 0 * * * *"} {
+		updated := *source
+		updated.SyncSchedule = schedule
+		_ = repo.Update(ctx, &updated)
+		if err := first.AddOrUpdate(&updated); err != nil {
+			t.Fatal(err)
+		}
+		oldFirst.Run()  // A callback that had already entered before removal.
+		oldSecond.Run() // The other replica never received AddOrUpdate.
+		if queue.count.Load() != 0 || len(logs.logs) != 0 {
+			t.Fatal("obsolete schedule dispatched")
+		}
+	}
+	first.cron.Entry(first.entries[source.ID]).Job.Run()
+	if queue.count.Load() != 1 || len(logs.logs) != 1 {
+		t.Fatal("current schedule did not dispatch")
 	}
 }
 
@@ -374,7 +409,7 @@ func TestScheduler_TriggerSync_InactiveSkipped(t *testing.T) {
 	scheduler := NewScheduler(repo, newFakeSyncLogRepo(), enqueuer)
 
 	// Directly call triggerSync — it should skip because ds is not active
-	scheduler.triggerSync("ds-inactive", 1)
+	scheduler.triggerSync("ds-inactive", 1, "* * * * * *")
 
 	if enqueuer.count.Load() != 0 {
 		t.Error("should not enqueue for inactive data source")
@@ -387,7 +422,7 @@ func TestScheduler_TriggerSync_NotFound(t *testing.T) {
 	scheduler := NewScheduler(repo, newFakeSyncLogRepo(), enqueuer)
 
 	// Should not panic, just skip
-	scheduler.triggerSync("nonexistent", 1)
+	scheduler.triggerSync("nonexistent", 1, "* * * * * *")
 
 	if enqueuer.count.Load() != 0 {
 		t.Error("should not enqueue for non-existent data source")

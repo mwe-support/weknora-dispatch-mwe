@@ -68,7 +68,7 @@ func TestProcessingSourcePauseIsAtomicAndKeepsUncertainExport(t *testing.T) {
 
 func TestProcessingRunProjectionOrderingCancellationAndRetention(t *testing.T) {
 	db := processingServiceTestDatabase(t)
-	require.NoError(t, db.AutoMigrate(&types.SyncLog{}, &types.SyncRunItem{}))
+	require.NoError(t, db.AutoMigrate(&types.SyncLog{}, &types.SyncRunItem{}, &types.ProcessingLegacyEvidence{}))
 	r := repository.NewProcessingRepository(db)
 	ctx := context.Background()
 	started := time.Now().UTC().Add(-time.Hour)

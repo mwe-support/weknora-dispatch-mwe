@@ -29,7 +29,7 @@ func newSQLiteDataSourceDeleteFixture(t *testing.T) *sqliteDataSourceDeleteFixtu
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "weknora.db")), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.DataSource{}, &types.SyncLog{}, &types.ProcessingJob{}, &types.ProcessingStep{}, &types.ProcessingEvent{}, &types.SyncRunItem{}))
+	require.NoError(t, db.AutoMigrate(&types.DataSource{}, &types.SyncLog{}, &types.ProcessingJob{}, &types.ProcessingStep{}, &types.ProcessingEvent{}, &types.SyncRunItem{}, &types.ProcessingLegacyEvidence{}))
 
 	dsRepo := repository.NewDataSourceRepository(db)
 	syncLogRepo := repository.NewSyncLogRepository(db)

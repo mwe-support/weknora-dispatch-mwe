@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -14,8 +15,13 @@ import (
 
 type stubDataSourceService struct {
 	interfaces.DataSourceService
-	getSyncLogs   func(ctx context.Context, dsID string, limit int, offset int) ([]*types.SyncLog, error)
-	getDataSource func(ctx context.Context, id string) (*types.DataSource, error)
+	getSyncLogs      func(ctx context.Context, dsID string, limit int, offset int) ([]*types.SyncLog, error)
+	getDataSource    func(ctx context.Context, id string) (*types.DataSource, error)
+	updateDataSource func(context.Context, *types.DataSource) (*types.DataSource, error)
+}
+
+func (s *stubDataSourceService) UpdateDataSource(ctx context.Context, input *types.DataSource) (*types.DataSource, error) {
+	return s.updateDataSource(ctx, input)
 }
 
 func (s *stubDataSourceService) GetSyncLogs(ctx context.Context, dsID string, limit int, offset int) ([]*types.SyncLog, error) {
@@ -55,7 +61,39 @@ func newDataSourceTestRouter(h *DataSourceHandler) *gin.Engine {
 		c.Next()
 	})
 	r.GET("/datasource/:id/logs", h.GetSyncLogs)
+	r.PUT("/datasource/:id", h.UpdateDataSource)
 	return r
+}
+
+func TestDataSourceUpdateDistinguishesOmittedAndClearedSettings(t *testing.T) {
+	for _, body := range []string{`{"name":"renamed"}`, `{"sync_schedule":"","sync_deletions":false}`} {
+		t.Run(body, func(t *testing.T) {
+			existing := types.DataSource{ID: "source", TenantID: 1, KnowledgeBaseID: "kb", Type: types.ConnectorTypeTencentDocs, SyncSchedule: "*/10 * * * * *", SyncDeletions: true}
+			var captured types.DataSource
+			svc := &stubDataSourceService{getDataSource: func(context.Context, string) (*types.DataSource, error) { copy := existing; return &copy, nil }, updateDataSource: func(_ context.Context, input *types.DataSource) (*types.DataSource, error) {
+				captured = *input
+				return input, nil
+			}}
+			kb := &stubKBServiceForDS{getByID: func(context.Context, string) (*types.KnowledgeBase, error) {
+				return &types.KnowledgeBase{ID: "kb", TenantID: 1}, nil
+			}}
+			router := newDataSourceTestRouter(NewDataSourceHandler(svc, kb))
+			request := withDSCtx(httptest.NewRequest(http.MethodPut, "/datasource/source", strings.NewReader(body)), 1)
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("update returned %d", response.Code)
+			}
+			if strings.Contains(body, "renamed") {
+				if captured.SyncSchedule != existing.SyncSchedule || !captured.SyncDeletions {
+					t.Fatal("omitted settings were cleared")
+				}
+			} else if captured.SyncSchedule != "" || captured.SyncDeletions {
+				t.Fatal("explicit clear was ignored")
+			}
+		})
+	}
 }
 
 func withDSCtx(req *http.Request, tenantID uint64) *http.Request {
