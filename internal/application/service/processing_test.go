@@ -43,6 +43,10 @@ func TestProcessingWikiChildrenUseIsolatedQueue(t *testing.T) {
 	}
 	require.Equal(t, types.QueueMaintenance, types.ProcessingQueue("wiki_retire_page"))
 	require.Equal(t, types.QueueMaintenance, types.ProcessingQueue("retire_previous"))
+	for _, stage := range []string{"embedding", "faq_embedding"} {
+		require.Equal(t, types.QueueSummary, types.ProcessingQueue(stage), "model calls require the existing enrichment pool")
+	}
+	require.Equal(t, types.QueuePostProcess, types.ProcessingQueue("publish"))
 }
 
 func (q *processingTestQueue) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {

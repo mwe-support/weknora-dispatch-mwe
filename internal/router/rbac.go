@@ -574,6 +574,12 @@ func (g *rbacGuards) KBAccessWrite(param string) gin.HandlerFunc {
 	)
 }
 
+// Data-source lifecycle controls require an administrator in the KB's own
+// workspace. Shared Editor content access cannot rewrite this authority.
+func (g *rbacGuards) KBAccessOwn(param string) gin.HandlerFunc {
+	return middleware.RequireKBAccess(middleware.KBIDFromParam(param), types.OrgRoleAdmin, g.kbService, nil, nil, g.cfg)
+}
+
 // KBAccessReadFromKnowledgeIDParam is like KBAccessRead but resolves
 // the kb_id by walking a knowledge document (URL `:knowledge_id`)
 // back to its parent KB. Used by the chunk routes whose URL addresses

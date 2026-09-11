@@ -51,7 +51,8 @@ func TestProcessingHistoryRoutesRecheckAccessAndRejectScopedGlobalKeys(t *testin
 	}
 	kb := &processingHistoryKBLookup{}
 	enabled := true
-	g := &rbacGuards{cfg: &config.Config{Tenant: &config.TenantConfig{EnableRBAC: &enabled}}, kbService: kb}
+	g := &rbacGuards{cfg: &config.Config{Tenant: &config.TenantConfig{EnableRBAC: &enabled}}, kbService: kb,
+		kbShareService: &downloadKBShareStub{permission: types.OrgRoleEditor, source: 1}}
 	h := handler.NewProcessingHandler(repository.NewProcessingRepository(db), nil)
 	role, tenant := types.TenantRoleViewer, uint64(1)
 	var key *types.TenantAPIKeyScope
@@ -97,6 +98,11 @@ func TestProcessingHistoryRoutesRecheckAccessAndRejectScopedGlobalKeys(t *testin
 	require.Equal(t, 200, call(http.MethodGet, "/api/v1/processing/jobs/a").Code, "deleted-KB cleanup remains visible to its tenant admin")
 	tenant = 2
 	require.Equal(t, 404, call(http.MethodGet, "/api/v1/processing/jobs/a").Code)
+	kb.gone = false
+	require.Equal(t, 200, call(http.MethodGet, local).Code, "shared history remains readable")
+	for _, action := range []string{"retry", "cancel", "rebuild", "resolve-export", "pin", "rollback", "retire"} {
+		require.Equal(t, 403, call(http.MethodPost, local+"/a/"+action).Code, "receiving-tenant admin cannot manage source lifecycle: "+action)
+	}
 	tenant = 1
 	kb.gone = false
 	key = &types.TenantAPIKeyScope{KeyID: 10, Capabilities: types.StringArray{string(types.APIKeyCapabilityManageDataSources)}, KnowledgeBaseIDs: types.StringArray{"kb"}}

@@ -248,7 +248,7 @@ func ProcessingQueue(stage string) string {
 	switch stage {
 	case "scan_page", "scan_document", "discover", "metadata", "fetch", "native_read", "export_start", "export_poll", "download", "normalize":
 		return QueueSync
-	case "summary":
+	case "summary", "embedding", "faq_embedding":
 		return QueueSummary
 	case "asset", "assets", "asset_download", "images", "ocr", "image_ocr", "image_caption", "image_index":
 		return QueueMultimodal
@@ -258,7 +258,7 @@ func ProcessingQueue(stage string) string {
 		return QueueQuestion
 	case "wiki", "wiki_extract", "wiki_dedup", "wiki_cite", "wiki_summary_part", "wiki_summary", "wiki_prepare", "wiki_taxonomy_input", "wiki_taxonomy", "wiki_taxonomy_vectors", "wiki_taxonomy_plan", "wiki_pages", "wiki_page", "wiki_links":
 		return QueueWiki
-	case "index", "embedding", "text_index", "summary_index", "faq_prepare", "faq_index", "faq_entry", "faq_embedding", "faq_write", "publish":
+	case "index", "text_index", "summary_index", "faq_prepare", "faq_index", "faq_entry", "faq_write", "publish":
 		return QueuePostProcess
 	case "retire", "retire_previous", "wiki_retire_page", "cleanup":
 		return QueueMaintenance
