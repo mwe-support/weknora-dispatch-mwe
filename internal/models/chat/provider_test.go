@@ -2,6 +2,8 @@ package chat
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/provider"
@@ -9,7 +11,33 @@ import (
 	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
+
+func TestBuiltinLocalChatThinkingControlReachesWire(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "config", "builtin_models.yaml"))
+	require.NoError(t, err)
+	var file struct {
+		Models []types.BuiltinModelEntry `yaml:"builtin_models"`
+	}
+	require.NoError(t, yaml.Unmarshal(raw, &file))
+	for _, entry := range file.Models {
+		if entry.ID != "builtin-local-qwythos-q4-mm" {
+			continue
+		}
+		c := newOutboundChat(t, entry.Parameters.Provider, entry.Name, entry.Parameters.ExtraConfig)
+		for _, enabled := range []bool{false, true} {
+			body, _, rawHTTP, err := c.buildOutbound([]Message{{Role: "user", Content: "synthetic"}}, &ChatOptions{Thinking: &enabled, MaxTokens: 512}, false)
+			require.NoError(t, err)
+			require.True(t, rawHTTP)
+			var wire map[string]any
+			require.NoError(t, json.Unmarshal([]byte(mustJSON(t, body)), &wire))
+			require.Equal(t, enabled, wire["chat_template_kwargs"].(map[string]any)["enable_thinking"])
+		}
+		return
+	}
+	t.Fatal("deployment local chat model is missing")
+}
 
 // TestResolveProvider pins the provider+model routing table, including the
 // sub-model matchers (reasoning models, Qwen thinking, LKEAP DeepSeek V3) and

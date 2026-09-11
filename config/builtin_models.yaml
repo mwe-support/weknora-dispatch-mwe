@@ -9,6 +9,8 @@ builtin_models:
       api_key: ${LLM_API_KEY}
       provider: openai
       supports_vision: true
+      extra_config:
+        thinking_control: chat_template_kwargs
 
   - id: builtin-local-qwythos-q4-vlm
     type: VLLM
