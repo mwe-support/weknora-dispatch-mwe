@@ -14,6 +14,18 @@ import (
 	"github.com/google/uuid"
 )
 
+// Keep all OCR/caption text while bounding each embedding input. Plain rune
+// slices cannot drop Markdown/table content or split a UTF-8 character.
+// ponytail: fixed rune boundaries; add semantic overlap if retrieval needs it.
+func processingImageTextParts(text string) []string {
+	runes := []rune(text)
+	var parts []string
+	for start := 0; start < len(runes); start += 4096 {
+		parts = append(parts, string(runes[start:min(start+4096, len(runes))]))
+	}
+	return parts
+}
+
 func (e *processingDocumentExecution) imageText(ctx context.Context) (types.ProcessingOutcome, error) {
 	var input struct {
 		ID string `json:"asset_id"`
@@ -127,10 +139,25 @@ func (e *processingDocumentExecution) imageBarrier(ctx context.Context) (types.P
 				if item.text == "" {
 					continue
 				}
-				id := uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("%s/%d/%s/%s", e.lease.Step.ID, e.lease.Ref.Attempt, asset.ID, item.kind))).String()
-				results = append(results, &types.Chunk{ID: id, TenantID: e.lease.Job.TenantID, KnowledgeBaseID: e.kb.ID, KnowledgeID: e.lease.Job.KnowledgeID,
-					Content: item.text, SourceContent: item.text, ChunkType: item.kind, ParentChunkID: parent, ImageInfo: string(info), IsEnabled: true, Flags: types.ChunkFlagRecommended,
-					Status: int(types.ChunkStatusStored), IndexStatus: "processing", Metadata: stamp})
+				parts := processingImageTextParts(item.text)
+				for partIndex, part := range parts {
+					key := fmt.Sprintf("%s/%d/%s/%s", e.lease.Step.ID, e.lease.Ref.Attempt, asset.ID, item.kind)
+					partInfo := info
+					if len(parts) > 1 {
+						key += fmt.Sprintf("/%d", partIndex)
+						image := types.ImageInfo{URL: asset.StoredURL, OriginalURL: asset.StoredURL}
+						if item.kind == types.ChunkTypeImageOCR {
+							image.OCRText = part
+						} else {
+							image.Caption = part
+						}
+						partInfo, _ = json.Marshal([]types.ImageInfo{image})
+					}
+					id := uuid.NewSHA1(uuid.NameSpaceOID, []byte(key)).String()
+					results = append(results, &types.Chunk{ID: id, TenantID: e.lease.Job.TenantID, KnowledgeBaseID: e.kb.ID, KnowledgeID: e.lease.Job.KnowledgeID,
+						Content: part, SourceContent: part, ChunkIndex: partIndex, ChunkType: item.kind, ParentChunkID: parent, ImageInfo: string(partInfo), IsEnabled: true, Flags: types.ChunkFlagRecommended,
+						Status: int(types.ChunkStatusStored), IndexStatus: "processing", Metadata: stamp})
+				}
 			}
 		}
 	}

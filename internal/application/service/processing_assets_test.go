@@ -10,12 +10,27 @@ import (
 	"image/png"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	files "github.com/Tencent/WeKnora/internal/application/service/file"
+	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/tencentdocs"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestProcessingImageTextPartsPreserveLongOCRWithoutTruncation(t *testing.T) {
+	for _, original := range []string{"short unchanged", strings.Repeat("中🙂line|\n", 6000)} {
+		parts := processingImageTextParts(original)
+		require.Equal(t, original, strings.Join(parts, ""))
+		for _, part := range parts {
+			require.True(t, utf8.ValidString(part))
+			require.LessOrEqual(t, utf8.RuneCountInString(part), 4096)
+			_, err := retriever.PrepareProcessingEmbeddingInput(context.Background(), part)
+			require.NoError(t, err)
+		}
+	}
+}
 
 func processingTestImage(t *testing.T, n int) []byte {
 	t.Helper()
