@@ -116,6 +116,14 @@ func TestProcessingDOCXCoverageRejectsLostTextAndImages(t *testing.T) {
 	result.ImageRefs = nil
 	require.EqualError(t, validateProcessingDOCXText(runs, images, result), "DOCX_IMAGE_COVERAGE_INCOMPLETE")
 }
+
+func TestProcessingDOCXCoverageAcceptsEscapedMarkdownWithoutLosingLiteralBackslashes(t *testing.T) {
+	runs := map[string]int{"literal[link]*text": 1, `path\*file`: 1}
+	result := &types.ReadResult{MarkdownContent: "literal\\[link\\]\\*text\n" + `path\\\*file`}
+	require.NoError(t, validateProcessingDOCXText(runs, 0, result))
+	result.MarkdownContent = "literal\\[link\\]\\*text\npath*file"
+	require.EqualError(t, validateProcessingDOCXText(runs, 0, result), "DOCX_TEXT_COVERAGE_INCOMPLETE")
+}
 func (c *processingExportClient) GetExportProgress(context.Context, string) (*tencentdocs.ExportStatus, error) {
 	c.polls++
 	if c.polls == 1 {

@@ -253,7 +253,19 @@ func processingDOCXIsEmpty(data []byte) bool {
 }
 
 func validateProcessingDOCXText(textRuns map[string]int, images int, result *types.ReadResult) error {
-	text := processingDOCXText(result.MarkdownContent)
+	// A converter escapes literal Markdown punctuation. Decode only the output,
+	// once, so an original backslash remains part of the coverage requirement.
+	var decoded strings.Builder
+	for i := 0; i < len(result.MarkdownContent); i++ {
+		if result.MarkdownContent[i] == '\\' && i+1 < len(result.MarkdownContent) {
+			next := result.MarkdownContent[i+1]
+			if next >= '!' && next <= '/' || next >= ':' && next <= '@' || next >= '[' && next <= '`' || next >= '{' && next <= '~' {
+				i++
+			}
+		}
+		decoded.WriteByte(result.MarkdownContent[i])
+	}
+	text := processingDOCXText(decoded.String())
 	for run, expected := range textRuns {
 		if strings.Count(text, run) < expected {
 			return errors.New("DOCX_TEXT_COVERAGE_INCOMPLETE")

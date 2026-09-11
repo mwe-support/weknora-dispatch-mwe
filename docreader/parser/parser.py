@@ -3,6 +3,7 @@ from typing import Any, Optional
 
 from docreader.models.document import Document
 from docreader.parser.registry import registry
+from docreader.parser.docx_text import complete_docx_stories
 from docreader.parser.web_parser import WebParser
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,8 @@ class Parser:
 
         logger.info("Starting to parse file content, size: %d bytes", len(content))
         result = parser.parse(content)
+        if effective_file_type == "docx":
+            result.content = complete_docx_stories(content, result.content, result.images)
 
         if not result.content:
             logger.warning("Parser returned empty content for file: %s", file_name)
