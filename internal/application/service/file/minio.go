@@ -116,6 +116,9 @@ func (s *minioFileService) parseMinioFilePath(filePath string) (string, error) {
 func (s *minioFileService) SaveFile(ctx context.Context,
 	file *multipart.FileHeader, tenantID uint64, knowledgeID string,
 ) (string, error) {
+	if knowledgeID == "" {
+		knowledgeID = "exports" // Anonymous stage artifacts use the same namespace as SaveBytes.
+	}
 	// Generate object name
 	ext := filepath.Ext(file.Filename)
 	objectName := fmt.Sprintf("%d/%s/%s%s", tenantID, knowledgeID, uuid.New().String(), ext)

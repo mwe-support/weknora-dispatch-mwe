@@ -20,6 +20,7 @@
 | R1 旧数据恢复 | H13 原记录证明/接管、H14 明确清单恢复、原索引目标核验及回收 | 需要当前成员范围、可信旧产物和人工排空记录；不重放整个旧任务 |
 | H1 历史保护与调度 | 启动、兼容写入、保留期统一保护原记录；历史 running 与实际执行区分 | 原 running 仍可审计，但已证明排空后不再永久阻断新调度 |
 | S1 设置保存 | 空 cron、false 删除设置持久化；过期设置快照和其他副本旧 cron 拒绝执行 | 关闭计划不会被运行状态或并发改名恢复；冲突需重读设置 |
+| S2 MinIO 流式产物 | 无知识 ID 的 SaveFile 使用既有 exports 子目录，避免 MinIO 拒绝双斜线对象键 | 仅调整匿名上传的物理路径；外层仍不绑定虚构知识，保留租约、配额、资源登记和退役约束 |
 | U2 恢复证据展示 | 原错误序号/摘要、独立恢复记录、关联作业链接、受限 observer 投影 | 保留当时结果并显示后续事实，正文与凭据不进入发布记录 |
 
 B1 是同一执行协议的协调变更：仅更新其中的写入端、读取端或清理端会破坏版本隔离，因此作为一个功能提交。对外 WeKnora MCP Server 本批没有源码变更，不能将本批提交推入 MCP 专属仓库，也不向 Tencent 官方仓库推送。
@@ -186,3 +187,22 @@ H14 与旧历史补充：
 | U2 / O2 | `64370652` / `1b930144` |
 
 11:38 的更新预检确认迁移为 79、dirty=false，数据库约 809 MB；6 个 Asynq server 注册均属于同一当前 app 容器，没有第二个同库应用执行者。切换时必须停妥该旧容器并重核队列与注册，保留两条原 running 及全部归档投递，不以删除历史获得排空证明。新协议按现有腾讯来源范围启用，不更改来源选择器、同步日程、模型或凭据；此次部署不自动接管生产旧候选，也不重放原 8 项 scheduled 清单。
+
+## 发布前 MinIO 根因修正（S2）
+
+生产使用 MinIO，先前实际应用验收使用本地文件存储。补充的隔离 MinIO + PostgreSQL + Qdrant 验收发现：`ProcessingArtifacts.saveStream` 以空知识 ID 调用 `SaveFile`，原 MinIO 驱动产生 `1//文件名.enc`，存储端实际返回 `Object name contains unsupported characters`。`249`、`250` 保存阶段阻塞，`251-minio-root-cause-red.log` 用直接加密产物上传确认根因。开始前删除场景在修正前已通过，不能以此替代写入验证。
+
+修复在 MinIO 驱动内把空 ID 对应的目录设为已有 `exports` 命名空间；外层资源包装器的参数仍为空，不会建立虚构知识绑定。常规知识上传路径不变。其他存储驱动没有本批源码变更。本节与最终发布状态修订均归 S2 推送批次。
+
+`252-minio-green.log`：真实 MinIO 加密保存/解密读回、完整旧候选接管、丢索引确认重试、原文件预览、旧 Qdrant 索引回收、开始前删除及配额释放全部通过；原始运行记录保持不变。每次使用独立随机 bucket，并在测试结束清理。命令：
+
+```text
+python tmp/lifecycle-20260910/run-tests.py --postgres --qdrant --minio ./internal/application/service ./internal/application/service/file -run '^TestProcessing(LegacyAdoptionWithMinIO|Artifacts)' -count=1 -v
+PASS — source SHA-256 392586ed50800c9f5ae5a5463408b95d2a00a581eb482daf69d2887474e5e215
+```
+
+新隔离应用镜像 `local/weknora-app:lifecycle-392586ed50800c9f` 的二进制 SHA-256 为 `4adde29cdb830a92545788264954247026ab0a80893f8c25bf98eeada1b5431a`，镜像 ID 为 `sha256:1a0c73fb3b6c8af31c603f462f200eb0924ae6c844c6af99bf3d0161cae30555`。实际 HTTP 创建专用 MinIO backend 与新测试 KB，通过真实存储解析器完成合成腾讯 PDF 的 15 个文档阶段；所有活动产物均归该 backend。预览与下载原始字节摘要一致，两页及末尾标记均可检索。独立 MCP 再次验证 8 个测试 KB，含该 MinIO 样本；临时只读 key 已撤销。证据：`app-api-minio-verify.log`、`app-api-mcp.log`。应用再次重启后，两条合成旧 running 行仍保持完整摘要不变。
+
+S2 的 MinIO/Qdrant 自动用例采用合成模型和来源成员响应；真实 HTTP 样本覆盖腾讯附件导出及存储链路，未调用模型。真实模型、48 图与 Wiki 等场景的实测边界仍以前文记录为准。此修正使上表首轮 App 候选作废；最终 App 使用独立 `v0.7.2-processing-lifecycle-20260911-minio` 标识，前端保持已验收镜像。新增底层对象目录可由资源中保存的确切路径读回和回收；回滚仍受前述协议版本限制。
+
+最终补充全量命令 `python tmp/lifecycle-20260910/run-tests.py --postgres --qdrant --neo4j --minio ./... -count=1` 全部通过，证据 `253-full-go-minio-green.log`，源码 SHA-256 `abe9d09ca803827a00a8e01ab4c8a7b66affc3d61c37a0d7da7a4e4bd7730c7c`；repository 62.075 秒、service 439.269 秒。发布准备再次核对全部 1,796 个运行时源码文件与实际运行镜像一致，并验证原前端镜像的 nginx、入口字节及对新应用的 API 代理。S2 的 Standards 和 Spec 两项静态补审均为 0 P1/P2。浏览器实际打开 MinIO 中的双页 PDF，`app-live-minio-preview.png` 与 DOM 已保存并查看；未用接口成功替代浏览器渲染结果。

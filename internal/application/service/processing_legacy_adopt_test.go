@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/json"
@@ -27,6 +28,8 @@ import (
 	"github.com/google/uuid"
 	protocol "github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -54,6 +57,9 @@ func mockProcessingLegacyMembership(t *testing.T, visible *atomic.Bool) {
 	require.NoError(t, err)
 	previous := http.DefaultTransport
 	http.DefaultTransport = processingLegacyTransport(func(r *http.Request) (*http.Response, error) {
+		if os.Getenv("PROCESSING_TEST_STORAGE") == "minio" && r.URL.Host == "lifecycle-minio:9000" {
+			return previous.RoundTrip(r)
+		}
 		require.Equal(t, "docs.qq.com", r.URL.Host)
 		require.Equal(t, "synthetic-membership-token", r.Header.Get("Authorization"))
 		forward := r.Clone(r.Context())
@@ -87,6 +93,17 @@ func (r *processingLegacyAckLoss) ReadProcessingIndexes(ctx context.Context, kb,
 
 func TestProcessingLegacyAdoptionReusesRealQdrantVectorsAndPublishesOriginalFile(t *testing.T) {
 	for _, scenario := range []string{"complete", "delete-before-start", "graph-wiki", "moved-before-snapshot", "moved-before-publish", "unproven-model", "changed-same-id", "changed-dimension", "missing-old-vectors", "migrated-store", "migrated-store-without-proof", "keyword-only"} {
+		t.Run(scenario, func(t *testing.T) { checkProcessingLegacyAdoption(t, scenario) })
+	}
+}
+
+func TestProcessingLegacyAdoptionWithMinIO(t *testing.T) {
+	if os.Getenv("PROCESSING_TEST_MINIO") == "" {
+		t.Skip("requires isolated MinIO")
+	}
+	require.Equal(t, "lifecycle-minio:9000", os.Getenv("PROCESSING_TEST_MINIO"))
+	t.Setenv("PROCESSING_TEST_STORAGE", "minio")
+	for _, scenario := range []string{"complete", "delete-before-start"} {
 		t.Run(scenario, func(t *testing.T) { checkProcessingLegacyAdoption(t, scenario) })
 	}
 }
@@ -143,6 +160,41 @@ func checkProcessingLegacyAdoption(t *testing.T, scenario string) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, &tenant)
 	baseFiles := files.NewLocalFileService(dir, "")
+	var minioClient *minio.Client
+	var bucket string
+	if os.Getenv("PROCESSING_TEST_STORAGE") == "minio" {
+		endpoint := os.Getenv("PROCESSING_TEST_MINIO")
+		require.Equal(t, "lifecycle-minio:9000", endpoint)
+		bucket = "lifecycle-" + uuid.NewString()
+		const access, secret = "synthetic-minio", "synthetic-minio-test-only"
+		t.Setenv("STORAGE_TYPE", "minio")
+		t.Setenv("MINIO_ENDPOINT", endpoint)
+		t.Setenv("MINIO_ACCESS_KEY_ID", access)
+		t.Setenv("MINIO_SECRET_ACCESS_KEY", secret)
+		t.Setenv("MINIO_BUCKET_NAME", bucket)
+		baseFiles, err = files.NewMinioFileService(endpoint, access, secret, bucket, false)
+		require.NoError(t, err)
+		minioClient, err = minio.New(endpoint, &minio.Options{Creds: credentials.NewStaticV4(access, secret, "")})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			for object := range minioClient.ListObjects(cleanup, bucket, minio.ListObjectsOptions{Recursive: true}) {
+				require.NoError(t, object.Err)
+				require.NoError(t, minioClient.RemoveObject(cleanup, bucket, object.Key, minio.RemoveObjectOptions{}))
+			}
+			require.NoError(t, minioClient.RemoveBucket(cleanup, bucket))
+		})
+		probe := NewProcessingArtifacts(baseFiles, nil)
+		probeJob := types.ProcessingJob{ID: "probe", TenantID: 1, Generation: 1}
+		probeStep := types.ProcessingStep{ID: "probe", InputFingerprint: "synthetic"}
+		probePath, probeDigest, err := probe.Save(ctx, probeJob, probeStep, "probe", []byte("synthetic encrypted bytes"))
+		require.NoError(t, err)
+		probeBody, err := probe.Read(ctx, probeJob, probeStep, "probe", probePath, probeDigest)
+		require.NoError(t, err)
+		require.Equal(t, "synthetic encrypted bytes", string(probeBody))
+		require.NoError(t, baseFiles.DeleteFile(ctx, probePath))
+	}
 	image, err := baseFiles.SaveBytes(ctx, processingTestImage(t, 1), 1, "legacy.png", false)
 	require.NoError(t, err)
 	snapshot := processingLegacyFixture()
@@ -177,6 +229,11 @@ func checkProcessingLegacyAdoption(t *testing.T, scenario string) {
 	k.FileType = "md"
 	k.FileName = "source.md"
 	k.FilePath = "local://1/legacy/source.md"
+	if minioClient != nil {
+		_, err = minioClient.PutObject(ctx, bucket, "1/legacy/source.md", bytes.NewReader(body), int64(len(body)), minio.PutObjectOptions{ContentType: "text/markdown"})
+		require.NoError(t, err)
+		k.FilePath = "minio://" + bucket + "/1/legacy/source.md"
+	}
 	k.FileHash = fmt.Sprintf("%x", md5.Sum(body))
 	k.FileSize = int64(len(body))
 	k.EmbeddingModelID = "embed"
@@ -412,8 +469,12 @@ func checkProcessingLegacyAdoption(t *testing.T, scenario string) {
 		var owner types.Tenant
 		require.NoError(t, db.First(&owner, "id = ?", 1).Error)
 		require.Zero(t, owner.StorageUsed)
-		_, err := os.Stat(filepath.Join(dir, "1", "legacy", "source.md"))
-		require.True(t, os.IsNotExist(err))
+		reader, err := baseFiles.GetFile(ctx, k.FilePath)
+		if err == nil {
+			_, err = io.ReadAll(reader) // MinIO reports missing objects on the first read.
+			_ = reader.Close()
+		}
+		require.Error(t, err, "retirement must physically remove the original file")
 		var ids []string
 		for _, item := range inputs {
 			ids = append(ids, item.SourceID)
@@ -486,7 +547,7 @@ func checkProcessingLegacyAdoption(t *testing.T, scenario string) {
 				require.NoError(t, r.RetryStep(ctx, 1, job.ID, step.ID, current.Revision, "legacy-wiki-taxonomy-retry", "operator"))
 				continue
 			}
-			require.NotEqual(t, types.ProcessingBlocked, out.Status, "stage %s: %s", step.Stage, out.ErrorCode)
+			require.NotEqual(t, types.ProcessingBlocked, out.Status, "stage %s: %s: %s", step.Stage, out.ErrorCode, out.Message)
 			require.NoError(t, r.FinishStep(ctx, 1, *lease, out))
 		}
 	}
