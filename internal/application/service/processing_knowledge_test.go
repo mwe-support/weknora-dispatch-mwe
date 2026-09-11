@@ -12,6 +12,7 @@ import (
 	files "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/tencentdocs"
+	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
@@ -20,6 +21,39 @@ import (
 
 type processingUnavailableStorage struct {
 	interfaces.StorageBackendResolver
+}
+
+func TestProcessingChunksAcceptMixedStandaloneAndParentedText(t *testing.T) {
+	kb := &types.KnowledgeBase{ChunkingConfig: types.ChunkingConfig{EnableParentChild: true, ParentChunkSize: 240, ChildChunkSize: 60, ChunkOverlap: 10, Strategy: "heading"}}
+	body := "# 简短说明\n简短但完整的一段说明。\n\n# 详细说明\n" + strings.Repeat("这里是足够长的内容，需要拆为多个可检索的小段落。", 35)
+	parent, child := buildParentChildConfigs(kb.ChunkingConfig, buildSplitterConfig(kb))
+	parts := chunker.SplitParentChild(body, parent, child)
+	require.NotEmpty(t, parts.Parents)
+	standalone := 0
+	for _, part := range parts.Children {
+		if part.ParentIndex == -1 {
+			standalone++
+		}
+	}
+	require.Positive(t, standalone, "fixture must contain legitimate standalone text alongside parented text")
+	chunks, err := buildProcessingChunks(kb, types.ProcessingLease{Job: types.ProcessingJob{ID: "mixed-document"}, Step: types.ProcessingStep{ID: "mixed-step"}, Ref: types.ProcessingRef{Attempt: 1}}, body)
+	require.NoError(t, err)
+	require.Len(t, chunks, len(parts.Parents)+len(parts.Children))
+	parents := map[string]bool{}
+	for _, chunk := range chunks {
+		if chunk.ChunkType == types.ChunkTypeParentText {
+			parents[chunk.ID] = true
+		}
+	}
+	for i, child := range parts.Children {
+		chunk := chunks[len(parts.Parents)+i]
+		require.Equal(t, child.Content, chunk.Content)
+		if child.ParentIndex == -1 {
+			require.Empty(t, chunk.ParentChunkID)
+		} else {
+			require.True(t, parents[chunk.ParentChunkID])
+		}
+	}
 }
 
 func (processingUnavailableStorage) ResolveFileService(context.Context, *types.Tenant, string, string, string) (interfaces.FileService, string, error) {

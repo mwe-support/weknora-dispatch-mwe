@@ -426,7 +426,8 @@ func buildProcessingChunks(kb *types.KnowledgeBase, lease types.ProcessingLease,
 	textChunks := make([]*types.Chunk, len(children))
 	for i, child := range children {
 		textChunks[i] = makeChunk(types.ChunkTypeText, child.Chunk)
-		if len(parents) > 0 {
+		// The splitter uses -1 for a standalone leaf that needs no parent.
+		if len(parents) > 0 && child.ParentIndex != -1 {
 			if child.ParentIndex < 0 || child.ParentIndex >= len(parentChunks) {
 				return nil, errors.New("CHUNK_PARENT_MAPPING_INVALID")
 			}
