@@ -108,6 +108,11 @@ func checkProcessingLegacyAdoption(t *testing.T, scenario string) {
 	t.Setenv("STORAGE_TYPE", "local")
 	t.Setenv("LOCAL_STORAGE_BASE_DIR", dir)
 	db := processingServiceTestDatabase(t)
+	if scenario == "migrated-store" {
+		pool, err := db.DB()
+		require.NoError(t, err)
+		pool.SetMaxOpenConns(4) // The delete must wait on the row lock, not the connection pool.
+	}
 	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.Knowledge{}, &types.Model{}, &types.SyncLog{}, &types.SyncRunItem{}, &types.KnowledgeProcessingSpan{}))
 	migration, err := os.ReadFile(filepath.Join("..", "..", "..", "migrations", "versioned", "000088_processing_lifecycle.up.sql"))
 	require.NoError(t, err)

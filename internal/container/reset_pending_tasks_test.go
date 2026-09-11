@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     summary_status  VARCHAR(32) NOT NULL DEFAULT 'none',
     pending_subtasks_count INTEGER NOT NULL DEFAULT 0,
     error_message   TEXT,
+    metadata        TEXT,
     updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at      DATETIME
 );
@@ -95,7 +96,47 @@ func setupResetPendingDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.Exec(resetPendingSpansDDL).Error)
 	require.NoError(t, db.Exec(resetPendingOpsDDL).Error)
 	require.NoError(t, db.Exec(resetPendingKnowledgeBasesDDL).Error)
+	require.NoError(t, db.AutoMigrate(&types.ProcessingJob{}, &types.ProcessingLegacyEvidence{}, &types.DataSource{}))
 	return db
+}
+
+func TestResetPendingTasks_PreservesProcessingOwnershipAndOriginalHistory(t *testing.T) {
+	for _, setting := range []struct{ redis, sources string }{{"", "source-td"}, {"redis:6379", "*"}, {"redis:6379", ""}} {
+		t.Run(setting.redis+"/"+setting.sources, func(t *testing.T) {
+			t.Setenv("REDIS_ADDR", setting.redis)
+			t.Setenv("WEKNORA_PROCESSING_SOURCES", setting.sources)
+			db := setupResetPendingDB(t)
+			stale := time.Now().Add(-2 * time.Hour)
+			require.NoError(t, db.Create(&types.DataSource{ID: "source-td", TenantID: 1, KnowledgeBaseID: "kb", Name: "synthetic", Type: types.ConnectorTypeTencentDocs}).Error)
+			for _, id := range []string{"enrolled", "ledger", "evidence", "legacy"} {
+				source := "source-other"
+				if id == "enrolled" {
+					source = "source-td"
+				}
+				require.NoError(t, db.Exec("INSERT INTO sync_logs(id,data_source_id,status,started_at,error_message) VALUES (?,?,?,?,?)", id, source, "running", stale, "original").Error)
+			}
+			require.NoError(t, db.Create(&types.ProcessingJob{ID: "job", OriginRunID: "ledger"}).Error)
+			require.NoError(t, db.Create(&types.ProcessingLegacyEvidence{ID: "proof", ProcessingLegacyIdentity: types.ProcessingLegacyIdentity{RunID: "evidence", ErrorOrdinal: 1}, Action: "manual_confirmed"}).Error)
+			require.NoError(t, db.Exec("INSERT INTO knowledges(id,parse_status,summary_status,metadata) VALUES ('owned','processing','processing',?)", `{"processing_protocol":"2"}`).Error)
+			resetPendingTasks(db)
+			var logs []types.SyncLog
+			require.NoError(t, db.Find(&logs).Error)
+			for _, row := range logs {
+				protected := row.ID == "ledger" || row.ID == "evidence" || (row.ID == "enrolled" && setting.sources != "")
+				if protected {
+					require.Equal(t, "running", row.Status, row.ID)
+					require.Nil(t, row.FinishedAt, row.ID)
+					require.Equal(t, "original", row.ErrorMessage, row.ID)
+				} else {
+					require.Equal(t, "failed", row.Status, row.ID)
+				}
+			}
+			var owned types.Knowledge
+			require.NoError(t, db.First(&owned, "id = ?", "owned").Error)
+			require.Equal(t, "processing", owned.ParseStatus)
+			require.Equal(t, "processing", owned.SummaryStatus)
+		})
+	}
 }
 
 func TestResetPendingTasks_KnowledgeFindThenUpdate(t *testing.T) {

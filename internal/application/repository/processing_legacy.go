@@ -5,12 +5,47 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // LegacyKnowledge excludes rows whose state is owned by the leased ledger.
 // Apply this to the UPDATE as well as discovery queries: a callback is not a lease.
 func LegacyKnowledge(db *gorm.DB) *gorm.DB {
 	return db.Where("COALESCE(CAST(metadata->>'processing_protocol' AS TEXT), '') <> '2'")
+}
+
+// Ledger runs and original records supporting recovery evidence are audit
+// roots. Legacy reset, cancellation and expiry must not rewrite or remove them.
+func LegacySyncLog(db *gorm.DB) *gorm.DB {
+	return db.Where("NOT EXISTS (SELECT 1 FROM processing_jobs WHERE origin_run_id = sync_logs.id)").
+		Where("NOT EXISTS (SELECT 1 FROM processing_legacy_evidence WHERE run_id = sync_logs.id)")
+}
+
+// Ownership and legacy-evidence admission take the same source lock. Check
+// the write predicate in a new statement after that lock, not a stale snapshot.
+func lockLegacySyncSource(tx *gorm.DB, runID string) error {
+	var run types.SyncLog
+	err := tx.Select("data_source_id", "tenant_id").Where("id = ?", runID).Take(&run).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if run.DataSourceID == "" {
+		return nil
+	}
+	q := tx.Unscoped().Select("id").Where("id = ? AND tenant_id = ?", run.DataSourceID, run.TenantID)
+	if tx.Dialector.Name() == "postgres" {
+		q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	var source types.DataSource
+	err = q.Take(&source).Error
+	// No new owner can be admitted without the original source row.
+	if err == gorm.ErrRecordNotFound {
+		return nil
+	}
+	return err
 }
 
 func (r *knowledgeRepository) HasProcessingKnowledge(ctx context.Context, tenant uint64, kb string) (bool, error) {

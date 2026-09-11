@@ -252,16 +252,31 @@ func (r *SyncLogRepository) FindLatest(ctx context.Context, dsID string) (*types
 	return &log, nil
 }
 
-// HasRunningSync checks if a data source has any sync currently in "running" status.
+// HasRunningSync distinguishes execution from immutable historical status.
 func (r *SyncLogRepository) HasRunningSync(ctx context.Context, dsID string) (bool, error) {
 	if dsID == "" {
 		return false, errors.New("data source id is empty")
 	}
 	var count int64
+	active := []string{types.ProcessingEnqueuePending, types.ProcessingQueued, types.ProcessingRunning, types.ProcessingWaitingExternal, types.ProcessingRetryWait}
+	if err := r.db.WithContext(ctx).Model(&types.ProcessingJob{}).
+		Where("datasource_id = ? AND retirement_state <> ?", dsID, "deleted").
+		Where(`status = ? OR status IN ? OR EXISTS (SELECT 1 FROM processing_steps s WHERE s.job_id=processing_jobs.id AND s.phase<>? AND s.status IN ?)`, types.ProcessingPlanned, active, types.ProcessingPhaseRetire, active).Count(&count).Error; err != nil {
+		return false, err
+	}
+	if count > 0 {
+		return true, nil
+	}
 	if err := r.db.WithContext(ctx).
 		Model(&types.SyncLog{}).
 		Where("data_source_id = ?", dsID).
 		Where("status = ?", types.SyncLogStatusRunning).
+		Where("NOT EXISTS (SELECT 1 FROM processing_jobs WHERE origin_run_id = sync_logs.id)").
+		// A validated, immutable drain is evidence that the old workers and
+		// deliveries ended. Its admission expiry does not restart those workers.
+		// Later pending dispatches still block until they acquire a ledger job.
+		Where(`NOT EXISTS (SELECT 1 FROM processing_legacy_drains d
+		 WHERE d.tenant_id=sync_logs.tenant_id AND d.datasource_id=sync_logs.data_source_id AND d.checked_at>=sync_logs.started_at)`).
 		Count(&count).Error; err != nil {
 		return false, err
 	}
@@ -276,13 +291,12 @@ func (r *SyncLogRepository) Update(ctx context.Context, log *types.SyncLog) erro
 	if log.ID == "" {
 		return errors.New("sync log id is empty")
 	}
-	if err := r.db.WithContext(ctx).
-		Model(log).
-		Where("NOT EXISTS (?)", r.db.Model(&types.ProcessingJob{}).Select("1").Where("origin_run_id = ?", log.ID)).
-		Updates(log).Error; err != nil {
-		return err
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockLegacySyncSource(tx, log.ID); err != nil {
+			return err
+		}
+		return tx.Model(log).Scopes(LegacySyncLog).Updates(log).Error
+	})
 }
 
 // UpdateResult updates only fields produced by sync execution. Use an explicit
@@ -294,26 +308,28 @@ func (r *SyncLogRepository) UpdateResult(ctx context.Context, log *types.SyncLog
 	if log.ID == "" {
 		return errors.New("sync log id is empty")
 	}
-	if err := r.db.WithContext(ctx).
-		Model(&types.SyncLog{}).
-		Where("id = ?", log.ID).
-		Where("NOT EXISTS (?)", r.db.Model(&types.ProcessingJob{}).Select("1").Where("origin_run_id = ?", log.ID)).
-		Updates(map[string]interface{}{
-			"status":        log.Status,
-			"finished_at":   log.FinishedAt,
-			"items_total":   log.ItemsTotal,
-			"items_created": log.ItemsCreated,
-			"items_updated": log.ItemsUpdated,
-			"items_deleted": log.ItemsDeleted,
-			"items_skipped": log.ItemsSkipped,
-			"items_failed":  log.ItemsFailed,
-			"error_message": log.ErrorMessage,
-			"result":        log.Result,
-			"updated_at":    time.Now().UTC(),
-		}).Error; err != nil {
-		return err
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockLegacySyncSource(tx, log.ID); err != nil {
+			return err
+		}
+		return tx.
+			Model(&types.SyncLog{}).
+			Where("id = ?", log.ID).
+			Scopes(LegacySyncLog).
+			Updates(map[string]interface{}{
+				"status":        log.Status,
+				"finished_at":   log.FinishedAt,
+				"items_total":   log.ItemsTotal,
+				"items_created": log.ItemsCreated,
+				"items_updated": log.ItemsUpdated,
+				"items_deleted": log.ItemsDeleted,
+				"items_skipped": log.ItemsSkipped,
+				"items_failed":  log.ItemsFailed,
+				"error_message": log.ErrorMessage,
+				"result":        log.Result,
+				"updated_at":    time.Now().UTC(),
+			}).Error
+	})
 }
 
 // CancelPendingByDataSource marks all non-terminal sync logs for a data source as canceled.
@@ -326,7 +342,7 @@ func (r *SyncLogRepository) CancelPendingByDataSource(ctx context.Context, dsID 
 		Model(&types.SyncLog{}).
 		Where("data_source_id = ?", dsID).
 		Where("status IN ?", []string{types.SyncLogStatusRunning, "pending"}).
-		Where("NOT EXISTS (?)", r.db.Model(&types.ProcessingJob{}).Select("1").Where("origin_run_id = sync_logs.id")).
+		Scopes(LegacySyncLog).
 		Updates(map[string]interface{}{
 			"status":        types.SyncLogStatusCanceled,
 			"finished_at":   &now,
@@ -349,7 +365,9 @@ func (r *SyncLogRepository) CleanupOldLogs(ctx context.Context, retentionDays in
 	// Referenced lifecycle runs are audit roots. Unresolved legacy failures and
 	// unfinished runs have no automatic expiry; only safe terminal logs qualify.
 	return r.db.WithContext(ctx).Where("finished_at < ? AND status IN ?", now.AddDate(0, 0, -retentionDays), []string{types.SyncLogStatusSuccess, types.SyncLogStatusCanceled}).
-		Where("NOT EXISTS (?)", r.db.Model(&types.ProcessingJob{}).Select("1").Where("origin_run_id = sync_logs.id")).
+		Where("COALESCE(items_failed,0) = 0 AND COALESCE(error_message,'') = ''").
+		Where("result IS NULL OR result->'errors' IS NULL OR result->'errors' = ?", "[]").
+		Scopes(LegacySyncLog).
 		Where("NOT EXISTS (?)", r.db.Model(&types.SyncRunItem{}).Select("1").Where("run_id = sync_logs.id")).
 		Where("NOT EXISTS (?)", r.db.Model(&types.ProcessingEvent{}).Select("1").Where("run_id = sync_logs.id")).Delete(&types.SyncLog{}).Error
 }

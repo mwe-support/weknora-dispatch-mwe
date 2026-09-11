@@ -26,6 +26,17 @@ func (r *ProcessingRepository) BeginScan(ctx context.Context, input types.Proces
 		if err != nil {
 			return err
 		}
+		if !job.PlanSealed {
+			// EnsureJob holds the source lock. Re-read after it so an older
+			// writer cannot slip a historical result into a fresh scan admission.
+			if err := tx.Where("id = ?", run.ID).Take(&run).Error; err != nil {
+				return err
+			}
+			var previous map[string]json.RawMessage
+			if (len(run.Result) > 0 && json.Unmarshal(run.Result, &previous) != nil) || len(previous) > 0 || run.FinishedAt != nil || run.Status != types.SyncLogStatusRunning || run.ItemsTotal != 0 || run.ItemsCreated != 0 || run.ItemsUpdated != 0 || run.ItemsDeleted != 0 || run.ItemsSkipped != 0 || run.ItemsFailed != 0 {
+				return ErrProcessingConflict
+			}
+		}
 		if !job.IsCurrent || job.RetirementState != "retained" {
 			return nil
 		}

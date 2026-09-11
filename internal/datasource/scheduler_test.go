@@ -78,8 +78,9 @@ func (r *fakeDataSourceRepo) FindActive(_ context.Context) ([]*types.DataSource,
 
 // fakeSyncLogRepo is an in-memory SyncLogRepository.
 type fakeSyncLogRepo struct {
-	mu   sync.Mutex
-	logs map[string]*types.SyncLog
+	mu         sync.Mutex
+	logs       map[string]*types.SyncLog
+	runningErr error
 }
 
 func newFakeSyncLogRepo() *fakeSyncLogRepo {
@@ -136,6 +137,9 @@ func (r *fakeSyncLogRepo) CleanupOldLogs(_ context.Context, retentionDays int) e
 func (r *fakeSyncLogRepo) HasRunningSync(_ context.Context, dsID string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.runningErr != nil {
+		return false, r.runningErr
+	}
 	for _, log := range r.logs {
 		if log.DataSourceID == dsID && log.Status == types.SyncLogStatusRunning {
 			return true, nil
@@ -220,6 +224,18 @@ func TestScheduler_CronFires(t *testing.T) {
 	}
 	if queue, _ := enqueuer.lastQueue.Load().(string); queue != types.QueueSync {
 		t.Errorf("scheduled sync queue = %q, want %q", queue, types.QueueSync)
+	}
+}
+
+func TestScheduler_DoesNotDispatchWhenActivityCannotBeVerified(t *testing.T) {
+	repo := newFakeDataSourceRepo()
+	_ = repo.Create(context.Background(), &types.DataSource{ID: "query-failure", TenantID: 1, Status: types.DataSourceStatusActive})
+	logs := newFakeSyncLogRepo()
+	logs.runningErr = context.DeadlineExceeded
+	queue := &fakeTaskEnqueuer{}
+	NewScheduler(repo, logs, queue).triggerSync("query-failure", 1)
+	if queue.count.Load() != 0 || len(logs.logs) != 0 {
+		t.Fatal("activity-query failure must not create a run or delivery")
 	}
 }
 

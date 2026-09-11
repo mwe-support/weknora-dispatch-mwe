@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"gorm.io/gorm"
@@ -137,7 +138,7 @@ func resetPendingTasks(db *gorm.DB) {
 }
 
 func stuckKnowledgeParseQuery(db *gorm.DB) *gorm.DB {
-	q := db.Model(&types.Knowledge{}).
+	q := db.Model(&types.Knowledge{}).Scopes(repository.LegacyKnowledge).
 		Where("parse_status IN ?", resettableParseStatuses()).
 		// Wiki ingest ops are persisted independently from the task trigger.
 		// When wiki owns the only outstanding slot, keeping this finalizing row
@@ -155,13 +156,29 @@ func stuckKnowledgeParseQuery(db *gorm.DB) *gorm.DB {
 }
 
 func stuckKnowledgeSummaryQuery(db *gorm.DB) *gorm.DB {
-	return db.Model(&types.Knowledge{}).
+	return db.Model(&types.Knowledge{}).Scopes(repository.LegacyKnowledge).
 		Where("summary_status IN ?", []string{types.SummaryStatusPending, types.SummaryStatusProcessing})
 }
 
 func stuckSyncLogQuery(db *gorm.DB, distributed bool, staleCutoff time.Time) *gorm.DB {
-	q := db.Model(&types.SyncLog{}).
+	q := db.Model(&types.SyncLog{}).Scopes(repository.LegacySyncLog).
 		Where("status = ?", types.SyncLogStatusRunning)
+	// A newly enrolled source may still have historical running records with
+	// no v2 job. Restarting a replica proves nothing about those old attempts.
+	var sources []types.DataSource
+	if err := db.Unscoped().Select("id", "type").Where("type = ?", types.ConnectorTypeTencentDocs).Find(&sources).Error; err != nil {
+		q.AddError(err)
+		return q
+	}
+	var enrolled []string
+	for i := range sources {
+		if service.ProcessingLifecycleEnabled(&sources[i]) {
+			enrolled = append(enrolled, sources[i].ID)
+		}
+	}
+	if len(enrolled) > 0 {
+		q = q.Where("data_source_id NOT IN ?", enrolled)
+	}
 	if distributed {
 		q = q.Where("started_at < ?", staleCutoff)
 	}

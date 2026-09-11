@@ -147,7 +147,12 @@ func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64) {
 	}
 
 	// Layer 1: prevent overlap with a still-running sync
-	if running, _ := s.syncLogRepo.HasRunningSync(ctx, dataSourceID); running {
+	running, err := s.syncLogRepo.HasRunningSync(ctx, dataSourceID)
+	if err != nil {
+		logger.Warnf(ctx, "[Scheduler] could not verify active sync for ds=%s: %v", dataSourceID, err)
+		return
+	}
+	if running {
 		logger.Infof(ctx, "[Scheduler] skipping sync for ds=%s (previous sync still running)", dataSourceID)
 		return
 	}

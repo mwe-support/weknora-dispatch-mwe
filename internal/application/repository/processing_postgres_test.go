@@ -162,5 +162,6 @@ func TestProcessingPostgresConcurrentGenerationClaimAndAtomicFailure(t *testing.
 	checkProcessingLegacyEvidence(t, r)
 	checkProcessingLegacyRetry(t, r)
 	checkProcessingLegacyHistory(t, r)
+	checkProcessingLegacyScheduling(t, r)
 	checkProcessingTenantParser(t, r)
 }
