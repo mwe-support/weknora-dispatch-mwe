@@ -40,11 +40,12 @@ func vlmHTTPTimeout() time.Duration {
 
 // RemoteAPIVLM implements VLM via an OpenAI-compatible chat completions API.
 type RemoteAPIVLM struct {
-	modelName   string
-	modelID     string
-	client      *openai.Client
-	baseURL     string
-	temperature float32
+	modelName               string
+	modelID                 string
+	client                  *openai.Client
+	baseURL                 string
+	temperature             float32
+	disableTemplateThinking bool
 }
 
 // NewRemoteAPIVLM creates a remote-API backed VLM instance.
@@ -98,12 +99,19 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 	}
 
 	return &RemoteAPIVLM{
-		modelName:   config.ModelName,
-		modelID:     config.ModelID,
-		client:      openai.NewClientWithConfig(apiCfg),
-		baseURL:     config.BaseURL,
-		temperature: temp,
+		modelName:               config.ModelName,
+		modelID:                 config.ModelID,
+		client:                  openai.NewClientWithConfig(apiCfg),
+		baseURL:                 config.BaseURL,
+		temperature:             temp,
+		disableTemplateThinking: vlmTemplateThinking(providerName, config.Extra),
 	}, nil
+}
+
+func vlmTemplateThinking(name provider.ProviderName, extra map[string]any) bool {
+	control, _ := extra["thinking_control"].(string)
+	control = strings.ToLower(strings.TrimSpace(control))
+	return control == "chat_template_kwargs" || (control == "" && name == provider.ProviderGeneric)
 }
 
 // Predict sends an image with a text prompt to the OpenAI-compatible API.
@@ -143,6 +151,9 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 		MaxTokens:   defaultMaxToks,
 		Temperature: v.temperature,
 	}
+	if v.disableTemplateThinking {
+		req.ChatTemplateKwargs = map[string]interface{}{"enable_thinking": false}
+	}
 
 	totalImageSize := 0
 	for _, img := range imgBytesList {
@@ -160,7 +171,7 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 	}
 
 	content := resp.Choices[0].Message.Content
-	logger.Infof(ctx, "[VLM] OpenAI response received, len=%d", len(content))
+	logger.Infof(ctx, "[VLM] OpenAI response received, len=%d, finish_reason=%s, completion_tokens=%d", len(content), resp.Choices[0].FinishReason, resp.Usage.CompletionTokens)
 	return content, nil
 }
 

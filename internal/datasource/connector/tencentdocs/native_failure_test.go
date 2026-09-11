@@ -31,3 +31,18 @@ func TestNativeFailureKeepsWaitRetryAndUnknownExportDistinct(t *testing.T) {
 	require.Equal(t, "SOURCE_CHANGED_DURING_READ", changed.ErrorCode)
 	require.False(t, changed.Retryable)
 }
+
+func TestNativeFailureRetriesOnlyEmptyModelOutputInModelStages(t *testing.T) {
+	for _, stage := range []string{"summary", "image_ocr", "image_caption", "question"} {
+		outcome := ProcessingFailure(stage, errors.New("MODEL_OUTPUT_EMPTY"))
+		require.Equal(t, types.ProcessingFailed, outcome.Status)
+		require.Equal(t, "MODEL_OUTPUT_EMPTY", outcome.ErrorCode)
+		require.True(t, outcome.Retryable)
+	}
+	for _, stage := range []string{"parse", "export_start", "scan_document"} {
+		require.False(t, ProcessingFailure(stage, errors.New("MODEL_OUTPUT_EMPTY")).Retryable)
+	}
+	for _, code := range []string{"DOCX_TEXT_COVERAGE_INCOMPLETE", "IMAGE_MODEL_OUTPUT_INVALID", "SOURCE_CHANGED_DURING_READ"} {
+		require.False(t, ProcessingFailure("image_ocr", errors.New(code)).Retryable)
+	}
+}

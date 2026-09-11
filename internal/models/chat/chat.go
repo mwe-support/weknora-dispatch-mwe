@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/provider"
@@ -123,6 +124,16 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *ChatConfig {
 	if m == nil {
 		return nil
 	}
+	extra := m.Parameters.ExtraConfig
+	// Older installations predate this built-in model's wire configuration.
+	// Repair only the runtime mapping; persisted job configuration stays stable.
+	if m.IsBuiltin && m.ID == "builtin-local-qwythos-q4-mm" && strings.TrimSpace(extra[ExtraConfigThinkingControl]) == "" {
+		extra = maps.Clone(extra)
+		if extra == nil {
+			extra = make(map[string]string)
+		}
+		extra[ExtraConfigThinkingControl] = "chat_template_kwargs"
+	}
 	return &ChatConfig{
 		ModelID:        m.ID,
 		APIKey:         m.Parameters.APIKey,
@@ -131,7 +142,7 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *ChatConfig {
 		Source:         m.Source,
 		Provider:       m.Parameters.Provider,
 		MaxConcurrency: m.Parameters.MaxConcurrency,
-		ExtraConfig:    m.Parameters.ExtraConfig,
+		ExtraConfig:    extra,
 		CustomHeaders:  m.Parameters.CustomHeaders,
 		AppID:          appID,
 		AppSecret:      appSecret,

@@ -491,6 +491,9 @@ func (e *processingDocumentExecution) summarize(ctx context.Context) (types.Proc
 			return types.ProcessingOutcome{}, err
 		}
 		summary, err = e.s.getSummary(ctx, model, knowledge, chunks)
+		if errors.Is(err, errEmptySummaryOutput) {
+			return types.ProcessingOutcome{}, errors.New("MODEL_OUTPUT_EMPTY")
+		}
 		if err != nil {
 			return types.ProcessingOutcome{}, err
 		}

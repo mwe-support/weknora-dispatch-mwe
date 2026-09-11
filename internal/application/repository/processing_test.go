@@ -90,6 +90,69 @@ func TestProcessingPlanDeliveryLeaseAndDependencyCommit(t *testing.T) {
 	require.Equal(t, 1, succeeded)
 }
 
+func TestProcessingExhaustedRetryDoesNotBlockIndependentWork(t *testing.T) {
+	r := processingTestStore(t)
+	ctx := context.Background()
+	job, err := r.EnsureJob(ctx, types.ProcessingJob{Kind: types.ProcessingJobDocument, TenantID: 1, KnowledgeBaseID: "kb", DataSourceID: "source", ExternalID: "retry-bad", SourceRevision: "v1", PipelineFingerprint: "p1"})
+	require.NoError(t, err)
+	require.NoError(t, r.PlanSteps(ctx, 1, job.ID, []types.ProcessingStepSpec{
+		{Stage: "image_ocr", UnitKey: "bad", Phase: types.ProcessingPhasePrepare, InputFingerprint: "bad", RequiredForReady: true},
+		{Stage: "parse", UnitKey: "dependent", Phase: types.ProcessingPhasePrepare, InputFingerprint: "dependent", DependsOn: []string{"image_ocr/bad"}, RequiredForReady: true},
+		{Stage: "image_caption", UnitKey: "independent", Phase: types.ProcessingPhasePrepare, InputFingerprint: "independent"},
+	}))
+	steps, err := r.ListSteps(ctx, 1, job.ID)
+	require.NoError(t, err)
+	var bad, independent types.ProcessingStep
+	for _, step := range steps {
+		if step.UnitKey == "bad" {
+			bad = step
+		}
+		if step.UnitKey == "independent" {
+			independent = step
+		}
+	}
+	require.NoError(t, r.db.Model(&bad).Update("max_retries", 1).Error)
+	lease, err := r.ClaimStep(ctx, 1, processingStepRef(job, &bad), time.Minute)
+	require.NoError(t, err)
+	failure := types.ProcessingOutcome{Status: types.ProcessingFailed, ErrorClass: "model", ErrorCode: "MODEL_OUTPUT_EMPTY", Retryable: true}
+	require.NoError(t, r.FinishStep(ctx, 1, *lease, failure))
+	current, err := r.GetStep(ctx, 1, job.ID, bad.ID)
+	require.NoError(t, err)
+	require.Equal(t, types.ProcessingRetryWait, current.Status)
+	require.Equal(t, 1, current.RetryCount)
+	require.NotNil(t, current.NextRunAt)
+	require.NoError(t, r.db.Model(current).Update("next_run_at", time.Now().Add(-time.Minute)).Error)
+	require.NoError(t, r.ReconcileJob(ctx, 1, job.ID))
+	current, err = r.GetStep(ctx, 1, job.ID, bad.ID)
+	require.NoError(t, err)
+	lease, err = r.ClaimStep(ctx, 1, processingStepRef(job, current), time.Minute)
+	require.NoError(t, err)
+	require.NoError(t, r.FinishStep(ctx, 1, *lease, failure))
+	current, err = r.GetStep(ctx, 1, job.ID, bad.ID)
+	require.NoError(t, err)
+	require.Equal(t, types.ProcessingFailed, current.Status)
+	require.Equal(t, 1, current.RetryCount)
+	// This was queued before the failure and must still claim and commit.
+	lease, err = r.ClaimStep(ctx, 1, processingStepRef(job, &independent), time.Minute)
+	require.NoError(t, err)
+	require.NoError(t, r.FinishStep(ctx, 1, *lease, types.ProcessingOutcome{Status: types.ProcessingSucceeded, OutputManifestRef: "verified/independent", OutputDigest: "digest"}))
+	steps, err = r.ListSteps(ctx, 1, job.ID)
+	require.NoError(t, err)
+	for _, step := range steps {
+		if step.UnitKey == "dependent" {
+			require.Equal(t, types.ProcessingPlanned, step.Status)
+		}
+	}
+	other, err := r.EnsureJob(ctx, types.ProcessingJob{Kind: types.ProcessingJobDocument, TenantID: 1, KnowledgeBaseID: "kb", DataSourceID: "source", ExternalID: "retry-good", SourceRevision: "v1", PipelineFingerprint: "p1"})
+	require.NoError(t, err)
+	require.NoError(t, r.PlanSteps(ctx, 1, other.ID, []types.ProcessingStepSpec{{Stage: "parse", UnitKey: "body", Phase: types.ProcessingPhasePrepare, InputFingerprint: "good"}}))
+	steps, err = r.ListSteps(ctx, 1, other.ID)
+	require.NoError(t, err)
+	lease, err = r.ClaimStep(ctx, 1, processingStepRef(other, &steps[0]), time.Minute)
+	require.NoError(t, err)
+	require.NoError(t, r.FinishStep(ctx, 1, *lease, types.ProcessingOutcome{Status: types.ProcessingSucceeded, OutputManifestRef: "verified/other", OutputDigest: "digest", Completeness: "complete"}))
+}
+
 func TestProcessingJobReusesGenerationAndPreservesOldHistory(t *testing.T) {
 	r := processingTestStore(t)
 	ctx := context.Background()

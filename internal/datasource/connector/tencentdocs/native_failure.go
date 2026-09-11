@@ -81,6 +81,10 @@ func ProcessingFailure(stage string, err error) types.ProcessingOutcome {
 		code := strings.SplitN(err.Error(), ":", 2)[0]
 		if len(code) > 0 && len(code) <= 64 && strings.Contains(code, "_") && strings.IndexFunc(code, func(r rune) bool { return (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' }) < 0 {
 			outcome.ErrorClass, outcome.ErrorCode = "completeness", code
+			if code == "MODEL_OUTPUT_EMPTY" && (stage == "summary" || stage == "image_ocr" || stage == "image_caption" || stage == "question") {
+				outcome.Status, outcome.ErrorClass, outcome.Retryable = types.ProcessingFailed, "model", true
+				outcome.Message = "The model returned no usable text"
+			}
 			if code == "NATIVE_SIZE_EXCEEDED" {
 				outcome.ErrorClass = "size"
 			}

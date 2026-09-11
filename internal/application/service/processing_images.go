@@ -58,7 +58,10 @@ func (e *processingDocumentExecution) imageText(ctx context.Context) (types.Proc
 		return types.ProcessingOutcome{}, err
 	}
 	text = strings.TrimSpace(text)
-	if text == "" || len(text) > 16<<20 {
+	if text == "" {
+		return types.ProcessingOutcome{}, errors.New("MODEL_OUTPUT_EMPTY")
+	}
+	if len(text) > 16<<20 {
 		return types.ProcessingOutcome{}, errors.New("IMAGE_MODEL_OUTPUT_INVALID")
 	}
 	empty := false

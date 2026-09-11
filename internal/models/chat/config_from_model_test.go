@@ -57,3 +57,22 @@ func TestConfigFromModel_Nil(t *testing.T) {
 		t.Fatalf("expected nil for nil model, got %+v", got)
 	}
 }
+
+func TestBuiltinThinkingCompatibilityPreservesStoredConfiguration(t *testing.T) {
+	m := &types.Model{ID: "builtin-local-qwythos-q4-mm", IsBuiltin: true, Parameters: types.ModelParameters{Provider: "openai", ExtraConfig: map[string]string{"other": "kept"}}}
+	if cfg := ConfigFromModel(m, "", ""); EffectiveThinkingControl(cfg) != "chat_template_kwargs" || cfg.ExtraConfig["other"] != "kept" {
+		t.Fatal("legacy built-in does not send the configured thinking choice")
+	}
+	if _, ok := m.Parameters.ExtraConfig[ExtraConfigThinkingControl]; ok {
+		t.Fatal("persisted model parameters mutated")
+	}
+	m.Parameters.ExtraConfig[ExtraConfigThinkingControl] = "none"
+	if EffectiveThinkingControl(ConfigFromModel(m, "", "")) != "none" {
+		t.Fatal("explicit override lost")
+	}
+	delete(m.Parameters.ExtraConfig, ExtraConfigThinkingControl)
+	m.IsBuiltin = false
+	if EffectiveThinkingControl(ConfigFromModel(m, "", "")) != "none" {
+		t.Fatal("custom model affected")
+	}
+}
