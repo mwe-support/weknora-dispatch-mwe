@@ -1,9 +1,9 @@
 {
   "uid": "mwe-processing-lifecycle-v2",
-  "title": "WeKnora · 文档处理生命周期",
-  "description": "六类视图与应用历史页使用同一组数据库投影。仅时间线使用右上角日期范围；未解决异常保留所有时间。数据库账户仅能读取安全视图。",
+  "title": "WeKnora · 文档处理与失败复查",
+  "description": "默认只看新流程。先查看失败文件，再看处理进度和批次；技术明细默认折叠。历史记录可切换范围复查。仅事件时间线使用右上角日期范围，未解决异常不按时间隐藏。",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": false,
   "refresh": "",
   "timezone": "browser",
@@ -18,16 +18,16 @@
   ],
   "panels": [
     {
-      "id": 1,
+      "id": 4,
       "type": "table",
-      "title": "当前同步批次",
+      "title": "失败文档复查",
       "gridPos": {
-        "h": 13,
+        "h": 14,
         "w": 24,
         "x": 0,
         "y": 0
       },
-      "description": "只读生命周期事实视图。每个表格一次读取完整结果；在浏览器内翻页不会重新查询。默认关闭自动刷新；手动刷新生成新快照。超过10000条明确提示缩小筛选。工作空间变量用于过滤，不构成访问权限；仅管理员可访问此数据源。操作入口：WeKnora 设置 → 处理生命周期。旧流程数据标记 legacy_unverified。",
+      "description": "按文档定位和复查。失败表按同一文档、阶段和错误合并，详情保留所有事件 ID，完整事件仍在时间线。腾讯路径使用当时源端扫描的选定范围，不采用 WeKnora 后来移动的目录；原文链接仅使用已记录的腾讯地址。大小以1024换算，标注“响应”时是原生接口返回量，不是文件大小；未知不使用配额、上限或旧版本替代。每表完整快照，在浏览器分页；超过10000条要求缩小筛选。旧记录通过“记录范围”单独查看，不改写其当时结果。",
       "datasource": {
         "type": "postgres",
         "uid": "weknora-postgres"
@@ -38,7 +38,7 @@
           "format": "table",
           "rawQuery": true,
           "editorMode": "code",
-          "rawSql": "-- All pages use this one result set. Above the bound, return an explicit\n-- lower-bound notice, never a truncated list with a fabricated complete count.\nWITH candidates AS MATERIALIZED (\n SELECT * FROM mwe_processing_current_run_progress WHERE (${workspace:sqlstring}='' OR tenant_id::text=${workspace:sqlstring}) AND (${knowledge_base:sqlstring}='' OR knowledge_base_id::text=${knowledge_base:sqlstring}) AND (${source:sqlstring}='' OR datasource_id::text=${source:sqlstring}) AND (${run:sqlstring}='' OR run_id::text=${run:sqlstring}) AND (${status:sqlstring}='' OR status::text=${status:sqlstring}) AND (${stage:sqlstring}='' OR stage::text=${stage:sqlstring}) AND (${search:sqlstring}='' OR position(lower(${search:sqlstring}) in lower(title||' '||external_id||' '||job_id))>0)\n ORDER BY observed_at DESC,row_id DESC LIMIT 10001\n), gate AS (SELECT COUNT(*) AS n FROM candidates)\nSELECT '完整快照：'||gate.n::text||'条' AS \"查询状态\", c.title AS \"文档或批次\",\n c.tenant_id::text AS \"工作空间ID\", c.kb_name AS \"知识库\", c.source_name AS \"数据源\",\n c.generation::text AS \"文档版本\", c.status AS \"状态\", c.stage AS \"阶段\", c.observed_at::text AS \"记录时间\",\n jsonb_build_object('job_id',job_id, 'knowledge_base_id',knowledge_base_id, 'datasource_id',datasource_id, 'source_revision',source_revision, 'revision',revision, 'publication_epoch',publication_epoch, 'documents',documents, 'documents_succeeded',documents_succeeded, 'documents_failed',documents_failed, 'documents_blocked',documents_blocked, 'documents_active',documents_active, 'documents_unadmitted',documents_unadmitted, 'containers',containers, 'external_links',external_links, 'original_finished_status',original_finished_status, 'original_finished_at',original_finished_at, 'run_id',run_id, 'original_error_ordinal',original_error_ordinal, 'original_error_digest',original_error_digest, 'linked_job_id',linked_job_id, 'legacy_action',legacy_action, 'legacy_actor',legacy_actor, 'legacy_evidence_at',legacy_evidence_at, 'legacy_dead_letter_id',legacy_dead_letter_id, 'legacy_run_status',legacy_run_status)::text AS \"详情\"\nFROM candidates c CROSS JOIN gate WHERE gate.n<=10000\nUNION ALL\nSELECT '至少10001条，请缩小筛选范围','','','','','','','','','' FROM gate WHERE gate.n>10000;\n",
+          "rawSql": "-- All pages use this one result set. Above the bound, return an explicit\n-- lower-bound notice, never a truncated list with a fabricated complete count.\nWITH matching AS (\n SELECT c.*,\n COALESCE(NULLIF(sc.document_title,''),NULLIF(jc.document_title,''),NULLIF(c.title,''),NULLIF(c.source_name,''),'未记录文档名称') AS display_title,\n COALESCE(sc.source_path,jc.source_path,lc.source_path,k.metadata->>'source_path') AS display_source_path,\n COALESCE(sc.file_id,jc.file_id,k.metadata->>'file_id') AS display_file_id,\n COALESCE(sc.source_url,jc.source_url) AS display_source_url,\n COALESCE(jc.source_type,ds.type) AS display_source_type,\n COALESCE(jc.workspace_name,t.name,c.tenant_id::text) AS display_workspace,\n COALESCE(jc.file_bytes,CASE WHEN sc.step_attempt=c.step_attempt AND sc.stage='download' THEN sc.actual_bytes END,lc.actual_bytes,CASE WHEN k.file_size>0 THEN k.file_size END) AS display_file_bytes,\n COALESCE(jc.size_basis,CASE WHEN sc.step_attempt=c.step_attempt AND sc.stage='download' AND sc.actual_bytes IS NOT NULL THEN '本次下载失败记录' END,CASE WHEN lc.actual_bytes IS NOT NULL THEN '原始失败记录' END,CASE WHEN k.file_size>0 THEN '旧知识文件记录' END,CASE WHEN c.native_raw_bytes IS NOT NULL THEN '原生接口响应；不是导入文件大小' ELSE '未记录；不使用配额、上限或旧版本大小替代' END) AS display_size_basis,\n COALESCE(CASE WHEN sc.step_attempt=c.step_attempt THEN sc.limit_bytes END,lc.limit_bytes) AS display_limit_bytes,\n COALESCE(CASE WHEN sc.step_attempt=c.step_attempt THEN sc.observed_at_least_bytes END,lc.observed_at_least_bytes) AS display_lower_bytes,\n COALESCE(NULLIF(c.error_code,''),sc.error_code,'') AS display_error_code,count(*) OVER (PARTITION BY c.tenant_id,c.knowledge_base_id,c.datasource_id,CASE WHEN c.kind='scan' THEN COALESCE(NULLIF(sc.file_id,''),NULLIF(c.step_id,''),c.row_id) ELSE COALESCE(NULLIF(c.job_id,''),c.row_id) END,c.stage,c.error_code) AS incident_count,jsonb_agg(c.event_id) OVER (PARTITION BY c.tenant_id,c.knowledge_base_id,c.datasource_id,CASE WHEN c.kind='scan' THEN COALESCE(NULLIF(sc.file_id,''),NULLIF(c.step_id,''),c.row_id) ELSE COALESCE(NULLIF(c.job_id,''),c.row_id) END,c.stage,c.error_code) AS incident_event_ids,row_number() OVER (PARTITION BY c.tenant_id,c.knowledge_base_id,c.datasource_id,CASE WHEN c.kind='scan' THEN COALESCE(NULLIF(sc.file_id,''),NULLIF(c.step_id,''),c.row_id) ELSE COALESCE(NULLIF(c.job_id,''),c.row_id) END,c.stage,c.error_code ORDER BY c.observed_at DESC,c.row_id DESC) AS incident_rank\n FROM mwe_processing_unresolved_incidents c\n LEFT JOIN processing_job_context jc ON jc.tenant_id=c.tenant_id AND jc.job_id=c.job_id\n LEFT JOIN processing_step_context sc ON sc.tenant_id=c.tenant_id AND sc.job_id=c.job_id AND sc.step_id=NULLIF(c.step_id,'')\n LEFT JOIN processing_legacy_context lc ON lc.tenant_id=c.tenant_id AND lc.datasource_id=c.datasource_id AND lc.run_id=c.run_id AND lc.error_ordinal=c.original_error_ordinal AND lc.error_digest=c.original_error_digest\n LEFT JOIN knowledges k ON COALESCE(c.job_id,'')='' AND c.original_error_ordinal IS NULL AND k.id=c.knowledge_id AND k.tenant_id=c.tenant_id AND k.knowledge_base_id=c.knowledge_base_id AND k.metadata->>'datasource_id'=c.datasource_id\n LEFT JOIN tenants t ON t.id=c.tenant_id\n LEFT JOIN data_sources ds ON ds.id=c.datasource_id AND ds.tenant_id=c.tenant_id AND ds.knowledge_base_id=c.knowledge_base_id\n WHERE (${workspace:sqlstring}='' OR c.tenant_id::text=${workspace:sqlstring}) AND (${knowledge_base:sqlstring}='' OR c.knowledge_base_id::text=${knowledge_base:sqlstring}) AND (${source:sqlstring}='' OR c.datasource_id::text=${source:sqlstring}) AND (${run:sqlstring}='' OR c.run_id::text=${run:sqlstring}) AND (${status:sqlstring} IN ('','all') OR c.status::text=${status:sqlstring}) AND (${stage:sqlstring}='' OR c.stage::text=${stage:sqlstring}) AND (${records:sqlstring}='all' OR (${records:sqlstring}='current' AND c.evidence_basis='verified_v2') OR (${records:sqlstring}='legacy' AND c.evidence_basis<>'verified_v2')) AND (${search:sqlstring}='' OR position(lower(${search:sqlstring}) in lower(concat_ws(' ',sc.document_title,c.title,c.external_id,c.job_id,sc.file_id,jc.file_id,sc.source_path,jc.source_path,lc.source_path,k.metadata->>'source_path')))>0)\n), candidates AS MATERIALIZED (\n SELECT * FROM matching WHERE incident_rank=1\n ORDER BY observed_at DESC,row_id DESC LIMIT 10001\n), gate AS (SELECT COUNT(*) AS n FROM candidates)\nSELECT display_title AS \"文档名称\",\n COALESCE(NULLIF(display_source_path,''),CASE WHEN display_source_type='tencent_docs' THEN '未记录' ELSE '不适用' END) AS \"腾讯文档路径\",\n CASE WHEN display_file_bytes IS NULL AND native_raw_bytes IS NOT NULL THEN CASE WHEN native_raw_bytes::text ~ '^[0-9]{1,18}$' THEN\n      CASE WHEN (native_raw_bytes::text)::numeric>=1073741824 THEN round((native_raw_bytes::text)::numeric/1073741824,2)::text||' GB'\n           WHEN (native_raw_bytes::text)::numeric>=1048576 THEN round((native_raw_bytes::text)::numeric/1048576,2)::text||' MB'\n           ELSE round((native_raw_bytes::text)::numeric/1024,2)::text||' KB' END ELSE '未记录' END||'（响应）' ELSE CASE WHEN display_file_bytes::text ~ '^[0-9]{1,18}$' THEN\n      CASE WHEN (display_file_bytes::text)::numeric>=1073741824 THEN round((display_file_bytes::text)::numeric/1073741824,2)::text||' GB'\n           WHEN (display_file_bytes::text)::numeric>=1048576 THEN round((display_file_bytes::text)::numeric/1048576,2)::text||' MB'\n           ELSE round((display_file_bytes::text)::numeric/1024,2)::text||' KB' END ELSE '未记录' END END AS \"文件 / 响应大小\",\n display_workspace||E'\\n'||kb_name AS \"工作空间 / 知识库\",\n CASE stage WHEN 'scan' THEN '扫描批次' WHEN 'legacy_scan' THEN '历史扫描' WHEN 'scan_page' THEN '扫描目录' WHEN 'scan_document' THEN '确认源文档' WHEN 'native_read' THEN '读取源内容' WHEN 'export_start' THEN '发起导出' WHEN 'export_poll' THEN '等待导出' WHEN 'download' THEN '下载文件' WHEN 'normalize' THEN '内容转换' WHEN 'parse' THEN '解析' WHEN 'assets' THEN '收集图片' WHEN 'images' THEN '图片处理' WHEN 'image_ocr' THEN '图片文字识别' WHEN 'image_caption' THEN '图片描述' WHEN 'chunk' THEN '文档分块' WHEN 'embedding' THEN '生成向量' WHEN 'text_index' THEN '正文索引' WHEN 'image_index' THEN '图片索引' WHEN 'summary' THEN '摘要' WHEN 'questions' THEN '生成问题' WHEN 'publish' THEN '发布版本' WHEN 'retire' THEN '清理版本' WHEN 'retire_previous' THEN '清理旧版本' WHEN 'legacy_snapshot' THEN '核验旧文件' WHEN 'legacy_indexes' THEN '核验旧索引' WHEN 'question' THEN '生成单条问题' WHEN 'question_index' THEN '问题索引' WHEN 'summary_index' THEN '摘要索引' WHEN 'index' THEN '索引写入' ELSE COALESCE(NULLIF(stage,''),'—') END AS \"处理阶段\",\n CASE status WHEN 'planned' THEN '待启动' WHEN 'enqueue_pending' THEN '待派发' WHEN 'queued' THEN '排队中' WHEN 'running' THEN '处理中' WHEN 'waiting_external' THEN '等待外部结果' WHEN 'retry_wait' THEN '等待重试' WHEN 'succeeded' THEN '已完成' WHEN 'success' THEN '历史成功' WHEN 'completed' THEN '历史完成' WHEN 'partial' THEN '历史部分成功' WHEN 'failed' THEN '失败' WHEN 'blocked' THEN '需处理' WHEN 'canceled' THEN '已取消' WHEN 'superseded' THEN '已替代' WHEN 'skipped' THEN '已跳过' WHEN 'legacy_unverified' THEN '历史待核实' ELSE COALESCE(NULLIF(status,''),'—') END AS \"状态\",\n CASE WHEN display_error_code LIKE 'TENCENT_%' THEN '腾讯接口错误：'||display_error_code ELSE CASE display_error_code WHEN 'IDENTITY_UNRESOLVED' THEN '未能确认腾讯文档身份或状态' WHEN 'AUTH_REQUIRED' THEN '来源凭据不可用或失效' WHEN 'SOURCE_SIZE_EXCEEDED' THEN '内容超出大小限制' WHEN 'FILE_SIZE_EXCEEDED' THEN '文件超出大小限制' WHEN 'NATIVE_SIZE_EXCEEDED' THEN '原生内容超出读取限制' WHEN 'NATIVE_CONTENT_UNSUPPORTED' THEN '文档含尚不支持完整读取的内容' WHEN 'SOURCE_CHANGED_DURING_READ' THEN '读取期间源内容发生变化' WHEN 'SOURCE_EMPTY' THEN '新源内容为空，旧版本继续保留' WHEN 'LEGACY_UNVERIFIED' THEN '历史失败尚未核实' WHEN 'STAGE_EXECUTION_ERROR' THEN '本阶段未产出有效结果' WHEN 'RETIREMENT_IO_FAILED' THEN '版本清理未完成' WHEN 'EXPORT_OUTCOME_UNKNOWN' THEN '导出结果不确定，需要核实' WHEN 'STORAGE_QUOTA_EXCEEDED' THEN '存储配额不足' WHEN 'PIPELINE_CHANGED' THEN '处理配置变化，需要新的文档版本' WHEN 'QUESTION_OUTPUT_EMPTY' THEN '模型未返回有效问题' WHEN 'CHUNK_PARENT_MAPPING_INVALID' THEN '分块父子关系校验失败' WHEN 'NATIVE_TYPE_UNSUPPORTED' THEN '暂不支持此类源文档' WHEN 'UPSTREAM_TEMPORARY' THEN '来源接口暂时不可用' ELSE COALESCE(NULLIF(display_error_code,''),'—') END END AS \"异常原因\",\n incident_count::text AS \"异常次数\",\n observed_at AS \"记录时间\",\n display_source_url AS \"腾讯原文\",\n jsonb_build_object('job_id',job_id, 'knowledge_base_id',knowledge_base_id, 'datasource_id',datasource_id, 'source_revision',source_revision, 'revision',revision, 'publication_epoch',publication_epoch, 'event_id',event_id, 'step_id',step_id, 'step_attempt',step_attempt, 'dispatch_seq',dispatch_seq, 'event_type',event_type, 'error_class',error_class, 'error_code',error_code, 'cleanup_problem',cleanup_problem, 'run_id',run_id, 'original_error_ordinal',original_error_ordinal, 'original_error_digest',original_error_digest, 'linked_job_id',linked_job_id, 'legacy_action',legacy_action, 'legacy_actor',legacy_actor, 'legacy_evidence_at',legacy_evidence_at, 'legacy_dead_letter_id',legacy_dead_letter_id, 'legacy_run_status',legacy_run_status, '腾讯文档路径',display_source_path, '腾讯文件ID',display_file_id, '来源类型',display_source_type, '原文字节',display_file_bytes, '大小依据',display_size_basis, '原生响应字节',native_raw_bytes, '大小上限',display_limit_bytes, '至少已读取字节',display_lower_bytes, '同类异常次数',incident_count, '同类异常事件ID',incident_event_ids)::text AS \"详情\"\nFROM candidates c CROSS JOIN gate WHERE gate.n<=10000\nUNION ALL\nSELECT '至少10001条，请缩小筛选范围','','','','','','','',NULL::timestamptz,'','' FROM gate WHERE gate.n>10000;\n",
           "datasource": {
             "type": "postgres",
             "uid": "weknora-postgres"
@@ -61,9 +61,11 @@
       },
       "fieldConfig": {
         "defaults": {
+          "noValue": "未记录",
           "custom": {
             "filterable": true,
-            "minWidth": 90
+            "minWidth": 70,
+            "wrapText": false
           }
         },
         "overrides": [
@@ -75,7 +77,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 130
+                "value": 70
               },
               {
                 "id": "custom.inspect",
@@ -89,7 +91,7 @@
                     "options": {
                       "pattern": ".*",
                       "result": {
-                        "text": "查看记录"
+                        "text": "查看"
                       }
                     }
                   }
@@ -100,12 +102,208 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "文档或批次"
+              "options": "文档名称"
             },
             "properties": [
               {
                 "id": "custom.width",
-                "value": 260
+                "value": 190
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "腾讯文档路径"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 230
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "文件 / 响应大小"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 145
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "工作空间 / 知识库"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "处理阶段"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 105
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "状态"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "异常原因"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 230
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "记录时间"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 165
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "更新时间"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 165
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "文档名称"
+            },
+            "properties": [
+              {
+                "id": "custom.wrapText",
+                "value": true
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "腾讯文档路径"
+            },
+            "properties": [
+              {
+                "id": "custom.wrapText",
+                "value": true
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "工作空间 / 知识库"
+            },
+            "properties": [
+              {
+                "id": "custom.wrapText",
+                "value": true
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "异常原因"
+            },
+            "properties": [
+              {
+                "id": "custom.wrapText",
+                "value": true
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "腾讯原文"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "打开腾讯原文",
+                    "url": "${__value.raw}",
+                    "targetBlank": true
+                  }
+                ]
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^https://docs[.]qq[.]com/.*",
+                      "result": {
+                        "text": "打开"
+                      }
+                    }
+                  }
+                ]
               }
             ]
           }
@@ -115,14 +313,14 @@
     {
       "id": 2,
       "type": "table",
-      "title": "文档生命周期",
+      "title": "文档处理进度",
       "gridPos": {
-        "h": 13,
+        "h": 14,
         "w": 24,
         "x": 0,
-        "y": 13
+        "y": 14
       },
-      "description": "只读生命周期事实视图。每个表格一次读取完整结果；在浏览器内翻页不会重新查询。默认关闭自动刷新；手动刷新生成新快照。超过10000条明确提示缩小筛选。工作空间变量用于过滤，不构成访问权限；仅管理员可访问此数据源。操作入口：WeKnora 设置 → 处理生命周期。旧流程数据标记 legacy_unverified。",
+      "description": "按文档定位和复查。失败表按同一文档、阶段和错误合并，详情保留所有事件 ID，完整事件仍在时间线。腾讯路径使用当时源端扫描的选定范围，不采用 WeKnora 后来移动的目录；原文链接仅使用已记录的腾讯地址。大小以1024换算，标注“响应”时是原生接口返回量，不是文件大小；未知不使用配额、上限或旧版本替代。每表完整快照，在浏览器分页；超过10000条要求缩小筛选。旧记录通过“记录范围”单独查看，不改写其当时结果。",
       "datasource": {
         "type": "postgres",
         "uid": "weknora-postgres"
@@ -133,7 +331,7 @@
           "format": "table",
           "rawQuery": true,
           "editorMode": "code",
-          "rawSql": "-- All pages use this one result set. Above the bound, return an explicit\n-- lower-bound notice, never a truncated list with a fabricated complete count.\nWITH candidates AS MATERIALIZED (\n SELECT * FROM mwe_processing_current_document_lifecycle WHERE (${workspace:sqlstring}='' OR tenant_id::text=${workspace:sqlstring}) AND (${knowledge_base:sqlstring}='' OR knowledge_base_id::text=${knowledge_base:sqlstring}) AND (${source:sqlstring}='' OR datasource_id::text=${source:sqlstring}) AND (${run:sqlstring}='' OR run_id::text=${run:sqlstring}) AND (${status:sqlstring}='' OR status::text=${status:sqlstring}) AND (${stage:sqlstring}='' OR stage::text=${stage:sqlstring}) AND (${search:sqlstring}='' OR position(lower(${search:sqlstring}) in lower(title||' '||external_id||' '||job_id))>0)\n ORDER BY observed_at DESC,row_id DESC LIMIT 10001\n), gate AS (SELECT COUNT(*) AS n FROM candidates)\nSELECT '完整快照：'||gate.n::text||'条' AS \"查询状态\", c.title AS \"文档或批次\",\n c.tenant_id::text AS \"工作空间ID\", c.kb_name AS \"知识库\", c.source_name AS \"数据源\",\n c.generation::text AS \"文档版本\", c.status AS \"状态\", c.stage AS \"阶段\", c.observed_at::text AS \"记录时间\",\n jsonb_build_object('job_id',job_id, 'knowledge_base_id',knowledge_base_id, 'datasource_id',datasource_id, 'source_revision',source_revision, 'revision',revision, 'publication_epoch',publication_epoch, 'availability',availability, 'evidence_basis',evidence_basis, 'published_job_id',published_job_id, 'published_generation',published_generation, 'doc_type',doc_type, 'native_raw_bytes',native_raw_bytes, 'native_pages',native_pages, 'native_units',native_units, 'images',images, 'media_bytes',media_bytes, 'readiness',readiness, 'completeness',completeness, 'steps_total',steps_total, 'steps_succeeded',steps_succeeded, 'cleanup_problem',cleanup_problem, 'resources_active',resources_active, 'charged_bytes',charged_bytes, 'estimated_index_bytes',estimated_index_bytes, 'run_id',run_id, 'original_error_ordinal',original_error_ordinal, 'original_error_digest',original_error_digest, 'linked_job_id',linked_job_id, 'legacy_action',legacy_action, 'legacy_actor',legacy_actor, 'legacy_evidence_at',legacy_evidence_at, 'legacy_dead_letter_id',legacy_dead_letter_id, 'legacy_run_status',legacy_run_status)::text AS \"详情\"\nFROM candidates c CROSS JOIN gate WHERE gate.n<=10000\nUNION ALL\nSELECT '至少10001条，请缩小筛选范围','','','','','','','','','' FROM gate WHERE gate.n>10000;\n",
+          "rawSql": "-- All pages use this one result set. Above the bound, return an explicit\n-- lower-bound notice, never a truncated list with a fabricated complete count.\nWITH matching AS (\n SELECT c.*,\n COALESCE(NULLIF(sc.document_title,''),NULLIF(jc.document_title,''),NULLIF(c.title,''),NULLIF(c.source_name,''),'未记录文档名称') AS display_title,\n COALESCE(sc.source_path,jc.source_path,lc.source_path,k.metadata->>'source_path') AS display_source_path,\n COALESCE(sc.file_id,jc.file_id,k.metadata->>'file_id') AS display_file_id,\n COALESCE(sc.source_url,jc.source_url) AS display_source_url,\n COALESCE(jc.source_type,ds.type) AS display_source_type,\n COALESCE(jc.workspace_name,t.name,c.tenant_id::text) AS display_workspace,\n COALESCE(jc.file_bytes,CASE WHEN TRUE AND sc.stage='download' THEN sc.actual_bytes END,lc.actual_bytes,CASE WHEN k.file_size>0 THEN k.file_size END) AS display_file_bytes,\n COALESCE(jc.size_basis,CASE WHEN TRUE AND sc.stage='download' AND sc.actual_bytes IS NOT NULL THEN '本次下载失败记录' END,CASE WHEN lc.actual_bytes IS NOT NULL THEN '原始失败记录' END,CASE WHEN k.file_size>0 THEN '旧知识文件记录' END,CASE WHEN c.native_raw_bytes IS NOT NULL THEN '原生接口响应；不是导入文件大小' ELSE '未记录；不使用配额、上限或旧版本大小替代' END) AS display_size_basis,\n COALESCE(CASE WHEN TRUE THEN sc.limit_bytes END,lc.limit_bytes) AS display_limit_bytes,\n COALESCE(CASE WHEN TRUE THEN sc.observed_at_least_bytes END,lc.observed_at_least_bytes) AS display_lower_bytes,\n COALESCE(NULL::text,sc.error_code,'') AS display_error_code\n FROM mwe_processing_current_document_lifecycle c\n LEFT JOIN processing_job_context jc ON jc.tenant_id=c.tenant_id AND jc.job_id=c.job_id\n LEFT JOIN processing_step_context sc ON sc.tenant_id=c.tenant_id AND sc.job_id=c.job_id AND sc.step_id=jc.active_step_id\n LEFT JOIN processing_legacy_context lc ON lc.tenant_id=c.tenant_id AND lc.datasource_id=c.datasource_id AND lc.run_id=c.run_id AND lc.error_ordinal=c.original_error_ordinal AND lc.error_digest=c.original_error_digest\n LEFT JOIN knowledges k ON COALESCE(c.job_id,'')='' AND c.original_error_ordinal IS NULL AND k.id=c.knowledge_id AND k.tenant_id=c.tenant_id AND k.knowledge_base_id=c.knowledge_base_id AND k.metadata->>'datasource_id'=c.datasource_id\n LEFT JOIN tenants t ON t.id=c.tenant_id\n LEFT JOIN data_sources ds ON ds.id=c.datasource_id AND ds.tenant_id=c.tenant_id AND ds.knowledge_base_id=c.knowledge_base_id\n WHERE (${workspace:sqlstring}='' OR c.tenant_id::text=${workspace:sqlstring}) AND (${knowledge_base:sqlstring}='' OR c.knowledge_base_id::text=${knowledge_base:sqlstring}) AND (${source:sqlstring}='' OR c.datasource_id::text=${source:sqlstring}) AND (${run:sqlstring}='' OR c.run_id::text=${run:sqlstring}) AND (${status:sqlstring} IN ('','all') OR c.status::text=${status:sqlstring}) AND (${stage:sqlstring}='' OR c.stage::text=${stage:sqlstring}) AND (${records:sqlstring}='all' OR (${records:sqlstring}='current' AND c.evidence_basis='verified_v2') OR (${records:sqlstring}='legacy' AND c.evidence_basis<>'verified_v2')) AND (${search:sqlstring}='' OR position(lower(${search:sqlstring}) in lower(concat_ws(' ',sc.document_title,c.title,c.external_id,c.job_id,sc.file_id,jc.file_id,sc.source_path,jc.source_path,lc.source_path,k.metadata->>'source_path')))>0)\n), candidates AS MATERIALIZED (\n SELECT * FROM matching\n ORDER BY observed_at DESC,row_id DESC LIMIT 10001\n), gate AS (SELECT COUNT(*) AS n FROM candidates)\nSELECT display_title AS \"文档名称\",\n COALESCE(NULLIF(display_source_path,''),CASE WHEN display_source_type='tencent_docs' THEN '未记录' ELSE '不适用' END) AS \"腾讯文档路径\",\n CASE WHEN display_file_bytes IS NULL AND native_raw_bytes IS NOT NULL THEN CASE WHEN native_raw_bytes::text ~ '^[0-9]{1,18}$' THEN\n      CASE WHEN (native_raw_bytes::text)::numeric>=1073741824 THEN round((native_raw_bytes::text)::numeric/1073741824,2)::text||' GB'\n           WHEN (native_raw_bytes::text)::numeric>=1048576 THEN round((native_raw_bytes::text)::numeric/1048576,2)::text||' MB'\n           ELSE round((native_raw_bytes::text)::numeric/1024,2)::text||' KB' END ELSE '未记录' END||'（响应）' ELSE CASE WHEN display_file_bytes::text ~ '^[0-9]{1,18}$' THEN\n      CASE WHEN (display_file_bytes::text)::numeric>=1073741824 THEN round((display_file_bytes::text)::numeric/1073741824,2)::text||' GB'\n           WHEN (display_file_bytes::text)::numeric>=1048576 THEN round((display_file_bytes::text)::numeric/1048576,2)::text||' MB'\n           ELSE round((display_file_bytes::text)::numeric/1024,2)::text||' KB' END ELSE '未记录' END END AS \"文件 / 响应大小\",\n display_workspace||E'\\n'||kb_name AS \"工作空间 / 知识库\",\n CASE stage WHEN 'scan' THEN '扫描批次' WHEN 'legacy_scan' THEN '历史扫描' WHEN 'scan_page' THEN '扫描目录' WHEN 'scan_document' THEN '确认源文档' WHEN 'native_read' THEN '读取源内容' WHEN 'export_start' THEN '发起导出' WHEN 'export_poll' THEN '等待导出' WHEN 'download' THEN '下载文件' WHEN 'normalize' THEN '内容转换' WHEN 'parse' THEN '解析' WHEN 'assets' THEN '收集图片' WHEN 'images' THEN '图片处理' WHEN 'image_ocr' THEN '图片文字识别' WHEN 'image_caption' THEN '图片描述' WHEN 'chunk' THEN '文档分块' WHEN 'embedding' THEN '生成向量' WHEN 'text_index' THEN '正文索引' WHEN 'image_index' THEN '图片索引' WHEN 'summary' THEN '摘要' WHEN 'questions' THEN '生成问题' WHEN 'publish' THEN '发布版本' WHEN 'retire' THEN '清理版本' WHEN 'retire_previous' THEN '清理旧版本' WHEN 'legacy_snapshot' THEN '核验旧文件' WHEN 'legacy_indexes' THEN '核验旧索引' WHEN 'question' THEN '生成单条问题' WHEN 'question_index' THEN '问题索引' WHEN 'summary_index' THEN '摘要索引' WHEN 'index' THEN '索引写入' ELSE COALESCE(NULLIF(stage,''),'—') END AS \"处理阶段\",\n CASE status WHEN 'planned' THEN '待启动' WHEN 'enqueue_pending' THEN '待派发' WHEN 'queued' THEN '排队中' WHEN 'running' THEN '处理中' WHEN 'waiting_external' THEN '等待外部结果' WHEN 'retry_wait' THEN '等待重试' WHEN 'succeeded' THEN '已完成' WHEN 'success' THEN '历史成功' WHEN 'completed' THEN '历史完成' WHEN 'partial' THEN '历史部分成功' WHEN 'failed' THEN '失败' WHEN 'blocked' THEN '需处理' WHEN 'canceled' THEN '已取消' WHEN 'superseded' THEN '已替代' WHEN 'skipped' THEN '已跳过' WHEN 'legacy_unverified' THEN '历史待核实' ELSE COALESCE(NULLIF(status,''),'—') END AS \"状态\",\n CASE WHEN steps_total IS NULL THEN '历史阶段未核实' ELSE steps_succeeded::text||' / '||steps_total::text END AS \"阶段进度\",\n CASE availability WHEN 'current_available' THEN '当前版本可用' WHEN 'previous_available' THEN '旧版本仍可用' WHEN 'not_published' THEN '尚未发布' WHEN 'legacy_available' THEN '历史版本可用' WHEN 'legacy_unverified' THEN '历史待核实' ELSE COALESCE(NULLIF(availability,''),'—') END AS \"可用版本\",\n observed_at AS \"记录时间\",\n display_source_url AS \"腾讯原文\",\n jsonb_build_object('job_id',job_id, 'knowledge_base_id',knowledge_base_id, 'datasource_id',datasource_id, 'source_revision',source_revision, 'revision',revision, 'publication_epoch',publication_epoch, 'availability',availability, 'evidence_basis',evidence_basis, 'published_job_id',published_job_id, 'published_generation',published_generation, 'doc_type',doc_type, 'native_raw_bytes',native_raw_bytes, 'native_pages',native_pages, 'native_units',native_units, 'images',images, 'media_bytes',media_bytes, 'readiness',readiness, 'completeness',completeness, 'steps_total',steps_total, 'steps_succeeded',steps_succeeded, 'cleanup_problem',cleanup_problem, 'resources_active',resources_active, 'charged_bytes',charged_bytes, 'estimated_index_bytes',estimated_index_bytes, 'run_id',run_id, 'original_error_ordinal',original_error_ordinal, 'original_error_digest',original_error_digest, 'linked_job_id',linked_job_id, 'legacy_action',legacy_action, 'legacy_actor',legacy_actor, 'legacy_evidence_at',legacy_evidence_at, 'legacy_dead_letter_id',legacy_dead_letter_id, 'legacy_run_status',legacy_run_status, '腾讯文档路径',display_source_path, '腾讯文件ID',display_file_id, '来源类型',display_source_type, '原文字节',display_file_bytes, '大小依据',display_size_basis, '原生响应字节',native_raw_bytes, '大小上限',display_limit_bytes, '至少已读取字节',display_lower_bytes)::text AS \"详情\"\nFROM candidates c CROSS JOIN gate WHERE gate.n<=10000\nUNION ALL\nSELECT '至少10001条，请缩小筛选范围','','','','','','','',NULL::timestamptz,'','' FROM gate WHERE gate.n>10000;\n",
           "datasource": {
             "type": "postgres",
             "uid": "weknora-postgres"
@@ -156,9 +354,11 @@
       },
       "fieldConfig": {
         "defaults": {
+          "noValue": "未记录",
           "custom": {
             "filterable": true,
-            "minWidth": 90
+            "minWidth": 70,
+            "wrapText": false
           }
         },
         "overrides": [
@@ -170,7 +370,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 130
+                "value": 70
               },
               {
                 "id": "custom.inspect",
@@ -184,7 +384,7 @@
                     "options": {
                       "pattern": ".*",
                       "result": {
-                        "text": "查看记录"
+                        "text": "查看"
                       }
                     }
                   }
@@ -195,12 +395,208 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "文档或批次"
+              "options": "文档名称"
             },
             "properties": [
               {
                 "id": "custom.width",
-                "value": 260
+                "value": 190
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "腾讯文档路径"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 230
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "文件 / 响应大小"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 145
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "工作空间 / 知识库"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "处理阶段"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 105
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "状态"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "异常原因"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 230
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "记录时间"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 165
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "更新时间"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 165
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "文档名称"
+            },
+            "properties": [
+              {
+                "id": "custom.wrapText",
+                "value": true
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "腾讯文档路径"
+            },
+            "properties": [
+              {
+                "id": "custom.wrapText",
+                "value": true
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "工作空间 / 知识库"
+            },
+            "properties": [
+              {
+                "id": "custom.wrapText",
+                "value": true
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "异常原因"
+            },
+            "properties": [
+              {
+                "id": "custom.wrapText",
+                "value": true
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "腾讯原文"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "打开腾讯原文",
+                    "url": "${__value.raw}",
+                    "targetBlank": true
+                  }
+                ]
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^https://docs[.]qq[.]com/.*",
+                      "result": {
+                        "text": "打开"
+                      }
+                    }
+                  }
+                ]
               }
             ]
           }
@@ -208,16 +604,16 @@
       }
     },
     {
-      "id": 3,
+      "id": 1,
       "type": "table",
-      "title": "阶段与精准重试",
+      "title": "同步批次概览",
       "gridPos": {
-        "h": 13,
+        "h": 14,
         "w": 24,
         "x": 0,
-        "y": 26
+        "y": 28
       },
-      "description": "只读生命周期事实视图。每个表格一次读取完整结果；在浏览器内翻页不会重新查询。默认关闭自动刷新；手动刷新生成新快照。超过10000条明确提示缩小筛选。工作空间变量用于过滤，不构成访问权限；仅管理员可访问此数据源。操作入口：WeKnora 设置 → 处理生命周期。旧流程数据标记 legacy_unverified。",
+      "description": "按文档定位和复查。失败表按同一文档、阶段和错误合并，详情保留所有事件 ID，完整事件仍在时间线。腾讯路径使用当时源端扫描的选定范围，不采用 WeKnora 后来移动的目录；原文链接仅使用已记录的腾讯地址。大小以1024换算，标注“响应”时是原生接口返回量，不是文件大小；未知不使用配额、上限或旧版本替代。每表完整快照，在浏览器分页；超过10000条要求缩小筛选。旧记录通过“记录范围”单独查看，不改写其当时结果。",
       "datasource": {
         "type": "postgres",
         "uid": "weknora-postgres"
@@ -228,7 +624,7 @@
           "format": "table",
           "rawQuery": true,
           "editorMode": "code",
-          "rawSql": "-- All pages use this one result set. Above the bound, return an explicit\n-- lower-bound notice, never a truncated list with a fabricated complete count.\nWITH candidates AS MATERIALIZED (\n SELECT * FROM mwe_processing_stage_retry_queue WHERE (${workspace:sqlstring}='' OR tenant_id::text=${workspace:sqlstring}) AND (${knowledge_base:sqlstring}='' OR knowledge_base_id::text=${knowledge_base:sqlstring}) AND (${source:sqlstring}='' OR datasource_id::text=${source:sqlstring}) AND (${run:sqlstring}='' OR run_id::text=${run:sqlstring}) AND (${status:sqlstring}='' OR status::text=${status:sqlstring}) AND (${stage:sqlstring}='' OR stage::text=${stage:sqlstring}) AND (${search:sqlstring}='' OR position(lower(${search:sqlstring}) in lower(title||' '||external_id||' '||job_id))>0)\n ORDER BY observed_at DESC,row_id DESC LIMIT 10001\n), gate AS (SELECT COUNT(*) AS n FROM candidates)\nSELECT '完整快照：'||gate.n::text||'条' AS \"查询状态\", c.title AS \"文档或批次\",\n c.tenant_id::text AS \"工作空间ID\", c.kb_name AS \"知识库\", c.source_name AS \"数据源\",\n c.generation::text AS \"文档版本\", c.status AS \"状态\", c.stage AS \"阶段\", c.observed_at::text AS \"记录时间\",\n jsonb_build_object('job_id',job_id, 'knowledge_base_id',knowledge_base_id, 'datasource_id',datasource_id, 'source_revision',source_revision, 'revision',revision, 'publication_epoch',publication_epoch, 'step_id',step_id, 'phase',phase, 'unit_key',unit_key, 'step_attempt',step_attempt, 'dispatch_seq',dispatch_seq, 'retry_count',retry_count, 'max_retries',max_retries, 'next_run_at',next_run_at, 'deadline_at',deadline_at, 'heartbeat_at',heartbeat_at, 'error_class',error_class, 'error_code',error_code, 'run_id',run_id, 'original_error_ordinal',original_error_ordinal, 'original_error_digest',original_error_digest, 'linked_job_id',linked_job_id, 'legacy_action',legacy_action, 'legacy_actor',legacy_actor, 'legacy_evidence_at',legacy_evidence_at, 'legacy_dead_letter_id',legacy_dead_letter_id, 'legacy_run_status',legacy_run_status)::text AS \"详情\"\nFROM candidates c CROSS JOIN gate WHERE gate.n<=10000\nUNION ALL\nSELECT '至少10001条，请缩小筛选范围','','','','','','','','','' FROM gate WHERE gate.n>10000;\n",
+          "rawSql": "-- All pages use this one result set. Above the bound, return an explicit\n-- lower-bound notice, never a truncated list with a fabricated complete count.\nWITH matching AS (\n SELECT c.*,\n COALESCE(NULLIF(sc.document_title,''),NULLIF(jc.document_title,''),NULLIF(c.title,''),NULLIF(c.source_name,''),'未记录文档名称') AS display_title,\n COALESCE(sc.source_path,jc.source_path,lc.source_path,k.metadata->>'source_path') AS display_source_path,\n COALESCE(sc.file_id,jc.file_id,k.metadata->>'file_id') AS display_file_id,\n COALESCE(sc.source_url,jc.source_url) AS display_source_url,\n COALESCE(jc.source_type,ds.type) AS display_source_type,\n COALESCE(jc.workspace_name,t.name,c.tenant_id::text) AS display_workspace,\n COALESCE(jc.file_bytes,CASE WHEN TRUE AND sc.stage='download' THEN sc.actual_bytes END,lc.actual_bytes,CASE WHEN k.file_size>0 THEN k.file_size END) AS display_file_bytes,\n COALESCE(jc.size_basis,CASE WHEN TRUE AND sc.stage='download' AND sc.actual_bytes IS NOT NULL THEN '本次下载失败记录' END,CASE WHEN lc.actual_bytes IS NOT NULL THEN '原始失败记录' END,CASE WHEN k.file_size>0 THEN '旧知识文件记录' END,CASE WHEN c.native_raw_bytes IS NOT NULL THEN '原生接口响应；不是导入文件大小' ELSE '未记录；不使用配额、上限或旧版本大小替代' END) AS display_size_basis,\n COALESCE(CASE WHEN TRUE THEN sc.limit_bytes END,lc.limit_bytes) AS display_limit_bytes,\n COALESCE(CASE WHEN TRUE THEN sc.observed_at_least_bytes END,lc.observed_at_least_bytes) AS display_lower_bytes,\n COALESCE(NULL::text,sc.error_code,'') AS display_error_code\n FROM mwe_processing_current_run_progress c\n LEFT JOIN processing_job_context jc ON jc.tenant_id=c.tenant_id AND jc.job_id=c.job_id\n LEFT JOIN processing_step_context sc ON sc.tenant_id=c.tenant_id AND sc.job_id=c.job_id AND sc.step_id=NULL::text\n LEFT JOIN processing_legacy_context lc ON lc.tenant_id=c.tenant_id AND lc.datasource_id=c.datasource_id AND lc.run_id=c.run_id AND lc.error_ordinal=c.original_error_ordinal AND lc.error_digest=c.original_error_digest\n LEFT JOIN knowledges k ON COALESCE(c.job_id,'')='' AND c.original_error_ordinal IS NULL AND k.id=c.knowledge_id AND k.tenant_id=c.tenant_id AND k.knowledge_base_id=c.knowledge_base_id AND k.metadata->>'datasource_id'=c.datasource_id\n LEFT JOIN tenants t ON t.id=c.tenant_id\n LEFT JOIN data_sources ds ON ds.id=c.datasource_id AND ds.tenant_id=c.tenant_id AND ds.knowledge_base_id=c.knowledge_base_id\n WHERE (${workspace:sqlstring}='' OR c.tenant_id::text=${workspace:sqlstring}) AND (${knowledge_base:sqlstring}='' OR c.knowledge_base_id::text=${knowledge_base:sqlstring}) AND (${source:sqlstring}='' OR c.datasource_id::text=${source:sqlstring}) AND (${run:sqlstring}='' OR c.run_id::text=${run:sqlstring}) AND (${status:sqlstring} IN ('','all') OR c.status::text=${status:sqlstring}) AND (${stage:sqlstring}='' OR c.stage::text=${stage:sqlstring}) AND (${records:sqlstring}='all' OR (${records:sqlstring}='current' AND c.evidence_basis='verified_v2') OR (${records:sqlstring}='legacy' AND c.evidence_basis<>'verified_v2')) AND (${search:sqlstring}='' OR position(lower(${search:sqlstring}) in lower(concat_ws(' ',sc.document_title,c.title,c.external_id,c.job_id,sc.file_id,jc.file_id,sc.source_path,jc.source_path,lc.source_path,k.metadata->>'source_path')))>0)\n), candidates AS MATERIALIZED (\n SELECT * FROM matching\n ORDER BY observed_at DESC,row_id DESC LIMIT 10001\n), gate AS (SELECT COUNT(*) AS n FROM candidates)\nSELECT COALESCE(NULLIF(source_name,''),'未记录') AS \"同步来源\",\n display_workspace||E'\\n'||kb_name AS \"工作空间 / 知识库\",\n CASE status WHEN 'planned' THEN '待启动' WHEN 'enqueue_pending' THEN '待派发' WHEN 'queued' THEN '排队中' WHEN 'running' THEN '处理中' WHEN 'waiting_external' THEN '等待外部结果' WHEN 'retry_wait' THEN '等待重试' WHEN 'succeeded' THEN '已完成' WHEN 'success' THEN '历史成功' WHEN 'completed' THEN '历史完成' WHEN 'partial' THEN '历史部分成功' WHEN 'failed' THEN '失败' WHEN 'blocked' THEN '需处理' WHEN 'canceled' THEN '已取消' WHEN 'superseded' THEN '已替代' WHEN 'skipped' THEN '已跳过' WHEN 'legacy_unverified' THEN '历史待核实' ELSE COALESCE(NULLIF(status,''),'—') END AS \"状态\",\n documents::text AS \"发现文档\",\n documents_succeeded::text AS \"已完成\",\n (documents_failed+documents_blocked)::text AS \"需处理\",\n documents_active::text AS \"处理中\",\n documents_unadmitted::text AS \"未准入\",\n observed_at AS \"更新时间\",\n jsonb_build_object('job_id',job_id, 'knowledge_base_id',knowledge_base_id, 'datasource_id',datasource_id, 'source_revision',source_revision, 'revision',revision, 'publication_epoch',publication_epoch, 'documents',documents, 'documents_succeeded',documents_succeeded, 'documents_failed',documents_failed, 'documents_blocked',documents_blocked, 'documents_active',documents_active, 'documents_unadmitted',documents_unadmitted, 'containers',containers, 'external_links',external_links, 'original_finished_status',original_finished_status, 'original_finished_at',original_finished_at, 'run_id',run_id, 'original_error_ordinal',original_error_ordinal, 'original_error_digest',original_error_digest, 'linked_job_id',linked_job_id, 'legacy_action',legacy_action, 'legacy_actor',legacy_actor, 'legacy_evidence_at',legacy_evidence_at, 'legacy_dead_letter_id',legacy_dead_letter_id, 'legacy_run_status',legacy_run_status, '腾讯文档路径',display_source_path, '腾讯文件ID',display_file_id, '来源类型',display_source_type, '原文字节',display_file_bytes, '大小依据',display_size_basis, '原生响应字节',native_raw_bytes, '大小上限',display_limit_bytes, '至少已读取字节',display_lower_bytes)::text AS \"详情\"\nFROM candidates c CROSS JOIN gate WHERE gate.n<=10000\nUNION ALL\nSELECT '至少10001条，请缩小筛选范围','','','','','','','',NULL::timestamptz,'' FROM gate WHERE gate.n>10000;\n",
           "datasource": {
             "type": "postgres",
             "uid": "weknora-postgres"
@@ -251,9 +647,11 @@
       },
       "fieldConfig": {
         "defaults": {
+          "noValue": "未记录",
           "custom": {
             "filterable": true,
-            "minWidth": 90
+            "minWidth": 70,
+            "wrapText": false
           }
         },
         "overrides": [
@@ -265,7 +663,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 130
+                "value": 70
               },
               {
                 "id": "custom.inspect",
@@ -279,7 +677,7 @@
                     "options": {
                       "pattern": ".*",
                       "result": {
-                        "text": "查看记录"
+                        "text": "查看"
                       }
                     }
                   }
@@ -290,12 +688,208 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "文档或批次"
+              "options": "文档名称"
             },
             "properties": [
               {
                 "id": "custom.width",
-                "value": 260
+                "value": 190
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "腾讯文档路径"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 230
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "文件 / 响应大小"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 145
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "工作空间 / 知识库"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "处理阶段"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 105
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "状态"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "异常原因"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 230
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "记录时间"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 165
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "更新时间"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 165
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "文档名称"
+            },
+            "properties": [
+              {
+                "id": "custom.wrapText",
+                "value": true
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "腾讯文档路径"
+            },
+            "properties": [
+              {
+                "id": "custom.wrapText",
+                "value": true
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "工作空间 / 知识库"
+            },
+            "properties": [
+              {
+                "id": "custom.wrapText",
+                "value": true
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "异常原因"
+            },
+            "properties": [
+              {
+                "id": "custom.wrapText",
+                "value": true
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "腾讯原文"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "打开腾讯原文",
+                    "url": "${__value.raw}",
+                    "targetBlank": true
+                  }
+                ]
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^https://docs[.]qq[.]com/.*",
+                      "result": {
+                        "text": "打开"
+                      }
+                    }
+                  }
+                ]
               }
             ]
           }
@@ -303,320 +897,961 @@
       }
     },
     {
-      "id": 4,
-      "type": "table",
-      "title": "未解决异常（含旧版本清理）",
+      "id": 1000,
+      "type": "row",
+      "title": "阶段重试、事件和一致性明细",
+      "collapsed": true,
       "gridPos": {
-        "h": 13,
+        "h": 1,
         "w": 24,
         "x": 0,
-        "y": 39
+        "y": 42
       },
-      "description": "只读生命周期事实视图。每个表格一次读取完整结果；在浏览器内翻页不会重新查询。默认关闭自动刷新；手动刷新生成新快照。超过10000条明确提示缩小筛选。工作空间变量用于过滤，不构成访问权限；仅管理员可访问此数据源。操作入口：WeKnora 设置 → 处理生命周期。旧流程数据标记 legacy_unverified。",
-      "datasource": {
-        "type": "postgres",
-        "uid": "weknora-postgres"
-      },
-      "targets": [
+      "panels": [
         {
-          "refId": "A",
-          "format": "table",
-          "rawQuery": true,
-          "editorMode": "code",
-          "rawSql": "-- All pages use this one result set. Above the bound, return an explicit\n-- lower-bound notice, never a truncated list with a fabricated complete count.\nWITH candidates AS MATERIALIZED (\n SELECT * FROM mwe_processing_unresolved_incidents WHERE (${workspace:sqlstring}='' OR tenant_id::text=${workspace:sqlstring}) AND (${knowledge_base:sqlstring}='' OR knowledge_base_id::text=${knowledge_base:sqlstring}) AND (${source:sqlstring}='' OR datasource_id::text=${source:sqlstring}) AND (${run:sqlstring}='' OR run_id::text=${run:sqlstring}) AND (${status:sqlstring}='' OR status::text=${status:sqlstring}) AND (${stage:sqlstring}='' OR stage::text=${stage:sqlstring}) AND (${search:sqlstring}='' OR position(lower(${search:sqlstring}) in lower(title||' '||external_id||' '||job_id))>0)\n ORDER BY observed_at DESC,row_id DESC LIMIT 10001\n), gate AS (SELECT COUNT(*) AS n FROM candidates)\nSELECT '完整快照：'||gate.n::text||'条' AS \"查询状态\", c.title AS \"文档或批次\",\n c.tenant_id::text AS \"工作空间ID\", c.kb_name AS \"知识库\", c.source_name AS \"数据源\",\n c.generation::text AS \"文档版本\", c.status AS \"状态\", c.stage AS \"阶段\", c.observed_at::text AS \"记录时间\",\n jsonb_build_object('job_id',job_id, 'knowledge_base_id',knowledge_base_id, 'datasource_id',datasource_id, 'source_revision',source_revision, 'revision',revision, 'publication_epoch',publication_epoch, 'event_id',event_id, 'step_id',step_id, 'step_attempt',step_attempt, 'dispatch_seq',dispatch_seq, 'event_type',event_type, 'error_class',error_class, 'error_code',error_code, 'cleanup_problem',cleanup_problem, 'run_id',run_id, 'original_error_ordinal',original_error_ordinal, 'original_error_digest',original_error_digest, 'linked_job_id',linked_job_id, 'legacy_action',legacy_action, 'legacy_actor',legacy_actor, 'legacy_evidence_at',legacy_evidence_at, 'legacy_dead_letter_id',legacy_dead_letter_id, 'legacy_run_status',legacy_run_status)::text AS \"详情\"\nFROM candidates c CROSS JOIN gate WHERE gate.n<=10000\nUNION ALL\nSELECT '至少10001条，请缩小筛选范围','','','','','','','','','' FROM gate WHERE gate.n>10000;\n",
+          "id": 3,
+          "type": "table",
+          "title": "阶段与精准重试",
+          "gridPos": {
+            "h": 13,
+            "w": 24,
+            "x": 0,
+            "y": 43
+          },
+          "description": "按文档定位和复查。失败表按同一文档、阶段和错误合并，详情保留所有事件 ID，完整事件仍在时间线。腾讯路径使用当时源端扫描的选定范围，不采用 WeKnora 后来移动的目录；原文链接仅使用已记录的腾讯地址。大小以1024换算，标注“响应”时是原生接口返回量，不是文件大小；未知不使用配额、上限或旧版本替代。每表完整快照，在浏览器分页；超过10000条要求缩小筛选。旧记录通过“记录范围”单独查看，不改写其当时结果。",
           "datasource": {
             "type": "postgres",
             "uid": "weknora-postgres"
-          }
-        }
-      ],
-      "options": {
-        "showHeader": true,
-        "cellHeight": "sm",
-        "enablePagination": true,
-        "footer": {
-          "show": false,
-          "enablePagination": true,
-          "countRows": true,
-          "reducer": [
-            "count"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawQuery": true,
+              "editorMode": "code",
+              "rawSql": "-- All pages use this one result set. Above the bound, return an explicit\n-- lower-bound notice, never a truncated list with a fabricated complete count.\nWITH matching AS (\n SELECT c.*,\n COALESCE(NULLIF(sc.document_title,''),NULLIF(jc.document_title,''),NULLIF(c.title,''),NULLIF(c.source_name,''),'未记录文档名称') AS display_title,\n COALESCE(sc.source_path,jc.source_path,lc.source_path,k.metadata->>'source_path') AS display_source_path,\n COALESCE(sc.file_id,jc.file_id,k.metadata->>'file_id') AS display_file_id,\n COALESCE(sc.source_url,jc.source_url) AS display_source_url,\n COALESCE(jc.source_type,ds.type) AS display_source_type,\n COALESCE(jc.workspace_name,t.name,c.tenant_id::text) AS display_workspace,\n COALESCE(jc.file_bytes,CASE WHEN sc.step_attempt=c.step_attempt AND sc.stage='download' THEN sc.actual_bytes END,lc.actual_bytes,CASE WHEN k.file_size>0 THEN k.file_size END) AS display_file_bytes,\n COALESCE(jc.size_basis,CASE WHEN sc.step_attempt=c.step_attempt AND sc.stage='download' AND sc.actual_bytes IS NOT NULL THEN '本次下载失败记录' END,CASE WHEN lc.actual_bytes IS NOT NULL THEN '原始失败记录' END,CASE WHEN k.file_size>0 THEN '旧知识文件记录' END,CASE WHEN c.native_raw_bytes IS NOT NULL THEN '原生接口响应；不是导入文件大小' ELSE '未记录；不使用配额、上限或旧版本大小替代' END) AS display_size_basis,\n COALESCE(CASE WHEN sc.step_attempt=c.step_attempt THEN sc.limit_bytes END,lc.limit_bytes) AS display_limit_bytes,\n COALESCE(CASE WHEN sc.step_attempt=c.step_attempt THEN sc.observed_at_least_bytes END,lc.observed_at_least_bytes) AS display_lower_bytes,\n COALESCE(NULLIF(c.error_code,''),sc.error_code,'') AS display_error_code\n FROM mwe_processing_stage_retry_queue c\n LEFT JOIN processing_job_context jc ON jc.tenant_id=c.tenant_id AND jc.job_id=c.job_id\n LEFT JOIN processing_step_context sc ON sc.tenant_id=c.tenant_id AND sc.job_id=c.job_id AND sc.step_id=NULLIF(c.step_id,'')\n LEFT JOIN processing_legacy_context lc ON lc.tenant_id=c.tenant_id AND lc.datasource_id=c.datasource_id AND lc.run_id=c.run_id AND lc.error_ordinal=c.original_error_ordinal AND lc.error_digest=c.original_error_digest\n LEFT JOIN knowledges k ON COALESCE(c.job_id,'')='' AND c.original_error_ordinal IS NULL AND k.id=c.knowledge_id AND k.tenant_id=c.tenant_id AND k.knowledge_base_id=c.knowledge_base_id AND k.metadata->>'datasource_id'=c.datasource_id\n LEFT JOIN tenants t ON t.id=c.tenant_id\n LEFT JOIN data_sources ds ON ds.id=c.datasource_id AND ds.tenant_id=c.tenant_id AND ds.knowledge_base_id=c.knowledge_base_id\n WHERE (${workspace:sqlstring}='' OR c.tenant_id::text=${workspace:sqlstring}) AND (${knowledge_base:sqlstring}='' OR c.knowledge_base_id::text=${knowledge_base:sqlstring}) AND (${source:sqlstring}='' OR c.datasource_id::text=${source:sqlstring}) AND (${run:sqlstring}='' OR c.run_id::text=${run:sqlstring}) AND (${status:sqlstring} IN ('','all') OR c.status::text=${status:sqlstring}) AND (${stage:sqlstring}='' OR c.stage::text=${stage:sqlstring}) AND (${records:sqlstring}='all' OR (${records:sqlstring}='current' AND c.evidence_basis='verified_v2') OR (${records:sqlstring}='legacy' AND c.evidence_basis<>'verified_v2')) AND (${search:sqlstring}='' OR position(lower(${search:sqlstring}) in lower(concat_ws(' ',sc.document_title,c.title,c.external_id,c.job_id,sc.file_id,jc.file_id,sc.source_path,jc.source_path,lc.source_path,k.metadata->>'source_path')))>0)\n), candidates AS MATERIALIZED (\n SELECT * FROM matching\n ORDER BY observed_at DESC,row_id DESC LIMIT 10001\n), gate AS (SELECT COUNT(*) AS n FROM candidates)\nSELECT display_title AS \"文档名称\",\n COALESCE(NULLIF(display_source_path,''),CASE WHEN display_source_type='tencent_docs' THEN '未记录' ELSE '不适用' END) AS \"腾讯文档路径\",\n CASE WHEN display_file_bytes IS NULL AND native_raw_bytes IS NOT NULL THEN CASE WHEN native_raw_bytes::text ~ '^[0-9]{1,18}$' THEN\n      CASE WHEN (native_raw_bytes::text)::numeric>=1073741824 THEN round((native_raw_bytes::text)::numeric/1073741824,2)::text||' GB'\n           WHEN (native_raw_bytes::text)::numeric>=1048576 THEN round((native_raw_bytes::text)::numeric/1048576,2)::text||' MB'\n           ELSE round((native_raw_bytes::text)::numeric/1024,2)::text||' KB' END ELSE '未记录' END||'（响应）' ELSE CASE WHEN display_file_bytes::text ~ '^[0-9]{1,18}$' THEN\n      CASE WHEN (display_file_bytes::text)::numeric>=1073741824 THEN round((display_file_bytes::text)::numeric/1073741824,2)::text||' GB'\n           WHEN (display_file_bytes::text)::numeric>=1048576 THEN round((display_file_bytes::text)::numeric/1048576,2)::text||' MB'\n           ELSE round((display_file_bytes::text)::numeric/1024,2)::text||' KB' END ELSE '未记录' END END AS \"文件 / 响应大小\",\n display_workspace||E'\\n'||kb_name AS \"工作空间 / 知识库\",\n CASE stage WHEN 'scan' THEN '扫描批次' WHEN 'legacy_scan' THEN '历史扫描' WHEN 'scan_page' THEN '扫描目录' WHEN 'scan_document' THEN '确认源文档' WHEN 'native_read' THEN '读取源内容' WHEN 'export_start' THEN '发起导出' WHEN 'export_poll' THEN '等待导出' WHEN 'download' THEN '下载文件' WHEN 'normalize' THEN '内容转换' WHEN 'parse' THEN '解析' WHEN 'assets' THEN '收集图片' WHEN 'images' THEN '图片处理' WHEN 'image_ocr' THEN '图片文字识别' WHEN 'image_caption' THEN '图片描述' WHEN 'chunk' THEN '文档分块' WHEN 'embedding' THEN '生成向量' WHEN 'text_index' THEN '正文索引' WHEN 'image_index' THEN '图片索引' WHEN 'summary' THEN '摘要' WHEN 'questions' THEN '生成问题' WHEN 'publish' THEN '发布版本' WHEN 'retire' THEN '清理版本' WHEN 'retire_previous' THEN '清理旧版本' WHEN 'legacy_snapshot' THEN '核验旧文件' WHEN 'legacy_indexes' THEN '核验旧索引' WHEN 'question' THEN '生成单条问题' WHEN 'question_index' THEN '问题索引' WHEN 'summary_index' THEN '摘要索引' WHEN 'index' THEN '索引写入' ELSE COALESCE(NULLIF(stage,''),'—') END AS \"处理阶段\",\n CASE status WHEN 'planned' THEN '待启动' WHEN 'enqueue_pending' THEN '待派发' WHEN 'queued' THEN '排队中' WHEN 'running' THEN '处理中' WHEN 'waiting_external' THEN '等待外部结果' WHEN 'retry_wait' THEN '等待重试' WHEN 'succeeded' THEN '已完成' WHEN 'success' THEN '历史成功' WHEN 'completed' THEN '历史完成' WHEN 'partial' THEN '历史部分成功' WHEN 'failed' THEN '失败' WHEN 'blocked' THEN '需处理' WHEN 'canceled' THEN '已取消' WHEN 'superseded' THEN '已替代' WHEN 'skipped' THEN '已跳过' WHEN 'legacy_unverified' THEN '历史待核实' ELSE COALESCE(NULLIF(status,''),'—') END AS \"状态\",\n CASE WHEN display_error_code LIKE 'TENCENT_%' THEN '腾讯接口错误：'||display_error_code ELSE CASE display_error_code WHEN 'IDENTITY_UNRESOLVED' THEN '未能确认腾讯文档身份或状态' WHEN 'AUTH_REQUIRED' THEN '来源凭据不可用或失效' WHEN 'SOURCE_SIZE_EXCEEDED' THEN '内容超出大小限制' WHEN 'FILE_SIZE_EXCEEDED' THEN '文件超出大小限制' WHEN 'NATIVE_SIZE_EXCEEDED' THEN '原生内容超出读取限制' WHEN 'NATIVE_CONTENT_UNSUPPORTED' THEN '文档含尚不支持完整读取的内容' WHEN 'SOURCE_CHANGED_DURING_READ' THEN '读取期间源内容发生变化' WHEN 'SOURCE_EMPTY' THEN '新源内容为空，旧版本继续保留' WHEN 'LEGACY_UNVERIFIED' THEN '历史失败尚未核实' WHEN 'STAGE_EXECUTION_ERROR' THEN '本阶段未产出有效结果' WHEN 'RETIREMENT_IO_FAILED' THEN '版本清理未完成' WHEN 'EXPORT_OUTCOME_UNKNOWN' THEN '导出结果不确定，需要核实' WHEN 'STORAGE_QUOTA_EXCEEDED' THEN '存储配额不足' WHEN 'PIPELINE_CHANGED' THEN '处理配置变化，需要新的文档版本' WHEN 'QUESTION_OUTPUT_EMPTY' THEN '模型未返回有效问题' WHEN 'CHUNK_PARENT_MAPPING_INVALID' THEN '分块父子关系校验失败' WHEN 'NATIVE_TYPE_UNSUPPORTED' THEN '暂不支持此类源文档' WHEN 'UPSTREAM_TEMPORARY' THEN '来源接口暂时不可用' ELSE COALESCE(NULLIF(display_error_code,''),'—') END END AS \"异常原因\",\n next_run_at AS \"下次重试\",\n observed_at AS \"记录时间\",\n display_source_url AS \"腾讯原文\",\n jsonb_build_object('job_id',job_id, 'knowledge_base_id',knowledge_base_id, 'datasource_id',datasource_id, 'source_revision',source_revision, 'revision',revision, 'publication_epoch',publication_epoch, 'step_id',step_id, 'phase',phase, 'unit_key',unit_key, 'step_attempt',step_attempt, 'dispatch_seq',dispatch_seq, 'retry_count',retry_count, 'max_retries',max_retries, 'next_run_at',next_run_at, 'deadline_at',deadline_at, 'heartbeat_at',heartbeat_at, 'error_class',error_class, 'error_code',error_code, 'run_id',run_id, 'original_error_ordinal',original_error_ordinal, 'original_error_digest',original_error_digest, 'linked_job_id',linked_job_id, 'legacy_action',legacy_action, 'legacy_actor',legacy_actor, 'legacy_evidence_at',legacy_evidence_at, 'legacy_dead_letter_id',legacy_dead_letter_id, 'legacy_run_status',legacy_run_status, '腾讯文档路径',display_source_path, '腾讯文件ID',display_file_id, '来源类型',display_source_type, '原文字节',display_file_bytes, '大小依据',display_size_basis, '原生响应字节',native_raw_bytes, '大小上限',display_limit_bytes, '至少已读取字节',display_lower_bytes)::text AS \"详情\"\nFROM candidates c CROSS JOIN gate WHERE gate.n<=10000\nUNION ALL\nSELECT '至少10001条，请缩小筛选范围','','','','','','',NULL::timestamptz,NULL::timestamptz,'','' FROM gate WHERE gate.n>10000;\n",
+              "datasource": {
+                "type": "postgres",
+                "uid": "weknora-postgres"
+              }
+            }
           ],
-          "fields": ""
-        }
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "filterable": true,
-            "minWidth": 90
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "详情"
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "enablePagination": true,
+            "footer": {
+              "show": false,
+              "enablePagination": true,
+              "countRows": true,
+              "reducer": [
+                "count"
+              ],
+              "fields": ""
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "noValue": "未记录",
+              "custom": {
+                "filterable": true,
+                "minWidth": 70,
+                "wrapText": false
+              }
             },
-            "properties": [
+            "overrides": [
               {
-                "id": "custom.width",
-                "value": 130
-              },
-              {
-                "id": "custom.inspect",
-                "value": true
-              },
-              {
-                "id": "mappings",
-                "value": [
+                "matcher": {
+                  "id": "byName",
+                  "options": "详情"
+                },
+                "properties": [
                   {
-                    "type": "regex",
-                    "options": {
-                      "pattern": ".*",
-                      "result": {
-                        "text": "查看记录"
+                    "id": "custom.width",
+                    "value": 70
+                  },
+                  {
+                    "id": "custom.inspect",
+                    "value": true
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "regex",
+                        "options": {
+                          "pattern": ".*",
+                          "result": {
+                            "text": "查看"
+                          }
+                        }
                       }
-                    }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "文档名称"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 190
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "腾讯文档路径"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 230
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "文件 / 响应大小"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 145
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "工作空间 / 知识库"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 180
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "处理阶段"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 105
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "状态"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 90
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "异常原因"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 230
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "记录时间"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 165
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "更新时间"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 165
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "文档名称"
+                },
+                "properties": [
+                  {
+                    "id": "custom.wrapText",
+                    "value": true
+                  },
+                  {
+                    "id": "custom.inspect",
+                    "value": true
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "腾讯文档路径"
+                },
+                "properties": [
+                  {
+                    "id": "custom.wrapText",
+                    "value": true
+                  },
+                  {
+                    "id": "custom.inspect",
+                    "value": true
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "工作空间 / 知识库"
+                },
+                "properties": [
+                  {
+                    "id": "custom.wrapText",
+                    "value": true
+                  },
+                  {
+                    "id": "custom.inspect",
+                    "value": true
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "异常原因"
+                },
+                "properties": [
+                  {
+                    "id": "custom.wrapText",
+                    "value": true
+                  },
+                  {
+                    "id": "custom.inspect",
+                    "value": true
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "腾讯原文"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 80
+                  },
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "打开腾讯原文",
+                        "url": "${__value.raw}",
+                        "targetBlank": true
+                      }
+                    ]
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "regex",
+                        "options": {
+                          "pattern": "^https://docs[.]qq[.]com/.*",
+                          "result": {
+                            "text": "打开"
+                          }
+                        }
+                      }
+                    ]
                   }
                 ]
               }
             ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "文档或批次"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 260
-              }
-            ]
           }
-        ]
-      }
-    },
-    {
-      "id": 5,
-      "type": "table",
-      "title": "尝试与操作时间线",
-      "gridPos": {
-        "h": 13,
-        "w": 24,
-        "x": 0,
-        "y": 52
-      },
-      "description": "只读生命周期事实视图。每个表格一次读取完整结果；在浏览器内翻页不会重新查询。默认关闭自动刷新；手动刷新生成新快照。超过10000条明确提示缩小筛选。工作空间变量用于过滤，不构成访问权限；仅管理员可访问此数据源。操作入口：WeKnora 设置 → 处理生命周期。旧流程数据标记 legacy_unverified。",
-      "datasource": {
-        "type": "postgres",
-        "uid": "weknora-postgres"
-      },
-      "targets": [
+        },
         {
-          "refId": "A",
-          "format": "table",
-          "rawQuery": true,
-          "editorMode": "code",
-          "rawSql": "-- All pages use this one result set. Above the bound, return an explicit\n-- lower-bound notice, never a truncated list with a fabricated complete count.\nWITH candidates AS MATERIALIZED (\n SELECT * FROM mwe_processing_attempt_timeline WHERE (${workspace:sqlstring}='' OR tenant_id::text=${workspace:sqlstring}) AND (${knowledge_base:sqlstring}='' OR knowledge_base_id::text=${knowledge_base:sqlstring}) AND (${source:sqlstring}='' OR datasource_id::text=${source:sqlstring}) AND (${run:sqlstring}='' OR run_id::text=${run:sqlstring}) AND (${status:sqlstring}='' OR status::text=${status:sqlstring}) AND (${stage:sqlstring}='' OR stage::text=${stage:sqlstring}) AND (${search:sqlstring}='' OR position(lower(${search:sqlstring}) in lower(title||' '||external_id||' '||job_id))>0) AND $__timeFilter(observed_at)\n ORDER BY observed_at DESC,row_id DESC LIMIT 10001\n), gate AS (SELECT COUNT(*) AS n FROM candidates)\nSELECT '完整快照：'||gate.n::text||'条' AS \"查询状态\", c.title AS \"文档或批次\",\n c.tenant_id::text AS \"工作空间ID\", c.kb_name AS \"知识库\", c.source_name AS \"数据源\",\n c.generation::text AS \"文档版本\", c.status AS \"状态\", c.stage AS \"阶段\", c.observed_at::text AS \"记录时间\",\n jsonb_build_object('job_id',job_id, 'knowledge_base_id',knowledge_base_id, 'datasource_id',datasource_id, 'source_revision',source_revision, 'revision',revision, 'publication_epoch',publication_epoch, 'event_id',event_id, 'step_id',step_id, 'event_revision',event_revision, 'step_attempt',step_attempt, 'dispatch_seq',dispatch_seq, 'event_type',event_type, 'actor',actor, 'action',action, 'operation_request_id',operation_request_id, 'resolves_event_id',resolves_event_id, 'resolution_type',resolution_type, 'run_id',run_id, 'original_error_ordinal',original_error_ordinal, 'original_error_digest',original_error_digest, 'linked_job_id',linked_job_id, 'legacy_action',legacy_action, 'legacy_actor',legacy_actor, 'legacy_evidence_at',legacy_evidence_at, 'legacy_dead_letter_id',legacy_dead_letter_id, 'legacy_run_status',legacy_run_status)::text AS \"详情\"\nFROM candidates c CROSS JOIN gate WHERE gate.n<=10000\nUNION ALL\nSELECT '至少10001条，请缩小筛选范围','','','','','','','','','' FROM gate WHERE gate.n>10000;\n",
+          "id": 5,
+          "type": "table",
+          "title": "尝试与操作时间线",
+          "gridPos": {
+            "h": 13,
+            "w": 24,
+            "x": 0,
+            "y": 56
+          },
+          "description": "按文档定位和复查。失败表按同一文档、阶段和错误合并，详情保留所有事件 ID，完整事件仍在时间线。腾讯路径使用当时源端扫描的选定范围，不采用 WeKnora 后来移动的目录；原文链接仅使用已记录的腾讯地址。大小以1024换算，标注“响应”时是原生接口返回量，不是文件大小；未知不使用配额、上限或旧版本替代。每表完整快照，在浏览器分页；超过10000条要求缩小筛选。旧记录通过“记录范围”单独查看，不改写其当时结果。",
           "datasource": {
             "type": "postgres",
             "uid": "weknora-postgres"
-          }
-        }
-      ],
-      "options": {
-        "showHeader": true,
-        "cellHeight": "sm",
-        "enablePagination": true,
-        "footer": {
-          "show": false,
-          "enablePagination": true,
-          "countRows": true,
-          "reducer": [
-            "count"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawQuery": true,
+              "editorMode": "code",
+              "rawSql": "-- All pages use this one result set. Above the bound, return an explicit\n-- lower-bound notice, never a truncated list with a fabricated complete count.\nWITH matching AS (\n SELECT c.*,\n COALESCE(NULLIF(sc.document_title,''),NULLIF(jc.document_title,''),NULLIF(c.title,''),NULLIF(c.source_name,''),'未记录文档名称') AS display_title,\n COALESCE(sc.source_path,jc.source_path,lc.source_path,k.metadata->>'source_path') AS display_source_path,\n COALESCE(sc.file_id,jc.file_id,k.metadata->>'file_id') AS display_file_id,\n COALESCE(sc.source_url,jc.source_url) AS display_source_url,\n COALESCE(jc.source_type,ds.type) AS display_source_type,\n COALESCE(jc.workspace_name,t.name,c.tenant_id::text) AS display_workspace,\n COALESCE(jc.file_bytes,CASE WHEN sc.step_attempt=c.step_attempt AND sc.stage='download' THEN sc.actual_bytes END,lc.actual_bytes,CASE WHEN k.file_size>0 THEN k.file_size END) AS display_file_bytes,\n COALESCE(jc.size_basis,CASE WHEN sc.step_attempt=c.step_attempt AND sc.stage='download' AND sc.actual_bytes IS NOT NULL THEN '本次下载失败记录' END,CASE WHEN lc.actual_bytes IS NOT NULL THEN '原始失败记录' END,CASE WHEN k.file_size>0 THEN '旧知识文件记录' END,CASE WHEN c.native_raw_bytes IS NOT NULL THEN '原生接口响应；不是导入文件大小' ELSE '未记录；不使用配额、上限或旧版本大小替代' END) AS display_size_basis,\n COALESCE(CASE WHEN sc.step_attempt=c.step_attempt THEN sc.limit_bytes END,lc.limit_bytes) AS display_limit_bytes,\n COALESCE(CASE WHEN sc.step_attempt=c.step_attempt THEN sc.observed_at_least_bytes END,lc.observed_at_least_bytes) AS display_lower_bytes,\n COALESCE(NULL::text,sc.error_code,'') AS display_error_code\n FROM mwe_processing_attempt_timeline c\n LEFT JOIN processing_job_context jc ON jc.tenant_id=c.tenant_id AND jc.job_id=c.job_id\n LEFT JOIN processing_step_context sc ON sc.tenant_id=c.tenant_id AND sc.job_id=c.job_id AND sc.step_id=NULLIF(c.step_id,'')\n LEFT JOIN processing_legacy_context lc ON lc.tenant_id=c.tenant_id AND lc.datasource_id=c.datasource_id AND lc.run_id=c.run_id AND lc.error_ordinal=c.original_error_ordinal AND lc.error_digest=c.original_error_digest\n LEFT JOIN knowledges k ON COALESCE(c.job_id,'')='' AND c.original_error_ordinal IS NULL AND k.id=c.knowledge_id AND k.tenant_id=c.tenant_id AND k.knowledge_base_id=c.knowledge_base_id AND k.metadata->>'datasource_id'=c.datasource_id\n LEFT JOIN tenants t ON t.id=c.tenant_id\n LEFT JOIN data_sources ds ON ds.id=c.datasource_id AND ds.tenant_id=c.tenant_id AND ds.knowledge_base_id=c.knowledge_base_id\n WHERE (${workspace:sqlstring}='' OR c.tenant_id::text=${workspace:sqlstring}) AND (${knowledge_base:sqlstring}='' OR c.knowledge_base_id::text=${knowledge_base:sqlstring}) AND (${source:sqlstring}='' OR c.datasource_id::text=${source:sqlstring}) AND (${run:sqlstring}='' OR c.run_id::text=${run:sqlstring}) AND (${status:sqlstring} IN ('','all') OR c.status::text=${status:sqlstring}) AND (${stage:sqlstring}='' OR c.stage::text=${stage:sqlstring}) AND (${records:sqlstring}='all' OR (${records:sqlstring}='current' AND c.evidence_basis='verified_v2') OR (${records:sqlstring}='legacy' AND c.evidence_basis<>'verified_v2')) AND (${search:sqlstring}='' OR position(lower(${search:sqlstring}) in lower(concat_ws(' ',sc.document_title,c.title,c.external_id,c.job_id,sc.file_id,jc.file_id,sc.source_path,jc.source_path,lc.source_path,k.metadata->>'source_path')))>0) AND $__timeFilter(c.observed_at)\n), candidates AS MATERIALIZED (\n SELECT * FROM matching\n ORDER BY observed_at DESC,row_id DESC LIMIT 10001\n), gate AS (SELECT COUNT(*) AS n FROM candidates)\nSELECT display_title AS \"文档名称\",\n COALESCE(NULLIF(display_source_path,''),CASE WHEN display_source_type='tencent_docs' THEN '未记录' ELSE '不适用' END) AS \"腾讯文档路径\",\n CASE WHEN display_file_bytes IS NULL AND native_raw_bytes IS NOT NULL THEN CASE WHEN native_raw_bytes::text ~ '^[0-9]{1,18}$' THEN\n      CASE WHEN (native_raw_bytes::text)::numeric>=1073741824 THEN round((native_raw_bytes::text)::numeric/1073741824,2)::text||' GB'\n           WHEN (native_raw_bytes::text)::numeric>=1048576 THEN round((native_raw_bytes::text)::numeric/1048576,2)::text||' MB'\n           ELSE round((native_raw_bytes::text)::numeric/1024,2)::text||' KB' END ELSE '未记录' END||'（响应）' ELSE CASE WHEN display_file_bytes::text ~ '^[0-9]{1,18}$' THEN\n      CASE WHEN (display_file_bytes::text)::numeric>=1073741824 THEN round((display_file_bytes::text)::numeric/1073741824,2)::text||' GB'\n           WHEN (display_file_bytes::text)::numeric>=1048576 THEN round((display_file_bytes::text)::numeric/1048576,2)::text||' MB'\n           ELSE round((display_file_bytes::text)::numeric/1024,2)::text||' KB' END ELSE '未记录' END END AS \"文件 / 响应大小\",\n display_workspace||E'\\n'||kb_name AS \"工作空间 / 知识库\",\n CASE stage WHEN 'scan' THEN '扫描批次' WHEN 'legacy_scan' THEN '历史扫描' WHEN 'scan_page' THEN '扫描目录' WHEN 'scan_document' THEN '确认源文档' WHEN 'native_read' THEN '读取源内容' WHEN 'export_start' THEN '发起导出' WHEN 'export_poll' THEN '等待导出' WHEN 'download' THEN '下载文件' WHEN 'normalize' THEN '内容转换' WHEN 'parse' THEN '解析' WHEN 'assets' THEN '收集图片' WHEN 'images' THEN '图片处理' WHEN 'image_ocr' THEN '图片文字识别' WHEN 'image_caption' THEN '图片描述' WHEN 'chunk' THEN '文档分块' WHEN 'embedding' THEN '生成向量' WHEN 'text_index' THEN '正文索引' WHEN 'image_index' THEN '图片索引' WHEN 'summary' THEN '摘要' WHEN 'questions' THEN '生成问题' WHEN 'publish' THEN '发布版本' WHEN 'retire' THEN '清理版本' WHEN 'retire_previous' THEN '清理旧版本' WHEN 'legacy_snapshot' THEN '核验旧文件' WHEN 'legacy_indexes' THEN '核验旧索引' WHEN 'question' THEN '生成单条问题' WHEN 'question_index' THEN '问题索引' WHEN 'summary_index' THEN '摘要索引' WHEN 'index' THEN '索引写入' ELSE COALESCE(NULLIF(stage,''),'—') END AS \"处理阶段\",\n CASE status WHEN 'planned' THEN '待启动' WHEN 'enqueue_pending' THEN '待派发' WHEN 'queued' THEN '排队中' WHEN 'running' THEN '处理中' WHEN 'waiting_external' THEN '等待外部结果' WHEN 'retry_wait' THEN '等待重试' WHEN 'succeeded' THEN '已完成' WHEN 'success' THEN '历史成功' WHEN 'completed' THEN '历史完成' WHEN 'partial' THEN '历史部分成功' WHEN 'failed' THEN '失败' WHEN 'blocked' THEN '需处理' WHEN 'canceled' THEN '已取消' WHEN 'superseded' THEN '已替代' WHEN 'skipped' THEN '已跳过' WHEN 'legacy_unverified' THEN '历史待核实' ELSE COALESCE(NULLIF(status,''),'—') END AS \"状态\",\n CASE event_type WHEN 'step_failed' THEN '阶段失败' WHEN 'step_succeeded' THEN '阶段完成' WHEN 'legacy_error' THEN '历史失败' WHEN 'legacy_evidence' THEN '后续核验证据' WHEN 'run_finished' THEN '批次结束' ELSE COALESCE(NULLIF(event_type,''),'—') END AS \"事件\",\n COALESCE(NULLIF(actor,''),'—') AS \"操作人\",\n observed_at AS \"记录时间\",\n display_source_url AS \"腾讯原文\",\n jsonb_build_object('job_id',job_id, 'knowledge_base_id',knowledge_base_id, 'datasource_id',datasource_id, 'source_revision',source_revision, 'revision',revision, 'publication_epoch',publication_epoch, 'event_id',event_id, 'step_id',step_id, 'event_revision',event_revision, 'step_attempt',step_attempt, 'dispatch_seq',dispatch_seq, 'event_type',event_type, 'actor',actor, 'action',action, 'operation_request_id',operation_request_id, 'resolves_event_id',resolves_event_id, 'resolution_type',resolution_type, 'run_id',run_id, 'original_error_ordinal',original_error_ordinal, 'original_error_digest',original_error_digest, 'linked_job_id',linked_job_id, 'legacy_action',legacy_action, 'legacy_actor',legacy_actor, 'legacy_evidence_at',legacy_evidence_at, 'legacy_dead_letter_id',legacy_dead_letter_id, 'legacy_run_status',legacy_run_status, '腾讯文档路径',display_source_path, '腾讯文件ID',display_file_id, '来源类型',display_source_type, '原文字节',display_file_bytes, '大小依据',display_size_basis, '原生响应字节',native_raw_bytes, '大小上限',display_limit_bytes, '至少已读取字节',display_lower_bytes)::text AS \"详情\"\nFROM candidates c CROSS JOIN gate WHERE gate.n<=10000\nUNION ALL\nSELECT '至少10001条，请缩小筛选范围','','','','','','','',NULL::timestamptz,'','' FROM gate WHERE gate.n>10000;\n",
+              "datasource": {
+                "type": "postgres",
+                "uid": "weknora-postgres"
+              }
+            }
           ],
-          "fields": ""
-        }
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "filterable": true,
-            "minWidth": 90
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "详情"
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "enablePagination": true,
+            "footer": {
+              "show": false,
+              "enablePagination": true,
+              "countRows": true,
+              "reducer": [
+                "count"
+              ],
+              "fields": ""
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "noValue": "未记录",
+              "custom": {
+                "filterable": true,
+                "minWidth": 70,
+                "wrapText": false
+              }
             },
-            "properties": [
+            "overrides": [
               {
-                "id": "custom.width",
-                "value": 130
-              },
-              {
-                "id": "custom.inspect",
-                "value": true
-              },
-              {
-                "id": "mappings",
-                "value": [
+                "matcher": {
+                  "id": "byName",
+                  "options": "详情"
+                },
+                "properties": [
                   {
-                    "type": "regex",
-                    "options": {
-                      "pattern": ".*",
-                      "result": {
-                        "text": "查看记录"
+                    "id": "custom.width",
+                    "value": 70
+                  },
+                  {
+                    "id": "custom.inspect",
+                    "value": true
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "regex",
+                        "options": {
+                          "pattern": ".*",
+                          "result": {
+                            "text": "查看"
+                          }
+                        }
                       }
-                    }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "文档名称"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 190
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "腾讯文档路径"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 230
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "文件 / 响应大小"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 145
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "工作空间 / 知识库"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 180
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "处理阶段"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 105
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "状态"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 90
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "异常原因"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 230
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "记录时间"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 165
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "更新时间"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 165
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "文档名称"
+                },
+                "properties": [
+                  {
+                    "id": "custom.wrapText",
+                    "value": true
+                  },
+                  {
+                    "id": "custom.inspect",
+                    "value": true
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "腾讯文档路径"
+                },
+                "properties": [
+                  {
+                    "id": "custom.wrapText",
+                    "value": true
+                  },
+                  {
+                    "id": "custom.inspect",
+                    "value": true
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "工作空间 / 知识库"
+                },
+                "properties": [
+                  {
+                    "id": "custom.wrapText",
+                    "value": true
+                  },
+                  {
+                    "id": "custom.inspect",
+                    "value": true
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "异常原因"
+                },
+                "properties": [
+                  {
+                    "id": "custom.wrapText",
+                    "value": true
+                  },
+                  {
+                    "id": "custom.inspect",
+                    "value": true
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "腾讯原文"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 80
+                  },
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "打开腾讯原文",
+                        "url": "${__value.raw}",
+                        "targetBlank": true
+                      }
+                    ]
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "regex",
+                        "options": {
+                          "pattern": "^https://docs[.]qq[.]com/.*",
+                          "result": {
+                            "text": "打开"
+                          }
+                        }
+                      }
+                    ]
                   }
                 ]
               }
             ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "文档或批次"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 260
-              }
-            ]
           }
-        ]
-      }
-    },
-    {
-      "id": 6,
-      "type": "table",
-      "title": "生命周期一致性检查",
-      "gridPos": {
-        "h": 13,
-        "w": 24,
-        "x": 0,
-        "y": 65
-      },
-      "description": "只读生命周期事实视图。每个表格一次读取完整结果；在浏览器内翻页不会重新查询。默认关闭自动刷新；手动刷新生成新快照。超过10000条明确提示缩小筛选。工作空间变量用于过滤，不构成访问权限；仅管理员可访问此数据源。操作入口：WeKnora 设置 → 处理生命周期。旧流程数据标记 legacy_unverified。",
-      "datasource": {
-        "type": "postgres",
-        "uid": "weknora-postgres"
-      },
-      "targets": [
+        },
         {
-          "refId": "A",
-          "format": "table",
-          "rawQuery": true,
-          "editorMode": "code",
-          "rawSql": "-- All pages use this one result set. Above the bound, return an explicit\n-- lower-bound notice, never a truncated list with a fabricated complete count.\nWITH candidates AS MATERIALIZED (\n SELECT * FROM mwe_processing_lifecycle_inconsistencies WHERE (${workspace:sqlstring}='' OR tenant_id::text=${workspace:sqlstring}) AND (${knowledge_base:sqlstring}='' OR knowledge_base_id::text=${knowledge_base:sqlstring}) AND (${source:sqlstring}='' OR datasource_id::text=${source:sqlstring}) AND (${run:sqlstring}='' OR run_id::text=${run:sqlstring}) AND (${status:sqlstring}='' OR status::text=${status:sqlstring}) AND (${stage:sqlstring}='' OR stage::text=${stage:sqlstring}) AND (${search:sqlstring}='' OR position(lower(${search:sqlstring}) in lower(title||' '||external_id||' '||job_id))>0)\n ORDER BY observed_at DESC,row_id DESC LIMIT 10001\n), gate AS (SELECT COUNT(*) AS n FROM candidates)\nSELECT '完整快照：'||gate.n::text||'条' AS \"查询状态\", c.title AS \"文档或批次\",\n c.tenant_id::text AS \"工作空间ID\", c.kb_name AS \"知识库\", c.source_name AS \"数据源\",\n c.generation::text AS \"文档版本\", c.status AS \"状态\", c.stage AS \"阶段\", c.observed_at::text AS \"记录时间\",\n jsonb_build_object('job_id',job_id, 'knowledge_base_id',knowledge_base_id, 'datasource_id',datasource_id, 'source_revision',source_revision, 'revision',revision, 'publication_epoch',publication_epoch, 'step_id',step_id, 'readiness',readiness, 'completeness',completeness, 'retirement_state',retirement_state, 'is_current',is_current, 'is_published',is_published, 'cleanup_problem',cleanup_problem, 'run_id',run_id, 'original_error_ordinal',original_error_ordinal, 'original_error_digest',original_error_digest, 'linked_job_id',linked_job_id, 'legacy_action',legacy_action, 'legacy_actor',legacy_actor, 'legacy_evidence_at',legacy_evidence_at, 'legacy_dead_letter_id',legacy_dead_letter_id, 'legacy_run_status',legacy_run_status)::text AS \"详情\"\nFROM candidates c CROSS JOIN gate WHERE gate.n<=10000\nUNION ALL\nSELECT '至少10001条，请缩小筛选范围','','','','','','','','','' FROM gate WHERE gate.n>10000;\n",
+          "id": 6,
+          "type": "table",
+          "title": "生命周期一致性检查",
+          "gridPos": {
+            "h": 13,
+            "w": 24,
+            "x": 0,
+            "y": 69
+          },
+          "description": "按文档定位和复查。失败表按同一文档、阶段和错误合并，详情保留所有事件 ID，完整事件仍在时间线。腾讯路径使用当时源端扫描的选定范围，不采用 WeKnora 后来移动的目录；原文链接仅使用已记录的腾讯地址。大小以1024换算，标注“响应”时是原生接口返回量，不是文件大小；未知不使用配额、上限或旧版本替代。每表完整快照，在浏览器分页；超过10000条要求缩小筛选。旧记录通过“记录范围”单独查看，不改写其当时结果。",
           "datasource": {
             "type": "postgres",
             "uid": "weknora-postgres"
-          }
-        }
-      ],
-      "options": {
-        "showHeader": true,
-        "cellHeight": "sm",
-        "enablePagination": true,
-        "footer": {
-          "show": false,
-          "enablePagination": true,
-          "countRows": true,
-          "reducer": [
-            "count"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawQuery": true,
+              "editorMode": "code",
+              "rawSql": "-- All pages use this one result set. Above the bound, return an explicit\n-- lower-bound notice, never a truncated list with a fabricated complete count.\nWITH matching AS (\n SELECT c.*,\n COALESCE(NULLIF(sc.document_title,''),NULLIF(jc.document_title,''),NULLIF(c.title,''),NULLIF(c.source_name,''),'未记录文档名称') AS display_title,\n COALESCE(sc.source_path,jc.source_path,lc.source_path,k.metadata->>'source_path') AS display_source_path,\n COALESCE(sc.file_id,jc.file_id,k.metadata->>'file_id') AS display_file_id,\n COALESCE(sc.source_url,jc.source_url) AS display_source_url,\n COALESCE(jc.source_type,ds.type) AS display_source_type,\n COALESCE(jc.workspace_name,t.name,c.tenant_id::text) AS display_workspace,\n COALESCE(jc.file_bytes,CASE WHEN TRUE AND sc.stage='download' THEN sc.actual_bytes END,lc.actual_bytes,CASE WHEN k.file_size>0 THEN k.file_size END) AS display_file_bytes,\n COALESCE(jc.size_basis,CASE WHEN TRUE AND sc.stage='download' AND sc.actual_bytes IS NOT NULL THEN '本次下载失败记录' END,CASE WHEN lc.actual_bytes IS NOT NULL THEN '原始失败记录' END,CASE WHEN k.file_size>0 THEN '旧知识文件记录' END,CASE WHEN c.native_raw_bytes IS NOT NULL THEN '原生接口响应；不是导入文件大小' ELSE '未记录；不使用配额、上限或旧版本大小替代' END) AS display_size_basis,\n COALESCE(CASE WHEN TRUE THEN sc.limit_bytes END,lc.limit_bytes) AS display_limit_bytes,\n COALESCE(CASE WHEN TRUE THEN sc.observed_at_least_bytes END,lc.observed_at_least_bytes) AS display_lower_bytes,\n COALESCE(NULL::text,sc.error_code,'') AS display_error_code\n FROM mwe_processing_lifecycle_inconsistencies c\n LEFT JOIN processing_job_context jc ON jc.tenant_id=c.tenant_id AND jc.job_id=c.job_id\n LEFT JOIN processing_step_context sc ON sc.tenant_id=c.tenant_id AND sc.job_id=c.job_id AND sc.step_id=NULLIF(c.step_id,'')\n LEFT JOIN processing_legacy_context lc ON lc.tenant_id=c.tenant_id AND lc.datasource_id=c.datasource_id AND lc.run_id=c.run_id AND lc.error_ordinal=c.original_error_ordinal AND lc.error_digest=c.original_error_digest\n LEFT JOIN knowledges k ON COALESCE(c.job_id,'')='' AND c.original_error_ordinal IS NULL AND k.id=c.knowledge_id AND k.tenant_id=c.tenant_id AND k.knowledge_base_id=c.knowledge_base_id AND k.metadata->>'datasource_id'=c.datasource_id\n LEFT JOIN tenants t ON t.id=c.tenant_id\n LEFT JOIN data_sources ds ON ds.id=c.datasource_id AND ds.tenant_id=c.tenant_id AND ds.knowledge_base_id=c.knowledge_base_id\n WHERE (${workspace:sqlstring}='' OR c.tenant_id::text=${workspace:sqlstring}) AND (${knowledge_base:sqlstring}='' OR c.knowledge_base_id::text=${knowledge_base:sqlstring}) AND (${source:sqlstring}='' OR c.datasource_id::text=${source:sqlstring}) AND (${run:sqlstring}='' OR c.run_id::text=${run:sqlstring}) AND (${status:sqlstring} IN ('','all') OR c.status::text=${status:sqlstring}) AND (${stage:sqlstring}='' OR c.stage::text=${stage:sqlstring}) AND (${records:sqlstring}='all' OR (${records:sqlstring}='current' AND c.evidence_basis='verified_v2') OR (${records:sqlstring}='legacy' AND c.evidence_basis<>'verified_v2')) AND (${search:sqlstring}='' OR position(lower(${search:sqlstring}) in lower(concat_ws(' ',sc.document_title,c.title,c.external_id,c.job_id,sc.file_id,jc.file_id,sc.source_path,jc.source_path,lc.source_path,k.metadata->>'source_path')))>0)\n), candidates AS MATERIALIZED (\n SELECT * FROM matching\n ORDER BY observed_at DESC,row_id DESC LIMIT 10001\n), gate AS (SELECT COUNT(*) AS n FROM candidates)\nSELECT display_title AS \"文档名称\",\n COALESCE(NULLIF(display_source_path,''),CASE WHEN display_source_type='tencent_docs' THEN '未记录' ELSE '不适用' END) AS \"腾讯文档路径\",\n CASE WHEN display_file_bytes IS NULL AND native_raw_bytes IS NOT NULL THEN CASE WHEN native_raw_bytes::text ~ '^[0-9]{1,18}$' THEN\n      CASE WHEN (native_raw_bytes::text)::numeric>=1073741824 THEN round((native_raw_bytes::text)::numeric/1073741824,2)::text||' GB'\n           WHEN (native_raw_bytes::text)::numeric>=1048576 THEN round((native_raw_bytes::text)::numeric/1048576,2)::text||' MB'\n           ELSE round((native_raw_bytes::text)::numeric/1024,2)::text||' KB' END ELSE '未记录' END||'（响应）' ELSE CASE WHEN display_file_bytes::text ~ '^[0-9]{1,18}$' THEN\n      CASE WHEN (display_file_bytes::text)::numeric>=1073741824 THEN round((display_file_bytes::text)::numeric/1073741824,2)::text||' GB'\n           WHEN (display_file_bytes::text)::numeric>=1048576 THEN round((display_file_bytes::text)::numeric/1048576,2)::text||' MB'\n           ELSE round((display_file_bytes::text)::numeric/1024,2)::text||' KB' END ELSE '未记录' END END AS \"文件 / 响应大小\",\n display_workspace||E'\\n'||kb_name AS \"工作空间 / 知识库\",\n CASE stage WHEN 'scan' THEN '扫描批次' WHEN 'legacy_scan' THEN '历史扫描' WHEN 'scan_page' THEN '扫描目录' WHEN 'scan_document' THEN '确认源文档' WHEN 'native_read' THEN '读取源内容' WHEN 'export_start' THEN '发起导出' WHEN 'export_poll' THEN '等待导出' WHEN 'download' THEN '下载文件' WHEN 'normalize' THEN '内容转换' WHEN 'parse' THEN '解析' WHEN 'assets' THEN '收集图片' WHEN 'images' THEN '图片处理' WHEN 'image_ocr' THEN '图片文字识别' WHEN 'image_caption' THEN '图片描述' WHEN 'chunk' THEN '文档分块' WHEN 'embedding' THEN '生成向量' WHEN 'text_index' THEN '正文索引' WHEN 'image_index' THEN '图片索引' WHEN 'summary' THEN '摘要' WHEN 'questions' THEN '生成问题' WHEN 'publish' THEN '发布版本' WHEN 'retire' THEN '清理版本' WHEN 'retire_previous' THEN '清理旧版本' WHEN 'legacy_snapshot' THEN '核验旧文件' WHEN 'legacy_indexes' THEN '核验旧索引' WHEN 'question' THEN '生成单条问题' WHEN 'question_index' THEN '问题索引' WHEN 'summary_index' THEN '摘要索引' WHEN 'index' THEN '索引写入' ELSE COALESCE(NULLIF(stage,''),'—') END AS \"处理阶段\",\n CASE status WHEN 'planned' THEN '待启动' WHEN 'enqueue_pending' THEN '待派发' WHEN 'queued' THEN '排队中' WHEN 'running' THEN '处理中' WHEN 'waiting_external' THEN '等待外部结果' WHEN 'retry_wait' THEN '等待重试' WHEN 'succeeded' THEN '已完成' WHEN 'success' THEN '历史成功' WHEN 'completed' THEN '历史完成' WHEN 'partial' THEN '历史部分成功' WHEN 'failed' THEN '失败' WHEN 'blocked' THEN '需处理' WHEN 'canceled' THEN '已取消' WHEN 'superseded' THEN '已替代' WHEN 'skipped' THEN '已跳过' WHEN 'legacy_unverified' THEN '历史待核实' ELSE COALESCE(NULLIF(status,''),'—') END AS \"状态\",\n CASE WHEN display_error_code LIKE 'TENCENT_%' THEN '腾讯接口错误：'||display_error_code ELSE CASE display_error_code WHEN 'IDENTITY_UNRESOLVED' THEN '未能确认腾讯文档身份或状态' WHEN 'AUTH_REQUIRED' THEN '来源凭据不可用或失效' WHEN 'SOURCE_SIZE_EXCEEDED' THEN '内容超出大小限制' WHEN 'FILE_SIZE_EXCEEDED' THEN '文件超出大小限制' WHEN 'NATIVE_SIZE_EXCEEDED' THEN '原生内容超出读取限制' WHEN 'NATIVE_CONTENT_UNSUPPORTED' THEN '文档含尚不支持完整读取的内容' WHEN 'SOURCE_CHANGED_DURING_READ' THEN '读取期间源内容发生变化' WHEN 'SOURCE_EMPTY' THEN '新源内容为空，旧版本继续保留' WHEN 'LEGACY_UNVERIFIED' THEN '历史失败尚未核实' WHEN 'STAGE_EXECUTION_ERROR' THEN '本阶段未产出有效结果' WHEN 'RETIREMENT_IO_FAILED' THEN '版本清理未完成' WHEN 'EXPORT_OUTCOME_UNKNOWN' THEN '导出结果不确定，需要核实' WHEN 'STORAGE_QUOTA_EXCEEDED' THEN '存储配额不足' WHEN 'PIPELINE_CHANGED' THEN '处理配置变化，需要新的文档版本' WHEN 'QUESTION_OUTPUT_EMPTY' THEN '模型未返回有效问题' WHEN 'CHUNK_PARENT_MAPPING_INVALID' THEN '分块父子关系校验失败' WHEN 'NATIVE_TYPE_UNSUPPORTED' THEN '暂不支持此类源文档' WHEN 'UPSTREAM_TEMPORARY' THEN '来源接口暂时不可用' ELSE COALESCE(NULLIF(display_error_code,''),'—') END END AS \"异常原因\",\n observed_at AS \"记录时间\",\n display_source_url AS \"腾讯原文\",\n jsonb_build_object('job_id',job_id, 'knowledge_base_id',knowledge_base_id, 'datasource_id',datasource_id, 'source_revision',source_revision, 'revision',revision, 'publication_epoch',publication_epoch, 'step_id',step_id, 'readiness',readiness, 'completeness',completeness, 'retirement_state',retirement_state, 'is_current',is_current, 'is_published',is_published, 'cleanup_problem',cleanup_problem, 'run_id',run_id, 'original_error_ordinal',original_error_ordinal, 'original_error_digest',original_error_digest, 'linked_job_id',linked_job_id, 'legacy_action',legacy_action, 'legacy_actor',legacy_actor, 'legacy_evidence_at',legacy_evidence_at, 'legacy_dead_letter_id',legacy_dead_letter_id, 'legacy_run_status',legacy_run_status, '腾讯文档路径',display_source_path, '腾讯文件ID',display_file_id, '来源类型',display_source_type, '原文字节',display_file_bytes, '大小依据',display_size_basis, '原生响应字节',native_raw_bytes, '大小上限',display_limit_bytes, '至少已读取字节',display_lower_bytes)::text AS \"详情\"\nFROM candidates c CROSS JOIN gate WHERE gate.n<=10000\nUNION ALL\nSELECT '至少10001条，请缩小筛选范围','','','','','','',NULL::timestamptz,'','' FROM gate WHERE gate.n>10000;\n",
+              "datasource": {
+                "type": "postgres",
+                "uid": "weknora-postgres"
+              }
+            }
           ],
-          "fields": ""
-        }
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "filterable": true,
-            "minWidth": 90
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "详情"
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "enablePagination": true,
+            "footer": {
+              "show": false,
+              "enablePagination": true,
+              "countRows": true,
+              "reducer": [
+                "count"
+              ],
+              "fields": ""
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "noValue": "未记录",
+              "custom": {
+                "filterable": true,
+                "minWidth": 70,
+                "wrapText": false
+              }
             },
-            "properties": [
+            "overrides": [
               {
-                "id": "custom.width",
-                "value": 130
-              },
-              {
-                "id": "custom.inspect",
-                "value": true
-              },
-              {
-                "id": "mappings",
-                "value": [
+                "matcher": {
+                  "id": "byName",
+                  "options": "详情"
+                },
+                "properties": [
                   {
-                    "type": "regex",
-                    "options": {
-                      "pattern": ".*",
-                      "result": {
-                        "text": "查看记录"
+                    "id": "custom.width",
+                    "value": 70
+                  },
+                  {
+                    "id": "custom.inspect",
+                    "value": true
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "regex",
+                        "options": {
+                          "pattern": ".*",
+                          "result": {
+                            "text": "查看"
+                          }
+                        }
                       }
-                    }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "文档名称"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 190
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "腾讯文档路径"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 230
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "文件 / 响应大小"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 145
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "工作空间 / 知识库"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 180
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "处理阶段"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 105
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "状态"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 90
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "异常原因"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 230
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "记录时间"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 165
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "更新时间"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 165
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "文档名称"
+                },
+                "properties": [
+                  {
+                    "id": "custom.wrapText",
+                    "value": true
+                  },
+                  {
+                    "id": "custom.inspect",
+                    "value": true
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "腾讯文档路径"
+                },
+                "properties": [
+                  {
+                    "id": "custom.wrapText",
+                    "value": true
+                  },
+                  {
+                    "id": "custom.inspect",
+                    "value": true
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "工作空间 / 知识库"
+                },
+                "properties": [
+                  {
+                    "id": "custom.wrapText",
+                    "value": true
+                  },
+                  {
+                    "id": "custom.inspect",
+                    "value": true
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "异常原因"
+                },
+                "properties": [
+                  {
+                    "id": "custom.wrapText",
+                    "value": true
+                  },
+                  {
+                    "id": "custom.inspect",
+                    "value": true
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "腾讯原文"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 80
+                  },
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "打开腾讯原文",
+                        "url": "${__value.raw}",
+                        "targetBlank": true
+                      }
+                    ]
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "regex",
+                        "options": {
+                          "pattern": "^https://docs[.]qq[.]com/.*",
+                          "result": {
+                            "text": "打开"
+                          }
+                        }
+                      }
+                    ]
                   }
                 ]
               }
             ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "文档或批次"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 260
-              }
-            ]
           }
-        ]
-      }
+        }
+      ]
     }
   ],
   "templating": {
     "list": [
       {
         "name": "workspace",
-        "label": "工作空间ID",
-        "type": "textbox",
-        "query": "",
+        "label": "工作空间",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "weknora-postgres"
+        },
+        "query": "SELECT '全部工作空间' AS __text,'' AS __value UNION ALL SELECT name||' ('||id::text||')',id::text FROM tenants ORDER BY __text",
+        "definition": "SELECT '全部工作空间' AS __text,'' AS __value UNION ALL SELECT name||' ('||id::text||')',id::text FROM tenants ORDER BY __text",
+        "refresh": 1,
         "current": {
-          "text": "",
+          "text": "全部工作空间",
           "value": ""
         },
-        "skipUrlSync": false,
-        "hide": 0
+        "options": [],
+        "hide": 0,
+        "skipUrlSync": false
       },
       {
         "name": "knowledge_base",
-        "label": "知识库ID",
-        "type": "textbox",
-        "query": "",
+        "label": "知识库",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "weknora-postgres"
+        },
+        "query": "SELECT '全部知识库' AS __text,'' AS __value UNION ALL SELECT name,id FROM knowledge_bases WHERE deleted_at IS NULL AND (${workspace:sqlstring}='' OR tenant_id::text=${workspace:sqlstring}) ORDER BY __text",
+        "definition": "SELECT '全部知识库' AS __text,'' AS __value UNION ALL SELECT name,id FROM knowledge_bases WHERE deleted_at IS NULL AND (${workspace:sqlstring}='' OR tenant_id::text=${workspace:sqlstring}) ORDER BY __text",
+        "refresh": 1,
         "current": {
-          "text": "",
+          "text": "全部知识库",
           "value": ""
         },
-        "skipUrlSync": false,
-        "hide": 0
+        "options": [],
+        "hide": 0,
+        "skipUrlSync": false
       },
       {
         "name": "source",
-        "label": "数据源ID",
+        "label": "数据源",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "weknora-postgres"
+        },
+        "query": "SELECT '全部数据源' AS __text,'' AS __value UNION ALL SELECT name,id FROM data_sources WHERE deleted_at IS NULL AND (${workspace:sqlstring}='' OR tenant_id::text=${workspace:sqlstring}) AND (${knowledge_base:sqlstring}='' OR knowledge_base_id::text=${knowledge_base:sqlstring}) ORDER BY __text",
+        "definition": "SELECT '全部数据源' AS __text,'' AS __value UNION ALL SELECT name,id FROM data_sources WHERE deleted_at IS NULL AND (${workspace:sqlstring}='' OR tenant_id::text=${workspace:sqlstring}) AND (${knowledge_base:sqlstring}='' OR knowledge_base_id::text=${knowledge_base:sqlstring}) ORDER BY __text",
+        "refresh": 1,
+        "current": {
+          "text": "全部数据源",
+          "value": ""
+        },
+        "options": [],
+        "hide": 0,
+        "skipUrlSync": false
+      },
+      {
+        "name": "search",
+        "label": "文件名 / 腾讯路径 / ID",
         "type": "textbox",
         "query": "",
         "current": {
@@ -628,19 +1863,7 @@
       },
       {
         "name": "run",
-        "label": "批次ID",
-        "type": "textbox",
-        "query": "",
-        "current": {
-          "text": "",
-          "value": ""
-        },
-        "skipUrlSync": false,
-        "hide": 0
-      },
-      {
-        "name": "status",
-        "label": "状态",
+        "label": "批次 ID",
         "type": "textbox",
         "query": "",
         "current": {
@@ -652,7 +1875,7 @@
       },
       {
         "name": "stage",
-        "label": "阶段",
+        "label": "阶段代码",
         "type": "textbox",
         "query": "",
         "current": {
@@ -663,25 +1886,147 @@
         "hide": 0
       },
       {
-        "name": "search",
-        "label": "文档标题/ID",
-        "type": "textbox",
-        "query": "",
+        "name": "records",
+        "label": "记录范围",
+        "type": "custom",
+        "query": "新流程 : current,历史待核实 : legacy,全部 : all",
         "current": {
-          "text": "",
-          "value": ""
+          "text": "新流程",
+          "value": "current"
         },
-        "skipUrlSync": false,
-        "hide": 0
+        "options": [
+          {
+            "text": "新流程",
+            "value": "current",
+            "selected": true
+          },
+          {
+            "text": "历史待核实",
+            "value": "legacy",
+            "selected": false
+          },
+          {
+            "text": "全部",
+            "value": "all",
+            "selected": false
+          }
+        ],
+        "hide": 0,
+        "skipUrlSync": false
+      },
+      {
+        "name": "status",
+        "label": "状态",
+        "type": "custom",
+        "query": "全部 : all,待启动 : planned,待派发 : enqueue_pending,排队中 : queued,处理中 : running,等待外部结果 : waiting_external,等待重试 : retry_wait,已完成 : succeeded,历史成功 : success,历史完成 : completed,历史部分成功 : partial,失败 : failed,需处理 : blocked,已取消 : canceled,已替代 : superseded,已跳过 : skipped,历史待核实 : legacy_unverified",
+        "current": {
+          "text": "全部",
+          "value": "all"
+        },
+        "options": [
+          {
+            "text": "全部",
+            "value": "all",
+            "selected": true
+          },
+          {
+            "text": "待启动",
+            "value": "planned",
+            "selected": false
+          },
+          {
+            "text": "待派发",
+            "value": "enqueue_pending",
+            "selected": false
+          },
+          {
+            "text": "排队中",
+            "value": "queued",
+            "selected": false
+          },
+          {
+            "text": "处理中",
+            "value": "running",
+            "selected": false
+          },
+          {
+            "text": "等待外部结果",
+            "value": "waiting_external",
+            "selected": false
+          },
+          {
+            "text": "等待重试",
+            "value": "retry_wait",
+            "selected": false
+          },
+          {
+            "text": "已完成",
+            "value": "succeeded",
+            "selected": false
+          },
+          {
+            "text": "历史成功",
+            "value": "success",
+            "selected": false
+          },
+          {
+            "text": "历史完成",
+            "value": "completed",
+            "selected": false
+          },
+          {
+            "text": "历史部分成功",
+            "value": "partial",
+            "selected": false
+          },
+          {
+            "text": "失败",
+            "value": "failed",
+            "selected": false
+          },
+          {
+            "text": "需处理",
+            "value": "blocked",
+            "selected": false
+          },
+          {
+            "text": "已取消",
+            "value": "canceled",
+            "selected": false
+          },
+          {
+            "text": "已替代",
+            "value": "superseded",
+            "selected": false
+          },
+          {
+            "text": "已跳过",
+            "value": "skipped",
+            "selected": false
+          },
+          {
+            "text": "历史待核实",
+            "value": "legacy_unverified",
+            "selected": false
+          }
+        ],
+        "hide": 0,
+        "skipUrlSync": false
       }
     ]
   },
   "links": [
     {
-      "title": "基础设施与旧流程记录",
+      "title": "运行总览与历史复查",
       "type": "link",
       "url": "/d/mwe-kb-observability-v1",
       "targetBlank": false
+    },
+    {
+      "title": "WeKnora 处理操作",
+      "type": "link",
+      "url": "https://kb.mwexk.com/platform/settings?section=processing-history",
+      "targetBlank": true
     }
   ]
 }

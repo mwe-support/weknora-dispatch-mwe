@@ -56,6 +56,54 @@ CREATE OR REPLACE VIEW :"observer_schema".task_dead_letters AS
 CREATE OR REPLACE VIEW :"observer_schema".task_pending_ops AS
  SELECT id,tenant_id,task_type,enqueued_at FROM :"app_schema".task_pending_ops
  WHERE step_id IS NULL OR delivered_at IS NULL;
+-- Context is keyed to the exact job or scan step, never joined by title or to
+-- the newest knowledge version. Only recorded source metadata is exposed.
+CREATE OR REPLACE VIEW :"observer_schema".processing_job_context AS
+ SELECT j.tenant_id,j.id AS job_id,COALESCE(t.name,j.tenant_id::text) AS workspace_name,
+ ds.type AS source_type,NULLIF(j.metadata->>'file_id','') AS file_id,
+ CASE WHEN j.kind='document' THEN NULLIF(j.metadata->>'title','') END AS document_title,
+ CASE WHEN j.kind='document' AND ds.type='tencent_docs' AND NULLIF(j.metadata->>'title','') IS NOT NULL
+      THEN concat_ws('/',NULLIF(j.metadata->>'folder_path',''),j.metadata->>'title') END AS source_path,
+ CASE WHEN j.metadata->>'url' ~ '^https://docs[.]qq[.]com/[A-Za-z0-9_./%~-]+([?](resourceId|mode)=[A-Za-z0-9_%~-]+(&(resourceId|mode)=[A-Za-z0-9_%~-]+)*)?$'
+      THEN j.metadata->>'url' END AS source_url,
+ CASE WHEN file_result.bytes ~ '^[0-9]{1,18}$' THEN file_result.bytes::bigint END AS file_bytes,
+ CASE WHEN file_result.bytes ~ '^[0-9]{1,18}$' THEN file_result.basis END AS size_basis,
+ (SELECT s.id FROM :"app_schema".processing_steps s WHERE s.job_id=j.id
+  AND s.status IN ('failed','blocked','retry_wait','running','waiting_external','enqueue_pending','queued')
+  ORDER BY CASE s.status WHEN 'failed' THEN 0 WHEN 'blocked' THEN 1 WHEN 'retry_wait' THEN 2 WHEN 'running' THEN 3 ELSE 4 END,s.created_at,s.id LIMIT 1) AS active_step_id
+ FROM :"app_schema".processing_jobs j
+ LEFT JOIN :"app_schema".data_sources ds ON ds.id=j.datasource_id AND ds.tenant_id=j.tenant_id AND ds.knowledge_base_id=j.knowledge_base_id
+ LEFT JOIN :"app_schema".tenants t ON t.id=j.tenant_id
+ LEFT JOIN LATERAL (
+   SELECT s.result->>'bytes' AS bytes,
+    CASE s.stage WHEN 'download' THEN '本版本完整导出/下载文件' ELSE '已核验旧版本原文件' END AS basis
+   FROM :"app_schema".processing_steps s WHERE s.job_id=j.id AND s.unit_key='body'
+    AND s.stage IN ('download','legacy_snapshot') AND s.status='succeeded'
+   ORDER BY CASE s.stage WHEN 'download' THEN 0 ELSE 1 END,s.id LIMIT 1
+ ) file_result ON true;
+CREATE OR REPLACE VIEW :"observer_schema".processing_step_context AS
+ SELECT j.tenant_id,s.job_id,s.id AS step_id,s.stage,s.step_attempt,
+ CASE WHEN s.error_code ~ '^[A-Z0-9_]{1,80}$' THEN s.error_code ELSE '' END AS error_code,
+ CASE WHEN s.error_class ~ '^[a-zA-Z0-9_]{1,64}$' THEN s.error_class ELSE '' END AS error_class,
+ CASE WHEN j.kind='scan' AND s.stage='scan_document' THEN NULLIF(s.input->>'title','') END AS document_title,
+ CASE WHEN j.kind='scan' AND s.stage='scan_document' THEN NULLIF(s.input->>'file_id','') END AS file_id,
+ CASE WHEN j.kind='scan' AND s.stage='scan_document' AND NULLIF(s.input->>'title','') IS NOT NULL
+      THEN concat_ws('/',NULLIF(s.input->>'folder_path',''),s.input->>'title') END AS source_path,
+ CASE WHEN j.kind='scan' AND s.stage='scan_document' AND s.input->>'url' ~ '^https://docs[.]qq[.]com/[A-Za-z0-9_./%~-]+([?](resourceId|mode)=[A-Za-z0-9_%~-]+(&(resourceId|mode)=[A-Za-z0-9_%~-]+)*)?$'
+      THEN s.input->>'url' END AS source_url,
+ CASE WHEN s.result->>'actual_bytes' ~ '^[0-9]{1,18}$' THEN (s.result->>'actual_bytes')::bigint END AS actual_bytes,
+ CASE WHEN s.result->>'limit_bytes' ~ '^[0-9]{1,18}$' THEN (s.result->>'limit_bytes')::bigint END AS limit_bytes,
+ CASE WHEN s.result->>'observed_at_least_bytes' ~ '^[0-9]{1,18}$' THEN (s.result->>'observed_at_least_bytes')::bigint END AS observed_at_least_bytes
+ FROM :"app_schema".processing_steps s JOIN :"app_schema".processing_jobs j ON j.id=s.job_id;
+CREATE OR REPLACE VIEW :"observer_schema".processing_legacy_context AS
+ SELECT e.tenant_id,e.datasource_id,e.run_id,e.error_ordinal,e.error_digest,
+ NULLIF(item.value->>'source_path','') AS source_path,
+ CASE WHEN item.value->>'actual_bytes' ~ '^[0-9]{1,18}$' THEN (item.value->>'actual_bytes')::bigint END AS actual_bytes,
+ CASE WHEN item.value->>'limit_bytes' ~ '^[0-9]{1,18}$' THEN (item.value->>'limit_bytes')::bigint END AS limit_bytes,
+ CASE WHEN item.value->>'observed_at_least_bytes' ~ '^[0-9]{1,18}$' THEN (item.value->>'observed_at_least_bytes')::bigint END AS observed_at_least_bytes
+ FROM :"app_schema".mwe_processing_legacy_error_state e
+ JOIN :"app_schema".sync_logs s ON s.id=e.run_id AND s.tenant_id=e.tenant_id AND s.data_source_id=e.datasource_id
+ CROSS JOIN LATERAL (SELECT s.result->'errors'->(e.error_ordinal::int-1) AS value) item;
 -- Apply on every install/upgrade, including an existing secrets file.
 REVOKE ALL ON ALL TABLES IN SCHEMA :"app_schema" FROM :"observer_role";
 ALTER DEFAULT PRIVILEGES IN SCHEMA :"app_schema" REVOKE SELECT ON TABLES FROM :"observer_role";

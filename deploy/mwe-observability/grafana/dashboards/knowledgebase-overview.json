@@ -17,59 +17,29 @@
   "liveNow": true,
   "panels": [
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "This is intentionally independent of Docker health. It executes torch.cuda.is_available() and device_count inside the running MinerU container.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "options": {
-                "0": {
-                  "color": "red",
-                  "text": "故障"
-                },
-                "1": {
-                  "color": "green",
-                  "text": "可用"
-                }
-              },
-              "type": "value"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
+      "id": 101,
+      "type": "stat",
+      "title": "新流程同步批次",
+      "description": "来自统一生命周期视图。计数单位是视图行，不把目录、文档、尝试或异常事件混算。完整明细及冻结分页见处理生命周期看板。",
       "gridPos": {
-        "h": 5,
-        "w": 5,
+        "h": 4,
+        "w": 6,
         "x": 0,
         "y": 0
       },
-      "id": 1,
+      "datasource": {
+        "type": "postgres",
+        "uid": "weknora-postgres"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::bigint AS total FROM mwe_processing_current_run_progress WHERE evidence_basis='verified_v2'"
+        }
+      ],
       "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -78,29 +48,133 @@
           "values": false
         },
         "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "13.1.0",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "kb_component_capability_ready{component=\"mineru_cuda\"}",
-          "instant": true,
-          "legendFormat": "MinerU CUDA",
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "MinerU CUDA 能力",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
+        "colorMode": "value",
+        "graphMode": "none"
       },
       "fieldConfig": {
         "defaults": {
+          "noValue": "读取状态未知",
+          "min": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 102,
+      "type": "stat",
+      "title": "新流程文档",
+      "description": "来自统一生命周期视图。计数单位是视图行，不把目录、文档、尝试或异常事件混算。完整明细及冻结分页见处理生命周期看板。",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weknora-postgres"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::bigint AS total FROM mwe_processing_current_document_lifecycle WHERE evidence_basis='verified_v2'"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "读取状态未知",
+          "min": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 103,
+      "type": "stat",
+      "title": "待复查异常事件",
+      "description": "来自统一生命周期视图。计数单位是视图行，不把目录、文档、尝试或异常事件混算。完整明细及冻结分页见处理生命周期看板。",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weknora-postgres"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::bigint AS total FROM mwe_processing_unresolved_incidents WHERE evidence_basis='verified_v2'"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "读取状态未知",
+          "min": 0,
           "color": {
             "mode": "thresholds"
           },
@@ -119,19 +193,32 @@
           }
         },
         "overrides": []
-      },
+      }
+    },
+    {
+      "id": 104,
+      "type": "stat",
+      "title": "活动 / 待处理阶段",
+      "description": "来自统一生命周期视图。计数单位是视图行，不把目录、文档、尝试或异常事件混算。完整明细及冻结分页见处理生命周期看板。",
       "gridPos": {
-        "h": 5,
-        "w": 5,
-        "x": 5,
+        "h": 4,
+        "w": 6,
+        "x": 18,
         "y": 0
       },
-      "id": 2,
+      "datasource": {
+        "type": "postgres",
+        "uid": "weknora-postgres"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::bigint AS total FROM mwe_processing_stage_retry_queue WHERE evidence_basis='verified_v2'"
+        }
+      ],
       "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -140,31 +227,16 @@
           "values": false
         },
         "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "13.1.0",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "sum(kb_component_blocking_log)",
-          "instant": true,
-          "legendFormat": "阻断日志",
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "近期阻断级日志",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
+        "colorMode": "value",
+        "graphMode": "none"
       },
       "fieldConfig": {
         "defaults": {
+          "noValue": "读取状态未知",
+          "min": 0,
           "color": {
-            "mode": "thresholds"
+            "mode": "fixed",
+            "fixedColor": "blue"
           },
           "thresholds": {
             "mode": "absolute",
@@ -181,174 +253,22 @@
           }
         },
         "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 10,
-        "y": 0
-      },
-      "id": 3,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "13.1.0",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "weknora_failed_knowledge_recent_total",
-          "instant": true,
-          "legendFormat": "5分钟失败",
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "旧流程 · 最近5分钟任务失败",
-      "type": "stat"
+      }
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 1
-              },
-              {
-                "color": "red",
-                "value": 10
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
+      "id": 107,
+      "type": "text",
+      "title": "定位失败文档",
       "gridPos": {
-        "h": 5,
-        "w": 5,
-        "x": 14,
-        "y": 0
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 4
       },
-      "id": 4,
       "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "13.1.0",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "sum(weknora_processing_stale_total)",
-          "instant": true,
-          "legendFormat": "疑似停滞",
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "旧流程 · 状态超过70分钟未更新",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 1
-              },
-              {
-                "color": "red",
-                "value": 5
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 5,
-        "x": 19,
-        "y": 0
-      },
-      "id": 5,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "13.1.0",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "sum(weknora_dead_letters_recent_total) or vector(0)",
-          "instant": true,
-          "legendFormat": "死信",
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "旧流程 · 最近5分钟死信",
-      "type": "stat"
+        "mode": "markdown",
+        "content": "[打开文档处理与失败复查看板](/d/mwe-processing-lifecycle-v2) · 按工作空间、知识库和腾讯路径定位文件，查看大小、失败阶段和原因。历史流程记录保留在本页底部的折叠区。"
+      }
     },
     {
       "datasource": {
@@ -426,7 +346,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 5
+        "y": 7
       },
       "id": 6,
       "options": {
@@ -557,7 +477,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 5
+        "y": 7
       },
       "id": 7,
       "options": {
@@ -617,27 +537,55 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
+      "description": "This is intentionally independent of Docker health. It executes torch.cuda.is_available() and device_count inside the running MinerU container.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "thresholds"
           },
-          "unit": "percent"
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "text": "故障"
+                },
+                "1": {
+                  "color": "green",
+                  "text": "可用"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 6,
-        "w": 6,
+        "h": 4,
+        "w": 12,
         "x": 0,
-        "y": 13
+        "y": 15
       },
-      "id": 14,
+      "id": 1,
       "options": {
-        "colorMode": "value",
+        "colorMode": "background",
         "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "horizontal",
+        "justifyMode": "center",
+        "orientation": "auto",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -645,71 +593,21 @@
           "fields": "",
           "values": false
         },
-        "textMode": "value_and_name",
+        "textMode": "auto",
         "wideLayout": true
       },
       "pluginVersion": "13.1.0",
       "targets": [
         {
           "editorMode": "code",
-          "expr": "kb_gpu_utilization_percent",
+          "expr": "kb_component_capability_ready{component=\"mineru_cuda\"}",
           "instant": true,
-          "legendFormat": "GPU {{gpu}}",
+          "legendFormat": "MinerU CUDA",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "实时 GPU 占用",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 6,
-        "x": 6,
-        "y": 13
-      },
-      "id": 15,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "value_and_name",
-        "wideLayout": true
-      },
-      "pluginVersion": "13.1.0",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "100 * kb_gpu_memory_used_bytes / kb_gpu_memory_total_bytes",
-          "instant": true,
-          "legendFormat": "GPU {{gpu}}",
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "实时 GPU 显存占用",
+      "title": "MinerU CUDA 能力",
       "type": "stat"
     },
     {
@@ -730,31 +628,26 @@
                 "value": null
               },
               {
-                "color": "orange",
-                "value": 75
-              },
-              {
                 "color": "red",
-                "value": 85
+                "value": 1
               }
             ]
-          },
-          "unit": "celsius"
+          }
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 6,
-        "w": 6,
+        "h": 4,
+        "w": 12,
         "x": 12,
-        "y": 13
+        "y": 15
       },
-      "id": 16,
+      "id": 2,
       "options": {
-        "colorMode": "value",
+        "colorMode": "background",
         "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "horizontal",
+        "justifyMode": "center",
+        "orientation": "auto",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -762,1449 +655,1565 @@
           "fields": "",
           "values": false
         },
-        "textMode": "value_and_name",
+        "textMode": "auto",
         "wideLayout": true
       },
       "pluginVersion": "13.1.0",
       "targets": [
         {
           "editorMode": "code",
-          "expr": "kb_gpu_temperature_celsius",
+          "expr": "sum(kb_component_blocking_log)",
           "instant": true,
-          "legendFormat": "GPU {{gpu}}",
+          "legendFormat": "阻断日志",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "实时 GPU 温度",
+      "title": "近期阻断级日志",
       "type": "stat"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "watt"
-        },
-        "overrides": []
-      },
+      "id": 2001,
+      "type": "row",
+      "title": "硬件趋势与服务日志",
+      "collapsed": true,
       "gridPos": {
-        "h": 6,
-        "w": 6,
-        "x": 18,
-        "y": 13
-      },
-      "id": 17,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "value_and_name",
-        "wideLayout": true
-      },
-      "pluginVersion": "13.1.0",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "kb_gpu_power_watts",
-          "instant": true,
-          "legendFormat": "GPU {{gpu}}",
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "实时 GPU 功耗",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 12,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 4,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "min": 0,
-          "max": 100,
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 19
-      },
-      "id": 18,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "pluginVersion": "13.1.0",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "kb_gpu_utilization_percent",
-          "legendFormat": "GPU {{gpu}} 核心",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "editorMode": "code",
-          "expr": "100 * kb_gpu_memory_used_bytes / kb_gpu_memory_total_bytes",
-          "legendFormat": "GPU {{gpu}} 显存",
-          "range": true,
-          "refId": "B"
-        }
-      ],
-      "title": "GPU 占用趋势",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 12,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 4,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "/温度$/"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "celsius"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "/功耗$/"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "watt"
-              },
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 19
-      },
-      "id": 19,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "pluginVersion": "13.1.0",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "kb_gpu_temperature_celsius",
-          "legendFormat": "GPU {{gpu}} 温度",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "editorMode": "code",
-          "expr": "kb_gpu_power_watts",
-          "legendFormat": "GPU {{gpu}} 功耗",
-          "range": true,
-          "refId": "B"
-        }
-      ],
-      "title": "GPU 温度与功耗趋势",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 4,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "min": 0,
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 0,
-        "y": 27
-      },
-      "id": 8,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "pluginVersion": "13.1.0",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "100 - avg by (host) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100",
-          "legendFormat": "CPU 使用",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "editorMode": "code",
-          "expr": "avg by (host) (rate(node_cpu_seconds_total{mode=\"iowait\"}[5m])) * 100",
-          "legendFormat": "I/O 等待",
-          "range": true,
-          "refId": "B"
-        }
-      ],
-      "title": "CPU 趋势",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 4,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "min": 0,
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 6,
-        "y": 27
-      },
-      "id": 20,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "pluginVersion": "13.1.0",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)",
-          "legendFormat": "内存使用",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "editorMode": "code",
-          "expr": "100 * (1 - node_memory_SwapFree_bytes / clamp_min(node_memory_SwapTotal_bytes, 1))",
-          "legendFormat": "Swap 使用",
-          "range": true,
-          "refId": "B"
-        }
-      ],
-      "title": "内存趋势",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 4,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "min": 0,
-          "unit": "Bps"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 12,
-        "y": 27
-      },
-      "id": 21,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "pluginVersion": "13.1.0",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "sum by (host) (rate(node_network_receive_bytes_total{device!~\"lo|veth.*|br-.*|docker.*\"}[5m]))",
-          "legendFormat": "接收",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "editorMode": "code",
-          "expr": "sum by (host) (rate(node_network_transmit_bytes_total{device!~\"lo|veth.*|br-.*|docker.*\"}[5m]))",
-          "legendFormat": "发送",
-          "range": true,
-          "refId": "B"
-        }
-      ],
-      "title": "网络吞吐趋势",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 4,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "min": 0,
-          "unit": "Bps"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 18,
-        "y": 27
-      },
-      "id": 22,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "pluginVersion": "13.1.0",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "rate(node_disk_read_bytes_total{device=~\"md.*|nvme[0-9]+n[0-9]+|sd[a-z]+\"}[5m])",
-          "legendFormat": "{{device}} 读",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "editorMode": "code",
-          "expr": "rate(node_disk_written_bytes_total{device=~\"md.*|nvme[0-9]+n[0-9]+|sd[a-z]+\"}[5m])",
-          "legendFormat": "{{device}} 写",
-          "range": true,
-          "refId": "B"
-        }
-      ],
-      "title": "磁盘 I/O 趋势",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 15,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 4,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "normal"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "min": 0
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
+        "h": 1,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 19
       },
-      "id": 9,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "pluginVersion": "13.1.0",
-      "targets": [
+      "panels": [
         {
-          "editorMode": "code",
-          "expr": "weknora_knowledge_status_total",
-          "legendFormat": "{{parse_status}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "旧流程 · 知识处理状态趋势",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "postgres",
-        "uid": "weknora-postgres"
-      },
-      "description": "WeKnora工作空间/知识库表示导入目标。腾讯文档路径仅使用源端source_path记录；当前历史未采集则显示未记录，不使用WeKnora文件夹或标题推断。腾讯文档源空间与技术ID在详情中。导入文件大小按1024换算KB/MB/GB，可能为转换后文件；未知显示未记录。悬停详情点击检查图标查看完整信息。保留逐文件恢复判定及50条分页，每轮错误样本最多100条。",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "percent"
             },
-            "filterable": true,
-            "inspect": false
-          }
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 6,
+            "x": 0,
+            "y": 20
+          },
+          "id": 14,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value_and_name",
+            "wideLayout": true
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "kb_gpu_utilization_percent",
+              "instant": true,
+              "legendFormat": "GPU {{gpu}}",
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "实时 GPU 占用",
+          "type": "stat"
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "详情"
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "percent"
             },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "auto"
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 6,
+            "x": 6,
+            "y": 20
+          },
+          "id": 15,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value_and_name",
+            "wideLayout": true
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "100 * kb_gpu_memory_used_bytes / kb_gpu_memory_total_bytes",
+              "instant": true,
+              "legendFormat": "GPU {{gpu}}",
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "实时 GPU 显存占用",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 75
+                  },
+                  {
+                    "color": "red",
+                    "value": 85
+                  }
+                ]
+              },
+              "unit": "celsius"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 6,
+            "x": 12,
+            "y": 20
+          },
+          "id": 16,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value_and_name",
+            "wideLayout": true
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "kb_gpu_temperature_celsius",
+              "instant": true,
+              "legendFormat": "GPU {{gpu}}",
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "实时 GPU 温度",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "watt"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 6,
+            "x": 18,
+            "y": 20
+          },
+          "id": 17,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value_and_name",
+            "wideLayout": true
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "kb_gpu_power_watts",
+              "instant": true,
+              "legendFormat": "GPU {{gpu}}",
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "实时 GPU 功耗",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 12,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 4,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
                 }
               },
+              "min": 0,
+              "max": 100,
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 26
+          },
+          "id": 18,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "kb_gpu_utilization_percent",
+              "legendFormat": "GPU {{gpu}} 核心",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "editorMode": "code",
+              "expr": "100 * kb_gpu_memory_used_bytes / kb_gpu_memory_total_bytes",
+              "legendFormat": "GPU {{gpu}} 显存",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "GPU 占用趋势",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 12,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 4,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              }
+            },
+            "overrides": [
               {
-                "id": "mappings",
-                "value": [
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "/温度$/"
+                },
+                "properties": [
                   {
-                    "type": "regex",
-                    "options": {
-                      "pattern": ".*",
-                      "result": {
-                        "text": "查看"
-                      }
-                    }
+                    "id": "unit",
+                    "value": "celsius"
                   }
                 ]
               },
               {
-                "id": "custom.inspect",
-                "value": true
-              },
-              {
-                "id": "custom.width",
-                "value": 90
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "文档名称"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 260
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "腾讯文档路径"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 240
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "导入文件大小"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 115
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "失败环节"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 110
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "状态"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 110
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "最近失败时间"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 175
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "异常原因"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 300
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 11,
-        "w": 24,
-        "x": 0,
-        "y": 51
-      },
-      "id": 10,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
-        "showHeader": true,
-        "sortBy": [
-          {
-            "desc": true,
-            "displayName": "最近失败时间"
-          }
-        ]
-      },
-      "pluginVersion": "13.1.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "postgres",
-            "uid": "weknora-postgres"
-          },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "WITH valid_sources AS (\n  SELECT ds.id, ds.tenant_id, ds.knowledge_base_id, ds.name, ds.type,\n         kb.name AS kb_name, COALESCE(t.name, ds.tenant_id::text) AS workspace\n  FROM data_sources ds\n  JOIN knowledge_bases kb ON kb.id=ds.knowledge_base_id AND kb.tenant_id=ds.tenant_id AND kb.deleted_at IS NULL\n  LEFT JOIN tenants t ON t.id=ds.tenant_id\n  WHERE ds.deleted_at IS NULL AND ds.status<>'deleted'\n), raw_file_errors AS (\n  SELECT ds.*, sl.id AS sync_log_id, e.ordinality AS error_index,\n         COALESCE(NULLIF(e.item->>'title',''), '（历史错误未记录标题）') AS title,\n         NULLIF(e.item->>'external_id','') AS external_id,\n         NULLIF(e.item->>'file_id','') AS file_id,\n         CASE WHEN pg_input_is_valid(e.item->>'occurred_at','timestamp with time zone')\n              THEN (e.item->>'occurred_at')::timestamptz\n              ELSE COALESCE(sl.updated_at,sl.finished_at,sl.started_at) AT TIME ZONE 'UTC' END AS failed_at,\n         COALESCE(NULLIF(e.item->>'message',''), CASE WHEN jsonb_typeof(e.item)='string' THEN e.item #>> '{}' END, '未记录错误信息') AS message,\n         e.item\n  FROM sync_logs sl\n  JOIN valid_sources ds ON ds.id=sl.data_source_id AND ds.tenant_id=sl.tenant_id AND ds.type='tencent_docs'\n  CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(sl.result->'errors')='array' THEN sl.result->'errors' ELSE '[]'::jsonb END)\n    WITH ORDINALITY AS e(item,ordinality)\n), file_aliases AS (\n  SELECT id, external_id, max(file_id) AS file_id FROM raw_file_errors\n  WHERE external_id IS NOT NULL AND file_id IS NOT NULL\n  GROUP BY id,external_id HAVING count(DISTINCT file_id)=1\n), keyed_file_errors AS (\n  SELECT e.*, COALESCE(e.file_id,a.file_id) AS canonical_file_id,\n         CASE WHEN COALESCE(e.file_id,a.file_id) IS NOT NULL THEN 'file:'||COALESCE(e.file_id,a.file_id)\n              WHEN e.external_id IS NOT NULL THEN 'external:'||e.external_id\n              ELSE 'legacy-log:'||e.sync_log_id||':'||e.error_index::text END AS file_key\n  FROM raw_file_errors e LEFT JOIN file_aliases a ON a.id=e.id AND a.external_id=e.external_id\n), unresolved_file_errors AS (\n  SELECT e.* FROM keyed_file_errors e\n  WHERE NOT EXISTS (\n    SELECT 1 FROM processing_legacy_evidence proof\n    WHERE proof.tenant_id=e.tenant_id AND proof.knowledge_base_id=e.knowledge_base_id\n      AND proof.datasource_id=e.id AND proof.run_id=e.sync_log_id AND proof.error_ordinal=e.error_index\n      AND proof.error_digest=encode(sha256(convert_to(e.item::text,'UTF8')),'hex')\n      AND proof.action IN ('late_completion','manual_confirmed','recovered','policy_skipped')\n  )\n), latest_file_errors AS (\n  -- Resolving a newer occurrence must not hide an earlier unresolved error.\n  SELECT DISTINCT ON (id,file_key) * FROM unresolved_file_errors\n  ORDER BY id,file_key,failed_at DESC,sync_log_id DESC,error_index DESC\n), sync_failures AS (\n  SELECT e.failed_at, e.tenant_id, e.workspace, e.kb_name, e.name AS ds_name,\n         COALESCE(e.item->>'space_id','') AS space, e.title,\n         COALESCE(NULLIF(e.item->>'stage',''),\n           CASE WHEN e.message ~ 'download Tencent Docs export|FILE_SIZE_EXCEEDED' THEN 'download'\n                WHEN e.message ~ 'export' THEN 'export'\n                WHEN e.message ~ 'file info|query_file_info' THEN 'fetch_metadata' ELSE 'fetch' END) AS stage,\n         CASE WHEN e.item->>'category'='FILE_SIZE_EXCEEDED' OR e.item->>'code'='FILE_SIZE_EXCEEDED'\n                   OR e.message ~ 'download Tencent Docs export exceeds [0-9]+ bytes'\n              THEN 'FILE_SIZE_EXCEEDED'\n              ELSE COALESCE(NULLIF(e.item->>'category',''),NULLIF(e.item->>'code',''),'SOURCE_FETCH_FAILED') END AS category,\n         CASE WHEN e.message ~ 'download Tencent Docs export exceeds [0-9]+ bytes'\n              THEN '文件大小超出上限；历史日志未记录实际大小（不是解析引擎故障）' ELSE e.message END AS reason,\n         e.sync_log_id, e.id AS data_source_id, NULL::text AS knowledge_id, e.knowledge_base_id,\n         e.external_id, e.canonical_file_id AS file_id, e.type AS source,\n         COALESCE(e.item->>'limit_bytes',substring(e.message from 'download Tencent Docs export exceeds ([0-9]+) bytes')) AS limit_bytes,\n         e.item->>'actual_bytes' AS actual_bytes, e.item->>'observed_at_least_bytes' AS observed_at_least_bytes,\n         CASE WHEN e.canonical_file_id IS NOT NULL THEN 'file_id' WHEN e.external_id IS NOT NULL THEN 'external_id' ELSE 'legacy_title_only' END AS identity_basis,\n         CASE WHEN e.canonical_file_id IS NULL AND e.external_id IS NULL THEN '恢复待核实：历史记录缺少稳定文件ID' ELSE '未解决：尚无对应原错误的显式核验消解记录' END AS resolution,\n         e.file_key, NULLIF(e.item->>'source_path','') AS source_path\n  FROM latest_file_errors e\n), knowledge_failures AS (\n  SELECT k.updated_at AS failed_at, k.tenant_id, COALESCE(t.name,k.tenant_id::text) AS workspace,\n         kb.name AS kb_name, COALESCE(ds.name,'手工/API上传') AS ds_name,\n         COALESCE(NULLIF(k.metadata->>'space_name',''),NULLIF(k.metadata->>'space_id',''),'') AS space,\n         COALESCE(NULLIF(k.title,''),NULLIF(k.file_name,''),k.id) AS title,\n         COALESCE(sp.name,'knowledge_processing') AS stage,\n         COALESCE(NULLIF(sp.error_code,''),'KNOWLEDGE_PROCESSING_FAILED') AS category,\n         COALESCE(NULLIF(sp.error_message,''),NULLIF(k.error_message,''),'未记录错误信息') AS reason,\n         NULL::text AS sync_log_id, COALESCE(ds.id,'') AS data_source_id, k.id AS knowledge_id, k.knowledge_base_id,\n         NULLIF(k.metadata->>'external_id','') AS external_id, NULLIF(k.metadata->>'file_id','') AS file_id,\n         COALESCE(ds.type,k.channel) AS source,\n         NULL::text AS limit_bytes, CASE WHEN k.file_size>0 THEN k.file_size::text END AS actual_bytes, NULL::text AS observed_at_least_bytes,\n         'knowledge_id'::text AS identity_basis, '未解决：知识处理失败'::text AS resolution,\n         CASE WHEN NULLIF(k.metadata->>'file_id','') IS NOT NULL THEN 'file:'||(k.metadata->>'file_id')\n              WHEN NULLIF(k.metadata->>'external_id','') IS NOT NULL THEN 'external:'||(k.metadata->>'external_id')\n              ELSE 'knowledge:'||k.id END AS file_key,\n         CASE WHEN COALESCE(ds.type,k.channel)='tencent_docs' THEN NULLIF(k.metadata->>'source_path','') END AS source_path\n  FROM knowledges k\n  JOIN knowledge_bases kb ON kb.id=k.knowledge_base_id AND kb.tenant_id=k.tenant_id AND kb.deleted_at IS NULL\n  LEFT JOIN tenants t ON t.id=k.tenant_id\n  LEFT JOIN valid_sources ds ON ds.id=k.metadata->>'datasource_id' AND ds.tenant_id=k.tenant_id AND ds.knowledge_base_id=k.knowledge_base_id\n  LEFT JOIN LATERAL (SELECT s.name,s.error_code,s.error_message FROM knowledge_processing_spans s\n      WHERE s.knowledge_id=k.id AND s.status='failed' ORDER BY s.finished_at DESC NULLS LAST,s.updated_at DESC LIMIT 1) sp ON true\n  WHERE k.parse_status='failed' AND k.deleted_at IS NULL\n    AND (NULLIF(k.metadata->>'datasource_id','') IS NULL OR ds.id IS NOT NULL)\n), all_failures AS (\n  SELECT * FROM sync_failures UNION ALL SELECT * FROM knowledge_failures\n), linked_failures AS (\n  SELECT f.*, max(sync_log_id) OVER file_group AS linked_sync_log_id,\n         max(knowledge_id) OVER file_group AS linked_knowledge_id\n  FROM all_failures f WINDOW file_group AS (PARTITION BY tenant_id,knowledge_base_id,data_source_id,file_key)\n), failure_rows AS (\n  SELECT DISTINCT ON (tenant_id,knowledge_base_id,data_source_id,file_key) * FROM linked_failures\n  ORDER BY tenant_id,knowledge_base_id,data_source_id,file_key,failed_at DESC,knowledge_id NULLS LAST\n)\nSELECT title AS \"文档名称\",\n      CASE WHEN source='tencent_docs' THEN COALESCE(source_path,'未记录') ELSE '不适用' END AS \"腾讯文档路径\",\n      CASE WHEN actual_bytes ~ '^[0-9]{1,18}$' THEN\n      CASE WHEN (actual_bytes)::numeric>=1073741824 THEN round((actual_bytes)::numeric/1073741824,2)::text||' GB'\n           WHEN (actual_bytes)::numeric>=1048576 THEN round((actual_bytes)::numeric/1048576,2)::text||' MB'\n           ELSE round((actual_bytes)::numeric/1024,2)::text||' KB' END ELSE '未记录' END AS \"导入文件大小\",\n      workspace AS \"WeKnora 工作空间\",kb_name AS \"WeKnora 知识库\",\n      CASE source WHEN 'tencent_docs' THEN '腾讯文档' WHEN 'web' THEN '手工/API上传'\n        WHEN 'feishu' THEN '飞书' WHEN 'feishu_drive' THEN '飞书云盘' WHEN 'notion' THEN 'Notion'\n        ELSE COALESCE(NULLIF(source,''),ds_name) END AS \"来源\",\n      CASE stage WHEN 'fetch_metadata' THEN '获取文件信息' WHEN 'fetch_content' THEN '获取内容'\n        WHEN 'fetch' THEN '源端获取' WHEN 'export' THEN '导出' WHEN 'download' THEN '下载'\n        WHEN 'faq_validate' THEN 'FAQ格式校验' WHEN 'faq_import' THEN 'FAQ入库'\n        WHEN 'ingest' THEN '入库' WHEN 'knowledge_processing' THEN '知识处理' ELSE stage END AS \"失败环节\",\n      CASE WHEN category='FILE_SIZE_EXCEEDED' THEN '文件大小超出上限（上限：'||CASE WHEN limit_bytes ~ '^[0-9]{1,18}$' THEN\n      CASE WHEN (limit_bytes)::numeric>=1073741824 THEN round((limit_bytes)::numeric/1073741824,2)::text||' GB'\n           WHEN (limit_bytes)::numeric>=1048576 THEN round((limit_bytes)::numeric/1048576,2)::text||' MB'\n           ELSE round((limit_bytes)::numeric/1024,2)::text||' KB' END ELSE '未记录' END||'）'\n        ELSE LEFT(regexp_replace(reason,'https?://[^[:space:]]+','[URL_REDACTED]','g'),600) END AS \"异常原因\",\n      CASE WHEN identity_basis='legacy_title_only' THEN '恢复待核实' ELSE '未解决' END AS \"状态\",\n      failed_at AS \"最近失败时间\",\n      jsonb_strip_nulls(jsonb_build_object(\n        '错误类别',category,'完整原因',regexp_replace(reason,'https?://[^[:space:]]+','[URL_REDACTED]','g'),\n        '恢复判定',resolution,'定位依据',identity_basis,'连接配置名称',ds_name,\n        '腾讯文档源空间',CASE WHEN source='tencent_docs' THEN NULLIF(space,'') END,\n        '文件大小依据',CASE WHEN actual_bytes IS NULL THEN '未记录；未使用上限、读取下界或旧版本大小替代'\n          WHEN knowledge_id IS NOT NULL THEN 'WeKnora接收文件（可能为源文档转换后的文件）' ELSE '本次导出/下载响应记录' END,\n        '实际字节数',actual_bytes,'限制字节数',limit_bytes,'至少已读取字节数',observed_at_least_bytes,\n        'sync_log_id',NULLIF(linked_sync_log_id,''),'data_source_id',NULLIF(data_source_id,''),\n        'knowledge_id',NULLIF(linked_knowledge_id,''),'knowledge_base_id',knowledge_base_id,\n        'external_id',external_id,'file_id',file_id))::text AS \"详情\"\n      FROM failure_rows ORDER BY failed_at DESC,data_source_id,file_key LIMIT 50 OFFSET (GREATEST(COALESCE(NULLIF(${doc_page:sqlstring}, '')::int,1),1)-1)*50",
-          "refId": "A",
-          "sql": {
-            "columns": [
-              {
-                "parameters": [],
-                "type": "function"
-              }
-            ],
-            "groupBy": [
-              {
-                "property": {
-                  "type": "string"
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "/功耗$/"
                 },
-                "type": "groupBy"
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "watt"
+                  },
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  }
+                ]
               }
-            ],
-            "limit": 50
-          }
-        }
-      ],
-      "title": "旧流程文档记录（待核实）",
-      "type": "table"
-    },
-    {
-      "datasource": {
-        "type": "postgres",
-        "uid": "weknora-postgres"
-      },
-      "description": "有效数据源最新同步失败/部分成功汇总。具体文件见上方文档失败表；一次增量success不代表旧失败文件已重新处理。已删除源/知识库排除；每页50条。",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
+            ]
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 26
+          },
+          "id": 19,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
             },
-            "filterable": true,
-            "inspect": false
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 12,
-        "x": 0,
-        "y": 64
-      },
-      "id": 11,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "kb_gpu_temperature_celsius",
+              "legendFormat": "GPU {{gpu}} 温度",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "editorMode": "code",
+              "expr": "kb_gpu_power_watts",
+              "legendFormat": "GPU {{gpu}} 功耗",
+              "range": true,
+              "refId": "B"
+            }
           ],
-          "show": false
+          "title": "GPU 温度与功耗趋势",
+          "type": "timeseries"
         },
-        "showHeader": true,
-        "sortBy": []
-      },
-      "pluginVersion": "13.1.0",
-      "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "weknora-postgres"
+            "type": "prometheus",
+            "uid": "prometheus"
           },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "WITH latest AS (\n  SELECT DISTINCT ON (sl.data_source_id) sl.*, ds.name AS source_name,ds.type AS source_type,\n    kb.name AS kb_name, COALESCE(t.name,ds.tenant_id::text) AS workspace\n  FROM sync_logs sl\n  JOIN data_sources ds ON ds.id=sl.data_source_id AND ds.tenant_id=sl.tenant_id\n    AND ds.deleted_at IS NULL AND ds.status<>'deleted'\n  JOIN knowledge_bases kb ON kb.id=ds.knowledge_base_id AND kb.tenant_id=ds.tenant_id AND kb.deleted_at IS NULL\n  LEFT JOIN tenants t ON t.id=ds.tenant_id\n  ORDER BY sl.data_source_id,sl.updated_at DESC,sl.id DESC\n), failure_rows AS (\n  SELECT * FROM latest WHERE status IN ('failed','partial')\n)\nSELECT updated_at AS \"时间\",workspace AS \"WeKnora 工作空间\",kb_name AS \"WeKnora 知识库\",source_name AS \"数据源\",source_type AS \"类型\",status AS \"状态\",items_total AS \"总数\",items_failed AS \"失败数\",LEFT(regexp_replace(COALESCE(NULLIF(error_message,''),result::text,'未记录错误信息'),'https?://[^[:space:]]+','[URL_REDACTED]','g'),600) AS \"异常信息\",id AS \"sync_log_id\",data_source_id FROM failure_rows ORDER BY updated_at DESC,id DESC LIMIT 50 OFFSET (GREATEST(COALESCE(NULLIF(${sync_page:sqlstring}, '')::int,1),1)-1)*50",
-          "refId": "A"
-        }
-      ],
-      "title": "旧流程同步记录（待核实）",
-      "type": "table"
-    },
-    {
-      "datasource": {
-        "type": "postgres",
-        "uid": "weknora-postgres"
-      },
-      "description": "仅显示当前仍未解决的业务死信；同一任务类型和业务对象只保留最新一条。已完成或已删除对象的历史档案仍保留在数据库，但不占用本面板。",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 4,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "min": 0,
+              "unit": "percent"
             },
-            "filterable": true,
-            "inspect": false
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 12,
-        "x": 12,
-        "y": 64
-      },
-      "id": 12,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 0,
+            "y": 34
+          },
+          "id": 8,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "100 - avg by (host) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100",
+              "legendFormat": "CPU 使用",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "editorMode": "code",
+              "expr": "avg by (host) (rate(node_cpu_seconds_total{mode=\"iowait\"}[5m])) * 100",
+              "legendFormat": "I/O 等待",
+              "range": true,
+              "refId": "B"
+            }
           ],
-          "show": false
+          "title": "CPU 趋势",
+          "type": "timeseries"
         },
-        "showHeader": true,
-        "sortBy": []
-      },
-      "pluginVersion": "13.1.0",
-      "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "weknora-postgres"
+            "type": "prometheus",
+            "uid": "prometheus"
           },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "WITH latest_sync AS (SELECT DISTINCT ON (data_source_id) data_source_id,status FROM sync_logs ORDER BY data_source_id,updated_at DESC,id DESC), unresolved AS (SELECT DISTINCT ON (dl.task_type,COALESCE(NULLIF(dl.related_id,''),NULLIF(dl.payload->>'data_source_id',''),dl.id::text)) dl.*,COALESCE(NULLIF(dl.related_id,''),NULLIF(dl.payload->>'data_source_id',''),dl.id::text) AS business_id FROM task_dead_letters dl LEFT JOIN knowledges k ON k.id=dl.related_id AND k.deleted_at IS NULL LEFT JOIN latest_sync ls ON ls.data_source_id=dl.payload->>'data_source_id' WHERE (dl.task_type='datasource:sync' AND ls.status IN ('failed','partial')) OR (dl.task_type<>'datasource:sync' AND k.parse_status='failed') ORDER BY dl.task_type,COALESCE(NULLIF(dl.related_id,''),NULLIF(dl.payload->>'data_source_id',''),dl.id::text),dl.failed_at DESC,dl.id DESC) SELECT u.failed_at AS \"失败时间\",COALESCE(t.name,u.tenant_id::text) AS \"账号/工作空间\",u.task_type AS \"任务类型\",u.scope AS \"范围\",u.scope_id AS \"范围ID\",u.business_id AS \"关联ID\",u.fail_count AS \"失败次数\",LEFT(u.last_error,600) AS \"异常信息\" FROM unresolved u LEFT JOIN tenants t ON t.id=u.tenant_id ORDER BY u.failed_at DESC LIMIT 50 OFFSET (GREATEST(COALESCE(NULLIF(${dead_page:sqlstring}, '')::int,1),1)-1)*50",
-          "refId": "A"
-        }
-      ],
-      "title": "旧流程死信记录（待核实）",
-      "type": "table"
-    },
-    {
-      "gridPos": {
-        "h": 2,
-        "w": 24,
-        "x": 0,
-        "y": 62
-      },
-      "id": 43,
-      "options": {
-        "afterRender": "const variable=\"doc_page\";\nlet current=Math.max(Number(context.grafana.replaceVariables(\"${doc_page}\"))||1,1);\nconst pages=Math.max(Number(context.grafana.replaceVariables(\"${doc_pages}\"))||1,1);\nconst root=context.element.querySelector(\".kb-page-jump\");\nif(!root||root.dataset.ready===\"true\")return;\nroot.dataset.ready=\"true\";\nconst bar=document.createElement(\"div\");\nObject.assign(bar.style,{display:\"flex\",alignItems:\"center\",justifyContent:\"flex-end\",gap:\"8px\",height:\"100%\",padding:\"0 10px\",whiteSpace:\"nowrap\"});\nconst makeButton=(text,label)=>{const button=document.createElement(\"button\");button.type=\"button\";button.textContent=text;button.setAttribute(\"aria-label\",label);Object.assign(button.style,{padding:\"6px 10px\",color:\"inherit\",background:\"transparent\",border:\"1px solid #6b7280\",borderRadius:\"4px\"});return button;};\nconst prev=makeButton(\"‹\",\"文档失败上一页\");\nbar.append(prev);\nconst prefix=document.createElement(\"span\");prefix.textContent=\"第\";bar.append(prefix);\nconst input=document.createElement(\"input\");input.type=\"number\";input.min=\"1\";input.max=String(pages);input.step=\"1\";input.required=true;input.setAttribute(\"aria-label\",\"文档失败跳转页码\");Object.assign(input.style,{width:\"64px\",padding:\"6px 8px\",color:\"inherit\",background:\"transparent\",border:\"1px solid #6b7280\",borderRadius:\"4px\",textAlign:\"center\"});\ninput.addEventListener(\"pointerdown\",(event)=>event.stopPropagation());\ninput.addEventListener(\"mousedown\",(event)=>event.stopPropagation());\ninput.addEventListener(\"click\",(event)=>{event.stopPropagation();input.focus();});\nbar.append(input);\nconst total=document.createElement(\"span\");total.textContent=\"/ \"+pages+\" 页\";bar.append(total);\nconst next=makeButton(\"›\",\"文档失败下一页\");\nbar.append(next);\nconst size=document.createElement(\"span\");size.textContent=\"50 条/页\";bar.append(size);\nconst update=()=>{input.value=String(current);prev.disabled=current<=1;next.disabled=current>=pages;for(const button of [prev,next]){button.style.cursor=button.disabled?\"default\":\"pointer\";button.style.opacity=button.disabled?\"0.45\":\"1\";}};\nconst setPage=(page)=>{current=Math.min(Math.max(page,1),pages);update();context.grafana.locationService.partial({[\"var-\"+variable]:String(current)});};\nprev.addEventListener(\"click\",()=>setPage(current-1));\nnext.addEventListener(\"click\",()=>setPage(current+1));\ninput.addEventListener(\"keydown\",(event)=>{event.stopPropagation();if(event.key!==\"Enter\")return;event.preventDefault();const page=Number.parseInt(input.value,10);if(!Number.isInteger(page)||page<1||page>pages){input.value=String(current);context.grafana.notifyError([\"页码无效\",\"请输入 1 到 \"+pages]);return;}setPage(page);});\nupdate();\nroot.append(bar);",
-        "content": "<div class=\"kb-page-jump\"></div>",
-        "defaultContent": "<div class=\"kb-page-jump\"></div>",
-        "editor": {
-          "format": "auto",
-          "height": 100,
-          "language": "html"
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 4,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "min": 0,
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 6,
+            "y": 34
+          },
+          "id": 20,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)",
+              "legendFormat": "内存使用",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "editorMode": "code",
+              "expr": "100 * (1 - node_memory_SwapFree_bytes / clamp_min(node_memory_SwapTotal_bytes, 1))",
+              "legendFormat": "Swap 使用",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "内存趋势",
+          "type": "timeseries"
         },
-        "editors": [
-          "default"
-        ],
-        "externalScripts": [],
-        "externalStyles": [],
-        "helpers": "",
-        "renderMode": "everyRow",
-        "styles": "",
-        "wrap": false
-      },
-      "pluginVersion": "6.3.0",
-      "transparent": true,
-      "type": "marcusolsson-dynamictext-panel"
-    },
-    {
-      "gridPos": {
-        "h": 2,
-        "w": 12,
-        "x": 0,
-        "y": 73
-      },
-      "id": 44,
-      "options": {
-        "afterRender": "const variable=\"sync_page\";\nlet current=Math.max(Number(context.grafana.replaceVariables(\"${sync_page}\"))||1,1);\nconst pages=Math.max(Number(context.grafana.replaceVariables(\"${sync_pages}\"))||1,1);\nconst root=context.element.querySelector(\".kb-page-jump\");\nif(!root||root.dataset.ready===\"true\")return;\nroot.dataset.ready=\"true\";\nconst bar=document.createElement(\"div\");\nObject.assign(bar.style,{display:\"flex\",alignItems:\"center\",justifyContent:\"flex-end\",gap:\"8px\",height:\"100%\",padding:\"0 10px\",whiteSpace:\"nowrap\"});\nconst makeButton=(text,label)=>{const button=document.createElement(\"button\");button.type=\"button\";button.textContent=text;button.setAttribute(\"aria-label\",label);Object.assign(button.style,{padding:\"6px 10px\",color:\"inherit\",background:\"transparent\",border:\"1px solid #6b7280\",borderRadius:\"4px\"});return button;};\nconst prev=makeButton(\"‹\",\"数据源异常上一页\");\nbar.append(prev);\nconst prefix=document.createElement(\"span\");prefix.textContent=\"第\";bar.append(prefix);\nconst input=document.createElement(\"input\");input.type=\"number\";input.min=\"1\";input.max=String(pages);input.step=\"1\";input.required=true;input.setAttribute(\"aria-label\",\"数据源异常跳转页码\");Object.assign(input.style,{width:\"64px\",padding:\"6px 8px\",color:\"inherit\",background:\"transparent\",border:\"1px solid #6b7280\",borderRadius:\"4px\",textAlign:\"center\"});\ninput.addEventListener(\"pointerdown\",(event)=>event.stopPropagation());\ninput.addEventListener(\"mousedown\",(event)=>event.stopPropagation());\ninput.addEventListener(\"click\",(event)=>{event.stopPropagation();input.focus();});\nbar.append(input);\nconst total=document.createElement(\"span\");total.textContent=\"/ \"+pages+\" 页\";bar.append(total);\nconst next=makeButton(\"›\",\"数据源异常下一页\");\nbar.append(next);\nconst size=document.createElement(\"span\");size.textContent=\"50 条/页\";bar.append(size);\nconst update=()=>{input.value=String(current);prev.disabled=current<=1;next.disabled=current>=pages;for(const button of [prev,next]){button.style.cursor=button.disabled?\"default\":\"pointer\";button.style.opacity=button.disabled?\"0.45\":\"1\";}};\nconst setPage=(page)=>{current=Math.min(Math.max(page,1),pages);update();context.grafana.locationService.partial({[\"var-\"+variable]:String(current)});};\nprev.addEventListener(\"click\",()=>setPage(current-1));\nnext.addEventListener(\"click\",()=>setPage(current+1));\ninput.addEventListener(\"keydown\",(event)=>{event.stopPropagation();if(event.key!==\"Enter\")return;event.preventDefault();const page=Number.parseInt(input.value,10);if(!Number.isInteger(page)||page<1||page>pages){input.value=String(current);context.grafana.notifyError([\"页码无效\",\"请输入 1 到 \"+pages]);return;}setPage(page);});\nupdate();\nroot.append(bar);",
-        "content": "<div class=\"kb-page-jump\"></div>",
-        "defaultContent": "<div class=\"kb-page-jump\"></div>",
-        "editor": {
-          "format": "auto",
-          "height": 100,
-          "language": "html"
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 4,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "min": 0,
+              "unit": "Bps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 12,
+            "y": 34
+          },
+          "id": 21,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "sum by (host) (rate(node_network_receive_bytes_total{device!~\"lo|veth.*|br-.*|docker.*\"}[5m]))",
+              "legendFormat": "接收",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "editorMode": "code",
+              "expr": "sum by (host) (rate(node_network_transmit_bytes_total{device!~\"lo|veth.*|br-.*|docker.*\"}[5m]))",
+              "legendFormat": "发送",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "网络吞吐趋势",
+          "type": "timeseries"
         },
-        "editors": [
-          "default"
-        ],
-        "externalScripts": [],
-        "externalStyles": [],
-        "helpers": "",
-        "renderMode": "everyRow",
-        "styles": "",
-        "wrap": false
-      },
-      "pluginVersion": "6.3.0",
-      "transparent": true,
-      "type": "marcusolsson-dynamictext-panel"
-    },
-    {
-      "gridPos": {
-        "h": 2,
-        "w": 12,
-        "x": 12,
-        "y": 73
-      },
-      "id": 45,
-      "options": {
-        "afterRender": "const variable=\"dead_page\";\nlet current=Math.max(Number(context.grafana.replaceVariables(\"${dead_page}\"))||1,1);\nconst pages=Math.max(Number(context.grafana.replaceVariables(\"${dead_pages}\"))||1,1);\nconst root=context.element.querySelector(\".kb-page-jump\");\nif(!root||root.dataset.ready===\"true\")return;\nroot.dataset.ready=\"true\";\nconst bar=document.createElement(\"div\");\nObject.assign(bar.style,{display:\"flex\",alignItems:\"center\",justifyContent:\"flex-end\",gap:\"8px\",height:\"100%\",padding:\"0 10px\",whiteSpace:\"nowrap\"});\nconst makeButton=(text,label)=>{const button=document.createElement(\"button\");button.type=\"button\";button.textContent=text;button.setAttribute(\"aria-label\",label);Object.assign(button.style,{padding:\"6px 10px\",color:\"inherit\",background:\"transparent\",border:\"1px solid #6b7280\",borderRadius:\"4px\"});return button;};\nconst prev=makeButton(\"‹\",\"任务死信上一页\");\nbar.append(prev);\nconst prefix=document.createElement(\"span\");prefix.textContent=\"第\";bar.append(prefix);\nconst input=document.createElement(\"input\");input.type=\"number\";input.min=\"1\";input.max=String(pages);input.step=\"1\";input.required=true;input.setAttribute(\"aria-label\",\"任务死信跳转页码\");Object.assign(input.style,{width:\"64px\",padding:\"6px 8px\",color:\"inherit\",background:\"transparent\",border:\"1px solid #6b7280\",borderRadius:\"4px\",textAlign:\"center\"});\ninput.addEventListener(\"pointerdown\",(event)=>event.stopPropagation());\ninput.addEventListener(\"mousedown\",(event)=>event.stopPropagation());\ninput.addEventListener(\"click\",(event)=>{event.stopPropagation();input.focus();});\nbar.append(input);\nconst total=document.createElement(\"span\");total.textContent=\"/ \"+pages+\" 页\";bar.append(total);\nconst next=makeButton(\"›\",\"任务死信下一页\");\nbar.append(next);\nconst size=document.createElement(\"span\");size.textContent=\"50 条/页\";bar.append(size);\nconst update=()=>{input.value=String(current);prev.disabled=current<=1;next.disabled=current>=pages;for(const button of [prev,next]){button.style.cursor=button.disabled?\"default\":\"pointer\";button.style.opacity=button.disabled?\"0.45\":\"1\";}};\nconst setPage=(page)=>{current=Math.min(Math.max(page,1),pages);update();context.grafana.locationService.partial({[\"var-\"+variable]:String(current)});};\nprev.addEventListener(\"click\",()=>setPage(current-1));\nnext.addEventListener(\"click\",()=>setPage(current+1));\ninput.addEventListener(\"keydown\",(event)=>{event.stopPropagation();if(event.key!==\"Enter\")return;event.preventDefault();const page=Number.parseInt(input.value,10);if(!Number.isInteger(page)||page<1||page>pages){input.value=String(current);context.grafana.notifyError([\"页码无效\",\"请输入 1 到 \"+pages]);return;}setPage(page);});\nupdate();\nroot.append(bar);",
-        "content": "<div class=\"kb-page-jump\"></div>",
-        "defaultContent": "<div class=\"kb-page-jump\"></div>",
-        "editor": {
-          "format": "auto",
-          "height": 100,
-          "language": "html"
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 4,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "min": 0,
+              "unit": "Bps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 18,
+            "y": 34
+          },
+          "id": 22,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "rate(node_disk_read_bytes_total{device=~\"md.*|nvme[0-9]+n[0-9]+|sd[a-z]+\"}[5m])",
+              "legendFormat": "{{device}} 读",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "editorMode": "code",
+              "expr": "rate(node_disk_written_bytes_total{device=~\"md.*|nvme[0-9]+n[0-9]+|sd[a-z]+\"}[5m])",
+              "legendFormat": "{{device}} 写",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "磁盘 I/O 趋势",
+          "type": "timeseries"
         },
-        "editors": [
-          "default"
-        ],
-        "externalScripts": [],
-        "externalStyles": [],
-        "helpers": "",
-        "renderMode": "everyRow",
-        "styles": "",
-        "wrap": false
-      },
-      "pluginVersion": "6.3.0",
-      "transparent": true,
-      "type": "marcusolsson-dynamictext-panel"
-    },
-    {
-      "gridPos": {
-        "h": 2,
-        "w": 24,
-        "x": 0,
-        "y": 75
-      },
-      "id": 23,
-      "options": {
-        "content": "<div style=\"display:flex;align-items:center;gap:8px;height:100%;overflow-x:auto;white-space:nowrap;padding:0 12px\"><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-app\">App</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-docreader\">DocReader</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-frontend\">Frontend</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-mcp\">MCP</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-postgres\">PostgreSQL</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-redis\">Redis</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-minio\">MinIO</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-qdrant\">Qdrant</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-mineru-api\">MinerU</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-embed-text\">Embedding</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-rerank-text\">Reranker</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-q4-gpu0\">Q4‑GPU0</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-q4-gpu1\">Q4‑GPU1</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-q4-router\">Q4‑Router</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-alloy\">Alloy</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-grafana\">Grafana</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-loki\">Loki</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-prometheus\">Prometheus</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-capability-probe\">Probe</a></div>",
-        "mode": "html"
-      },
-      "pluginVersion": "13.1.0",
-      "transparent": true,
-      "type": "text"
-    },
-    {
-      "datasource": {
-        "type": "loki",
-        "uid": "loki"
-      },
-      "description": "使用上方容器导航条切换容器；每次只查询一个容器。",
-      "gridPos": {
-        "h": 10,
-        "w": 24,
-        "x": 0,
-        "y": 77
-      },
-      "id": 13,
-      "options": {
-        "dedupStrategy": "none",
-        "enableInfiniteScrolling": false,
-        "enableLogDetails": true,
-        "prettifyLogMessage": false,
-        "showCommonLabels": false,
-        "showLabels": false,
-        "showTime": true,
-        "sortOrder": "Descending",
-        "wrapLogMessage": true
-      },
-      "pluginVersion": "13.1.0",
-      "targets": [
+        {
+          "gridPos": {
+            "h": 2,
+            "w": 24,
+            "x": 0,
+            "y": 42
+          },
+          "id": 23,
+          "options": {
+            "content": "<div style=\"display:flex;align-items:center;gap:8px;height:100%;overflow-x:auto;white-space:nowrap;padding:0 12px\"><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-app\">App</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-docreader\">DocReader</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-frontend\">Frontend</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-mcp\">MCP</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-postgres\">PostgreSQL</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-redis\">Redis</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-minio\">MinIO</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-qdrant\">Qdrant</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-mineru-api\">MinerU</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-embed-text\">Embedding</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-rerank-text\">Reranker</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-q4-gpu0\">Q4‑GPU0</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-q4-gpu1\">Q4‑GPU1</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-q4-router\">Q4‑Router</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-alloy\">Alloy</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-grafana\">Grafana</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-loki\">Loki</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-prometheus\">Prometheus</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-capability-probe\">Probe</a></div>",
+            "mode": "html"
+          },
+          "pluginVersion": "13.1.0",
+          "transparent": true,
+          "type": "text"
+        },
         {
           "datasource": {
             "type": "loki",
             "uid": "loki"
           },
-          "direction": "backward",
-          "editorMode": "code",
-          "expr": "{stack=\"mwe-knowledgebase\",container=\"$log_container\"} |~ \"(?i)(fatal|panic|traceback|out of memory|cuda.*(unavailable|not available|error|out of memory)|no cuda gpus|failed to initialize nvml|failed to load model|segmentation fault)\"",
-          "queryType": "range",
-          "refId": "A"
-        }
-      ],
-      "title": "关联异常日志 · $log_container",
-      "type": "logs"
-    },
-    {
-      "id": 101,
-      "type": "stat",
-      "title": "当前同步批次",
-      "description": "来自统一生命周期视图。计数单位是视图行，不把目录、文档、尝试或异常事件混算。完整明细及冻结分页见处理生命周期看板。",
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 0,
-        "y": 43
-      },
-      "datasource": {
-        "type": "postgres",
-        "uid": "weknora-postgres"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::bigint AS total FROM mwe_processing_current_run_progress"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
+          "description": "使用上方容器导航条切换容器；每次只查询一个容器。",
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 44
+          },
+          "id": 13,
+          "options": {
+            "dedupStrategy": "none",
+            "enableInfiniteScrolling": false,
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "showCommonLabels": false,
+            "showLabels": false,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": true
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "direction": "backward",
+              "editorMode": "code",
+              "expr": "{stack=\"mwe-knowledgebase\",container=\"$log_container\"} |~ \"(?i)(fatal|panic|traceback|out of memory|cuda.*(unavailable|not available|error|out of memory)|no cuda gpus|failed to initialize nvml|failed to load model|segmentation fault)\"",
+              "queryType": "range",
+              "refId": "A"
+            }
           ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "none"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "读取状态未知",
-          "min": 0
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 102,
-      "type": "stat",
-      "title": "当前文档条目",
-      "description": "来自统一生命周期视图。计数单位是视图行，不把目录、文档、尝试或异常事件混算。完整明细及冻结分页见处理生命周期看板。",
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 4,
-        "y": 43
-      },
-      "datasource": {
-        "type": "postgres",
-        "uid": "weknora-postgres"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::bigint AS total FROM mwe_processing_current_document_lifecycle"
+          "title": "关联异常日志 · $log_container",
+          "type": "logs"
         }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "none"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "读取状态未知",
-          "min": 0
-        },
-        "overrides": []
-      }
+      ]
     },
     {
-      "id": 103,
-      "type": "stat",
-      "title": "待处理或异常阶段",
-      "description": "来自统一生命周期视图。计数单位是视图行，不把目录、文档、尝试或异常事件混算。完整明细及冻结分页见处理生命周期看板。",
+      "id": 2002,
+      "type": "row",
+      "title": "历史流程复查（保留原始记录）",
+      "collapsed": true,
       "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 8,
-        "y": 43
-      },
-      "datasource": {
-        "type": "postgres",
-        "uid": "weknora-postgres"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::bigint AS total FROM mwe_processing_stage_retry_queue"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "none"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "读取状态未知",
-          "min": 0
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 104,
-      "type": "stat",
-      "title": "未解决异常事件",
-      "description": "来自统一生命周期视图。计数单位是视图行，不把目录、文档、尝试或异常事件混算。完整明细及冻结分页见处理生命周期看板。",
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 12,
-        "y": 43
-      },
-      "datasource": {
-        "type": "postgres",
-        "uid": "weknora-postgres"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::bigint AS total FROM mwe_processing_unresolved_incidents"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "none"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "读取状态未知",
-          "min": 0
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 105,
-      "type": "stat",
-      "title": "近7天处理事件",
-      "description": "来自统一生命周期视图。计数单位是视图行，不把目录、文档、尝试或异常事件混算。完整明细及冻结分页见处理生命周期看板。",
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 16,
-        "y": 43
-      },
-      "datasource": {
-        "type": "postgres",
-        "uid": "weknora-postgres"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::bigint AS total FROM mwe_processing_attempt_timeline WHERE observed_at >= NOW()-INTERVAL '7 days'"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "none"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "读取状态未知",
-          "min": 0
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 106,
-      "type": "stat",
-      "title": "一致性异常",
-      "description": "来自统一生命周期视图。计数单位是视图行，不把目录、文档、尝试或异常事件混算。完整明细及冻结分页见处理生命周期看板。",
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 20,
-        "y": 43
-      },
-      "datasource": {
-        "type": "postgres",
-        "uid": "weknora-postgres"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::bigint AS total FROM mwe_processing_lifecycle_inconsistencies"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "none"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "读取状态未知",
-          "min": 0
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 107,
-      "type": "text",
-      "title": "完整生命周期明细",
-      "gridPos": {
-        "h": 3,
+        "h": 1,
         "w": 24,
         "x": 0,
-        "y": 48
+        "y": 20
       },
-      "options": {
-        "mode": "markdown",
-        "content": "[打开处理生命周期看板](/d/mwe-processing-lifecycle-v2) · 当前批次、文档可用性、精准阶段重试、未解决异常、事件时间线、一致性检查。\n\n下方旧流程记录的阶段证据尚未核实；实际恢复操作进入 WeKnora 设置 → 处理生命周期。"
-      }
+      "panels": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "weknora-postgres"
+          },
+          "description": "WeKnora工作空间/知识库表示导入目标。腾讯文档路径仅使用源端source_path记录；当前历史未采集则显示未记录，不使用WeKnora文件夹或标题推断。腾讯文档源空间与技术ID在详情中。导入文件大小按1024换算KB/MB/GB，可能为转换后文件；未知显示未记录。悬停详情点击检查图标查看完整信息。保留逐文件恢复判定及50条分页，每轮错误样本最多100条。",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "filterable": true,
+                "inspect": false
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "详情"
+                },
+                "properties": [
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "auto"
+                    }
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "regex",
+                        "options": {
+                          "pattern": ".*",
+                          "result": {
+                            "text": "查看"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "custom.inspect",
+                    "value": true
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 90
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "文档名称"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 260
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "腾讯文档路径"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 240
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "导入文件大小"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 115
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "失败环节"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 110
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "状态"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 110
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "最近失败时间"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 175
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "异常原因"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 300
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 13,
+            "w": 24,
+            "x": 0,
+            "y": 21
+          },
+          "id": 10,
+          "options": {
+            "cellHeight": "sm",
+            "footer": {
+              "countRows": false,
+              "fields": "",
+              "reducer": [
+                "sum"
+              ],
+              "show": false
+            },
+            "showHeader": true,
+            "sortBy": [
+              {
+                "desc": true,
+                "displayName": "最近失败时间"
+              }
+            ]
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "weknora-postgres"
+              },
+              "editorMode": "code",
+              "format": "table",
+              "rawQuery": true,
+              "rawSql": "WITH valid_sources AS (\n  SELECT ds.id, ds.tenant_id, ds.knowledge_base_id, ds.name, ds.type,\n         kb.name AS kb_name, COALESCE(t.name, ds.tenant_id::text) AS workspace\n  FROM data_sources ds\n  JOIN knowledge_bases kb ON kb.id=ds.knowledge_base_id AND kb.tenant_id=ds.tenant_id AND kb.deleted_at IS NULL\n  LEFT JOIN tenants t ON t.id=ds.tenant_id\n  WHERE ds.deleted_at IS NULL AND ds.status<>'deleted'\n), raw_file_errors AS (\n  SELECT ds.*, sl.id AS sync_log_id, e.ordinality AS error_index,\n         COALESCE(NULLIF(e.item->>'title',''), '（历史错误未记录标题）') AS title,\n         NULLIF(e.item->>'external_id','') AS external_id,\n         NULLIF(e.item->>'file_id','') AS file_id,\n         CASE WHEN pg_input_is_valid(e.item->>'occurred_at','timestamp with time zone')\n              THEN (e.item->>'occurred_at')::timestamptz\n              ELSE COALESCE(sl.updated_at,sl.finished_at,sl.started_at) AT TIME ZONE 'UTC' END AS failed_at,\n         COALESCE(NULLIF(e.item->>'message',''), CASE WHEN jsonb_typeof(e.item)='string' THEN e.item #>> '{}' END, '未记录错误信息') AS message,\n         e.item\n  FROM sync_logs sl\n  JOIN valid_sources ds ON ds.id=sl.data_source_id AND ds.tenant_id=sl.tenant_id AND ds.type='tencent_docs'\n  CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(sl.result->'errors')='array' THEN sl.result->'errors' ELSE '[]'::jsonb END)\n    WITH ORDINALITY AS e(item,ordinality)\n), file_aliases AS (\n  SELECT id, external_id, max(file_id) AS file_id FROM raw_file_errors\n  WHERE external_id IS NOT NULL AND file_id IS NOT NULL\n  GROUP BY id,external_id HAVING count(DISTINCT file_id)=1\n), keyed_file_errors AS (\n  SELECT e.*, COALESCE(e.file_id,a.file_id) AS canonical_file_id,\n         CASE WHEN COALESCE(e.file_id,a.file_id) IS NOT NULL THEN 'file:'||COALESCE(e.file_id,a.file_id)\n              WHEN e.external_id IS NOT NULL THEN 'external:'||e.external_id\n              ELSE 'legacy-log:'||e.sync_log_id||':'||e.error_index::text END AS file_key\n  FROM raw_file_errors e LEFT JOIN file_aliases a ON a.id=e.id AND a.external_id=e.external_id\n), unresolved_file_errors AS (\n  SELECT e.* FROM keyed_file_errors e\n  WHERE NOT EXISTS (\n    SELECT 1 FROM processing_legacy_evidence proof\n    WHERE proof.tenant_id=e.tenant_id AND proof.knowledge_base_id=e.knowledge_base_id\n      AND proof.datasource_id=e.id AND proof.run_id=e.sync_log_id AND proof.error_ordinal=e.error_index\n      AND proof.error_digest=encode(sha256(convert_to(e.item::text,'UTF8')),'hex')\n      AND proof.action IN ('late_completion','manual_confirmed','recovered','policy_skipped')\n  )\n), latest_file_errors AS (\n  -- Resolving a newer occurrence must not hide an earlier unresolved error.\n  SELECT DISTINCT ON (id,file_key) * FROM unresolved_file_errors\n  ORDER BY id,file_key,failed_at DESC,sync_log_id DESC,error_index DESC\n), sync_failures AS (\n  SELECT e.failed_at, e.tenant_id, e.workspace, e.kb_name, e.name AS ds_name,\n         COALESCE(e.item->>'space_id','') AS space, e.title,\n         COALESCE(NULLIF(e.item->>'stage',''),\n           CASE WHEN e.message ~ 'download Tencent Docs export|FILE_SIZE_EXCEEDED' THEN 'download'\n                WHEN e.message ~ 'export' THEN 'export'\n                WHEN e.message ~ 'file info|query_file_info' THEN 'fetch_metadata' ELSE 'fetch' END) AS stage,\n         CASE WHEN e.item->>'category'='FILE_SIZE_EXCEEDED' OR e.item->>'code'='FILE_SIZE_EXCEEDED'\n                   OR e.message ~ 'download Tencent Docs export exceeds [0-9]+ bytes'\n              THEN 'FILE_SIZE_EXCEEDED'\n              ELSE COALESCE(NULLIF(e.item->>'category',''),NULLIF(e.item->>'code',''),'SOURCE_FETCH_FAILED') END AS category,\n         CASE WHEN e.message ~ 'download Tencent Docs export exceeds [0-9]+ bytes'\n              THEN '文件大小超出上限；历史日志未记录实际大小（不是解析引擎故障）' ELSE e.message END AS reason,\n         e.sync_log_id, e.id AS data_source_id, NULL::text AS knowledge_id, e.knowledge_base_id,\n         e.external_id, e.canonical_file_id AS file_id, e.type AS source,\n         COALESCE(e.item->>'limit_bytes',substring(e.message from 'download Tencent Docs export exceeds ([0-9]+) bytes')) AS limit_bytes,\n         e.item->>'actual_bytes' AS actual_bytes, e.item->>'observed_at_least_bytes' AS observed_at_least_bytes,\n         CASE WHEN e.canonical_file_id IS NOT NULL THEN 'file_id' WHEN e.external_id IS NOT NULL THEN 'external_id' ELSE 'legacy_title_only' END AS identity_basis,\n         CASE WHEN e.canonical_file_id IS NULL AND e.external_id IS NULL THEN '恢复待核实：历史记录缺少稳定文件ID' ELSE '未解决：尚无对应原错误的显式核验消解记录' END AS resolution,\n         e.file_key, NULLIF(e.item->>'source_path','') AS source_path\n  FROM latest_file_errors e\n), knowledge_failures AS (\n  SELECT k.updated_at AS failed_at, k.tenant_id, COALESCE(t.name,k.tenant_id::text) AS workspace,\n         kb.name AS kb_name, COALESCE(ds.name,'手工/API上传') AS ds_name,\n         COALESCE(NULLIF(k.metadata->>'space_name',''),NULLIF(k.metadata->>'space_id',''),'') AS space,\n         COALESCE(NULLIF(k.title,''),NULLIF(k.file_name,''),k.id) AS title,\n         COALESCE(sp.name,'knowledge_processing') AS stage,\n         COALESCE(NULLIF(sp.error_code,''),'KNOWLEDGE_PROCESSING_FAILED') AS category,\n         COALESCE(NULLIF(sp.error_message,''),NULLIF(k.error_message,''),'未记录错误信息') AS reason,\n         NULL::text AS sync_log_id, COALESCE(ds.id,'') AS data_source_id, k.id AS knowledge_id, k.knowledge_base_id,\n         NULLIF(k.metadata->>'external_id','') AS external_id, NULLIF(k.metadata->>'file_id','') AS file_id,\n         COALESCE(ds.type,k.channel) AS source,\n         NULL::text AS limit_bytes, CASE WHEN k.file_size>0 THEN k.file_size::text END AS actual_bytes, NULL::text AS observed_at_least_bytes,\n         'knowledge_id'::text AS identity_basis, '未解决：知识处理失败'::text AS resolution,\n         CASE WHEN NULLIF(k.metadata->>'file_id','') IS NOT NULL THEN 'file:'||(k.metadata->>'file_id')\n              WHEN NULLIF(k.metadata->>'external_id','') IS NOT NULL THEN 'external:'||(k.metadata->>'external_id')\n              ELSE 'knowledge:'||k.id END AS file_key,\n         CASE WHEN COALESCE(ds.type,k.channel)='tencent_docs' THEN NULLIF(k.metadata->>'source_path','') END AS source_path\n  FROM knowledges k\n  JOIN knowledge_bases kb ON kb.id=k.knowledge_base_id AND kb.tenant_id=k.tenant_id AND kb.deleted_at IS NULL\n  LEFT JOIN tenants t ON t.id=k.tenant_id\n  LEFT JOIN valid_sources ds ON ds.id=k.metadata->>'datasource_id' AND ds.tenant_id=k.tenant_id AND ds.knowledge_base_id=k.knowledge_base_id\n  LEFT JOIN LATERAL (SELECT s.name,s.error_code,s.error_message FROM knowledge_processing_spans s\n      WHERE s.knowledge_id=k.id AND s.status='failed' ORDER BY s.finished_at DESC NULLS LAST,s.updated_at DESC LIMIT 1) sp ON true\n  WHERE k.parse_status='failed' AND k.deleted_at IS NULL\n    AND (NULLIF(k.metadata->>'datasource_id','') IS NULL OR ds.id IS NOT NULL)\n), all_failures AS (\n  SELECT * FROM sync_failures UNION ALL SELECT * FROM knowledge_failures\n), linked_failures AS (\n  SELECT f.*, max(sync_log_id) OVER file_group AS linked_sync_log_id,\n         max(knowledge_id) OVER file_group AS linked_knowledge_id\n  FROM all_failures f WINDOW file_group AS (PARTITION BY tenant_id,knowledge_base_id,data_source_id,file_key)\n), failure_rows AS (\n  SELECT DISTINCT ON (tenant_id,knowledge_base_id,data_source_id,file_key) * FROM linked_failures\n  ORDER BY tenant_id,knowledge_base_id,data_source_id,file_key,failed_at DESC,knowledge_id NULLS LAST\n)\nSELECT title AS \"文档名称\",\n      CASE WHEN source='tencent_docs' THEN COALESCE(source_path,'未记录') ELSE '不适用' END AS \"腾讯文档路径\",\n      CASE WHEN actual_bytes ~ '^[0-9]{1,18}$' THEN\n      CASE WHEN (actual_bytes)::numeric>=1073741824 THEN round((actual_bytes)::numeric/1073741824,2)::text||' GB'\n           WHEN (actual_bytes)::numeric>=1048576 THEN round((actual_bytes)::numeric/1048576,2)::text||' MB'\n           ELSE round((actual_bytes)::numeric/1024,2)::text||' KB' END ELSE '未记录' END AS \"导入文件大小\",\n      workspace AS \"WeKnora 工作空间\",kb_name AS \"WeKnora 知识库\",\n      CASE source WHEN 'tencent_docs' THEN '腾讯文档' WHEN 'web' THEN '手工/API上传'\n        WHEN 'feishu' THEN '飞书' WHEN 'feishu_drive' THEN '飞书云盘' WHEN 'notion' THEN 'Notion'\n        ELSE COALESCE(NULLIF(source,''),ds_name) END AS \"来源\",\n      CASE stage WHEN 'fetch_metadata' THEN '获取文件信息' WHEN 'fetch_content' THEN '获取内容'\n        WHEN 'fetch' THEN '源端获取' WHEN 'export' THEN '导出' WHEN 'download' THEN '下载'\n        WHEN 'faq_validate' THEN 'FAQ格式校验' WHEN 'faq_import' THEN 'FAQ入库'\n        WHEN 'ingest' THEN '入库' WHEN 'knowledge_processing' THEN '知识处理' ELSE stage END AS \"失败环节\",\n      CASE WHEN category='FILE_SIZE_EXCEEDED' THEN '文件大小超出上限（上限：'||CASE WHEN limit_bytes ~ '^[0-9]{1,18}$' THEN\n      CASE WHEN (limit_bytes)::numeric>=1073741824 THEN round((limit_bytes)::numeric/1073741824,2)::text||' GB'\n           WHEN (limit_bytes)::numeric>=1048576 THEN round((limit_bytes)::numeric/1048576,2)::text||' MB'\n           ELSE round((limit_bytes)::numeric/1024,2)::text||' KB' END ELSE '未记录' END||'）'\n        ELSE LEFT(regexp_replace(reason,'https?://[^[:space:]]+','[URL_REDACTED]','g'),600) END AS \"异常原因\",\n      CASE WHEN identity_basis='legacy_title_only' THEN '恢复待核实' ELSE '未解决' END AS \"状态\",\n      failed_at AS \"最近失败时间\",\n      jsonb_strip_nulls(jsonb_build_object(\n        '错误类别',category,'完整原因',regexp_replace(reason,'https?://[^[:space:]]+','[URL_REDACTED]','g'),\n        '恢复判定',resolution,'定位依据',identity_basis,'连接配置名称',ds_name,\n        '腾讯文档源空间',CASE WHEN source='tencent_docs' THEN NULLIF(space,'') END,\n        '文件大小依据',CASE WHEN actual_bytes IS NULL THEN '未记录；未使用上限、读取下界或旧版本大小替代'\n          WHEN knowledge_id IS NOT NULL THEN 'WeKnora接收文件（可能为源文档转换后的文件）' ELSE '本次导出/下载响应记录' END,\n        '实际字节数',actual_bytes,'限制字节数',limit_bytes,'至少已读取字节数',observed_at_least_bytes,\n        'sync_log_id',NULLIF(linked_sync_log_id,''),'data_source_id',NULLIF(data_source_id,''),\n        'knowledge_id',NULLIF(linked_knowledge_id,''),'knowledge_base_id',knowledge_base_id,\n        'external_id',external_id,'file_id',file_id))::text AS \"详情\"\n      FROM failure_rows ORDER BY failed_at DESC,data_source_id,file_key LIMIT 50 OFFSET (GREATEST(COALESCE(NULLIF(${doc_page:sqlstring}, '')::int,1),1)-1)*50",
+              "refId": "A",
+              "sql": {
+                "columns": [
+                  {
+                    "parameters": [],
+                    "type": "function"
+                  }
+                ],
+                "groupBy": [
+                  {
+                    "property": {
+                      "type": "string"
+                    },
+                    "type": "groupBy"
+                  }
+                ],
+                "limit": 50
+              }
+            }
+          ],
+          "title": "旧流程文档记录（待核实）",
+          "type": "table"
+        },
+        {
+          "gridPos": {
+            "h": 2,
+            "w": 24,
+            "x": 0,
+            "y": 34
+          },
+          "id": 43,
+          "options": {
+            "afterRender": "const variable=\"doc_page\";\nlet current=Math.max(Number(context.grafana.replaceVariables(\"${doc_page}\"))||1,1);\nconst pages=Math.max(Number(context.grafana.replaceVariables(\"${doc_pages}\"))||1,1);\nconst root=context.element.querySelector(\".kb-page-jump\");\nif(!root||root.dataset.ready===\"true\")return;\nroot.dataset.ready=\"true\";\nconst bar=document.createElement(\"div\");\nObject.assign(bar.style,{display:\"flex\",alignItems:\"center\",justifyContent:\"flex-end\",gap:\"8px\",height:\"100%\",padding:\"0 10px\",whiteSpace:\"nowrap\"});\nconst makeButton=(text,label)=>{const button=document.createElement(\"button\");button.type=\"button\";button.textContent=text;button.setAttribute(\"aria-label\",label);Object.assign(button.style,{padding:\"6px 10px\",color:\"inherit\",background:\"transparent\",border:\"1px solid #6b7280\",borderRadius:\"4px\"});return button;};\nconst prev=makeButton(\"‹\",\"文档失败上一页\");\nbar.append(prev);\nconst prefix=document.createElement(\"span\");prefix.textContent=\"第\";bar.append(prefix);\nconst input=document.createElement(\"input\");input.type=\"number\";input.min=\"1\";input.max=String(pages);input.step=\"1\";input.required=true;input.setAttribute(\"aria-label\",\"文档失败跳转页码\");Object.assign(input.style,{width:\"64px\",padding:\"6px 8px\",color:\"inherit\",background:\"transparent\",border:\"1px solid #6b7280\",borderRadius:\"4px\",textAlign:\"center\"});\ninput.addEventListener(\"pointerdown\",(event)=>event.stopPropagation());\ninput.addEventListener(\"mousedown\",(event)=>event.stopPropagation());\ninput.addEventListener(\"click\",(event)=>{event.stopPropagation();input.focus();});\nbar.append(input);\nconst total=document.createElement(\"span\");total.textContent=\"/ \"+pages+\" 页\";bar.append(total);\nconst next=makeButton(\"›\",\"文档失败下一页\");\nbar.append(next);\nconst size=document.createElement(\"span\");size.textContent=\"50 条/页\";bar.append(size);\nconst update=()=>{input.value=String(current);prev.disabled=current<=1;next.disabled=current>=pages;for(const button of [prev,next]){button.style.cursor=button.disabled?\"default\":\"pointer\";button.style.opacity=button.disabled?\"0.45\":\"1\";}};\nconst setPage=(page)=>{current=Math.min(Math.max(page,1),pages);update();context.grafana.locationService.partial({[\"var-\"+variable]:String(current)});};\nprev.addEventListener(\"click\",()=>setPage(current-1));\nnext.addEventListener(\"click\",()=>setPage(current+1));\ninput.addEventListener(\"keydown\",(event)=>{event.stopPropagation();if(event.key!==\"Enter\")return;event.preventDefault();const page=Number.parseInt(input.value,10);if(!Number.isInteger(page)||page<1||page>pages){input.value=String(current);context.grafana.notifyError([\"页码无效\",\"请输入 1 到 \"+pages]);return;}setPage(page);});\nupdate();\nroot.append(bar);",
+            "content": "<div class=\"kb-page-jump\"></div>",
+            "defaultContent": "<div class=\"kb-page-jump\"></div>",
+            "editor": {
+              "format": "auto",
+              "height": 100,
+              "language": "html"
+            },
+            "editors": [
+              "default"
+            ],
+            "externalScripts": [],
+            "externalStyles": [],
+            "helpers": "",
+            "renderMode": "everyRow",
+            "styles": "",
+            "wrap": false
+          },
+          "pluginVersion": "6.3.0",
+          "transparent": true,
+          "type": "marcusolsson-dynamictext-panel"
+        },
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "weknora-postgres"
+          },
+          "description": "有效数据源最新同步失败/部分成功汇总。具体文件见上方文档失败表；一次增量success不代表旧失败文件已重新处理。已删除源/知识库排除；每页50条。",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "filterable": true,
+                "inspect": false
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 0,
+            "y": 36
+          },
+          "id": 11,
+          "options": {
+            "cellHeight": "sm",
+            "footer": {
+              "countRows": false,
+              "fields": "",
+              "reducer": [
+                "sum"
+              ],
+              "show": false
+            },
+            "showHeader": true,
+            "sortBy": []
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "weknora-postgres"
+              },
+              "editorMode": "code",
+              "format": "table",
+              "rawQuery": true,
+              "rawSql": "WITH latest AS (\n  SELECT DISTINCT ON (sl.data_source_id) sl.*, ds.name AS source_name,ds.type AS source_type,\n    kb.name AS kb_name, COALESCE(t.name,ds.tenant_id::text) AS workspace\n  FROM sync_logs sl\n  JOIN data_sources ds ON ds.id=sl.data_source_id AND ds.tenant_id=sl.tenant_id\n    AND ds.deleted_at IS NULL AND ds.status<>'deleted'\n  JOIN knowledge_bases kb ON kb.id=ds.knowledge_base_id AND kb.tenant_id=ds.tenant_id AND kb.deleted_at IS NULL\n  LEFT JOIN tenants t ON t.id=ds.tenant_id\n  ORDER BY sl.data_source_id,sl.updated_at DESC,sl.id DESC\n), failure_rows AS (\n  SELECT * FROM latest WHERE status IN ('failed','partial')\n)\nSELECT updated_at AS \"时间\",workspace AS \"WeKnora 工作空间\",kb_name AS \"WeKnora 知识库\",source_name AS \"数据源\",source_type AS \"类型\",status AS \"状态\",items_total AS \"总数\",items_failed AS \"失败数\",LEFT(regexp_replace(COALESCE(NULLIF(error_message,''),result::text,'未记录错误信息'),'https?://[^[:space:]]+','[URL_REDACTED]','g'),600) AS \"异常信息\",id AS \"sync_log_id\",data_source_id FROM failure_rows ORDER BY updated_at DESC,id DESC LIMIT 50 OFFSET (GREATEST(COALESCE(NULLIF(${sync_page:sqlstring}, '')::int,1),1)-1)*50",
+              "refId": "A"
+            }
+          ],
+          "title": "旧流程同步记录（待核实）",
+          "type": "table"
+        },
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "weknora-postgres"
+          },
+          "description": "仅显示当前仍未解决的业务死信；同一任务类型和业务对象只保留最新一条。已完成或已删除对象的历史档案仍保留在数据库，但不占用本面板。",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "filterable": true,
+                "inspect": false
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 12,
+            "y": 36
+          },
+          "id": 12,
+          "options": {
+            "cellHeight": "sm",
+            "footer": {
+              "countRows": false,
+              "fields": "",
+              "reducer": [
+                "sum"
+              ],
+              "show": false
+            },
+            "showHeader": true,
+            "sortBy": []
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "weknora-postgres"
+              },
+              "editorMode": "code",
+              "format": "table",
+              "rawQuery": true,
+              "rawSql": "WITH latest_sync AS (SELECT DISTINCT ON (data_source_id) data_source_id,status FROM sync_logs ORDER BY data_source_id,updated_at DESC,id DESC), unresolved AS (SELECT DISTINCT ON (dl.task_type,COALESCE(NULLIF(dl.related_id,''),NULLIF(dl.payload->>'data_source_id',''),dl.id::text)) dl.*,COALESCE(NULLIF(dl.related_id,''),NULLIF(dl.payload->>'data_source_id',''),dl.id::text) AS business_id FROM task_dead_letters dl LEFT JOIN knowledges k ON k.id=dl.related_id AND k.deleted_at IS NULL LEFT JOIN latest_sync ls ON ls.data_source_id=dl.payload->>'data_source_id' WHERE (dl.task_type='datasource:sync' AND ls.status IN ('failed','partial')) OR (dl.task_type<>'datasource:sync' AND k.parse_status='failed') ORDER BY dl.task_type,COALESCE(NULLIF(dl.related_id,''),NULLIF(dl.payload->>'data_source_id',''),dl.id::text),dl.failed_at DESC,dl.id DESC) SELECT u.failed_at AS \"失败时间\",COALESCE(t.name,u.tenant_id::text) AS \"账号/工作空间\",u.task_type AS \"任务类型\",u.scope AS \"范围\",u.scope_id AS \"范围ID\",u.business_id AS \"关联ID\",u.fail_count AS \"失败次数\",LEFT(u.last_error,600) AS \"异常信息\" FROM unresolved u LEFT JOIN tenants t ON t.id=u.tenant_id ORDER BY u.failed_at DESC LIMIT 50 OFFSET (GREATEST(COALESCE(NULLIF(${dead_page:sqlstring}, '')::int,1),1)-1)*50",
+              "refId": "A"
+            }
+          ],
+          "title": "旧流程死信记录（待核实）",
+          "type": "table"
+        },
+        {
+          "gridPos": {
+            "h": 2,
+            "w": 12,
+            "x": 0,
+            "y": 46
+          },
+          "id": 44,
+          "options": {
+            "afterRender": "const variable=\"sync_page\";\nlet current=Math.max(Number(context.grafana.replaceVariables(\"${sync_page}\"))||1,1);\nconst pages=Math.max(Number(context.grafana.replaceVariables(\"${sync_pages}\"))||1,1);\nconst root=context.element.querySelector(\".kb-page-jump\");\nif(!root||root.dataset.ready===\"true\")return;\nroot.dataset.ready=\"true\";\nconst bar=document.createElement(\"div\");\nObject.assign(bar.style,{display:\"flex\",alignItems:\"center\",justifyContent:\"flex-end\",gap:\"8px\",height:\"100%\",padding:\"0 10px\",whiteSpace:\"nowrap\"});\nconst makeButton=(text,label)=>{const button=document.createElement(\"button\");button.type=\"button\";button.textContent=text;button.setAttribute(\"aria-label\",label);Object.assign(button.style,{padding:\"6px 10px\",color:\"inherit\",background:\"transparent\",border:\"1px solid #6b7280\",borderRadius:\"4px\"});return button;};\nconst prev=makeButton(\"‹\",\"数据源异常上一页\");\nbar.append(prev);\nconst prefix=document.createElement(\"span\");prefix.textContent=\"第\";bar.append(prefix);\nconst input=document.createElement(\"input\");input.type=\"number\";input.min=\"1\";input.max=String(pages);input.step=\"1\";input.required=true;input.setAttribute(\"aria-label\",\"数据源异常跳转页码\");Object.assign(input.style,{width:\"64px\",padding:\"6px 8px\",color:\"inherit\",background:\"transparent\",border:\"1px solid #6b7280\",borderRadius:\"4px\",textAlign:\"center\"});\ninput.addEventListener(\"pointerdown\",(event)=>event.stopPropagation());\ninput.addEventListener(\"mousedown\",(event)=>event.stopPropagation());\ninput.addEventListener(\"click\",(event)=>{event.stopPropagation();input.focus();});\nbar.append(input);\nconst total=document.createElement(\"span\");total.textContent=\"/ \"+pages+\" 页\";bar.append(total);\nconst next=makeButton(\"›\",\"数据源异常下一页\");\nbar.append(next);\nconst size=document.createElement(\"span\");size.textContent=\"50 条/页\";bar.append(size);\nconst update=()=>{input.value=String(current);prev.disabled=current<=1;next.disabled=current>=pages;for(const button of [prev,next]){button.style.cursor=button.disabled?\"default\":\"pointer\";button.style.opacity=button.disabled?\"0.45\":\"1\";}};\nconst setPage=(page)=>{current=Math.min(Math.max(page,1),pages);update();context.grafana.locationService.partial({[\"var-\"+variable]:String(current)});};\nprev.addEventListener(\"click\",()=>setPage(current-1));\nnext.addEventListener(\"click\",()=>setPage(current+1));\ninput.addEventListener(\"keydown\",(event)=>{event.stopPropagation();if(event.key!==\"Enter\")return;event.preventDefault();const page=Number.parseInt(input.value,10);if(!Number.isInteger(page)||page<1||page>pages){input.value=String(current);context.grafana.notifyError([\"页码无效\",\"请输入 1 到 \"+pages]);return;}setPage(page);});\nupdate();\nroot.append(bar);",
+            "content": "<div class=\"kb-page-jump\"></div>",
+            "defaultContent": "<div class=\"kb-page-jump\"></div>",
+            "editor": {
+              "format": "auto",
+              "height": 100,
+              "language": "html"
+            },
+            "editors": [
+              "default"
+            ],
+            "externalScripts": [],
+            "externalStyles": [],
+            "helpers": "",
+            "renderMode": "everyRow",
+            "styles": "",
+            "wrap": false
+          },
+          "pluginVersion": "6.3.0",
+          "transparent": true,
+          "type": "marcusolsson-dynamictext-panel"
+        },
+        {
+          "gridPos": {
+            "h": 2,
+            "w": 12,
+            "x": 12,
+            "y": 46
+          },
+          "id": 45,
+          "options": {
+            "afterRender": "const variable=\"dead_page\";\nlet current=Math.max(Number(context.grafana.replaceVariables(\"${dead_page}\"))||1,1);\nconst pages=Math.max(Number(context.grafana.replaceVariables(\"${dead_pages}\"))||1,1);\nconst root=context.element.querySelector(\".kb-page-jump\");\nif(!root||root.dataset.ready===\"true\")return;\nroot.dataset.ready=\"true\";\nconst bar=document.createElement(\"div\");\nObject.assign(bar.style,{display:\"flex\",alignItems:\"center\",justifyContent:\"flex-end\",gap:\"8px\",height:\"100%\",padding:\"0 10px\",whiteSpace:\"nowrap\"});\nconst makeButton=(text,label)=>{const button=document.createElement(\"button\");button.type=\"button\";button.textContent=text;button.setAttribute(\"aria-label\",label);Object.assign(button.style,{padding:\"6px 10px\",color:\"inherit\",background:\"transparent\",border:\"1px solid #6b7280\",borderRadius:\"4px\"});return button;};\nconst prev=makeButton(\"‹\",\"任务死信上一页\");\nbar.append(prev);\nconst prefix=document.createElement(\"span\");prefix.textContent=\"第\";bar.append(prefix);\nconst input=document.createElement(\"input\");input.type=\"number\";input.min=\"1\";input.max=String(pages);input.step=\"1\";input.required=true;input.setAttribute(\"aria-label\",\"任务死信跳转页码\");Object.assign(input.style,{width:\"64px\",padding:\"6px 8px\",color:\"inherit\",background:\"transparent\",border:\"1px solid #6b7280\",borderRadius:\"4px\",textAlign:\"center\"});\ninput.addEventListener(\"pointerdown\",(event)=>event.stopPropagation());\ninput.addEventListener(\"mousedown\",(event)=>event.stopPropagation());\ninput.addEventListener(\"click\",(event)=>{event.stopPropagation();input.focus();});\nbar.append(input);\nconst total=document.createElement(\"span\");total.textContent=\"/ \"+pages+\" 页\";bar.append(total);\nconst next=makeButton(\"›\",\"任务死信下一页\");\nbar.append(next);\nconst size=document.createElement(\"span\");size.textContent=\"50 条/页\";bar.append(size);\nconst update=()=>{input.value=String(current);prev.disabled=current<=1;next.disabled=current>=pages;for(const button of [prev,next]){button.style.cursor=button.disabled?\"default\":\"pointer\";button.style.opacity=button.disabled?\"0.45\":\"1\";}};\nconst setPage=(page)=>{current=Math.min(Math.max(page,1),pages);update();context.grafana.locationService.partial({[\"var-\"+variable]:String(current)});};\nprev.addEventListener(\"click\",()=>setPage(current-1));\nnext.addEventListener(\"click\",()=>setPage(current+1));\ninput.addEventListener(\"keydown\",(event)=>{event.stopPropagation();if(event.key!==\"Enter\")return;event.preventDefault();const page=Number.parseInt(input.value,10);if(!Number.isInteger(page)||page<1||page>pages){input.value=String(current);context.grafana.notifyError([\"页码无效\",\"请输入 1 到 \"+pages]);return;}setPage(page);});\nupdate();\nroot.append(bar);",
+            "content": "<div class=\"kb-page-jump\"></div>",
+            "defaultContent": "<div class=\"kb-page-jump\"></div>",
+            "editor": {
+              "format": "auto",
+              "height": 100,
+              "language": "html"
+            },
+            "editors": [
+              "default"
+            ],
+            "externalScripts": [],
+            "externalStyles": [],
+            "helpers": "",
+            "renderMode": "everyRow",
+            "styles": "",
+            "wrap": false
+          },
+          "pluginVersion": "6.3.0",
+          "transparent": true,
+          "type": "marcusolsson-dynamictext-panel"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 8,
+            "x": 0,
+            "y": 48
+          },
+          "id": 3,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "wideLayout": true
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "weknora_failed_knowledge_recent_total",
+              "instant": true,
+              "legendFormat": "5分钟失败",
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "旧流程 · 最近5分钟任务失败",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 10
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 8,
+            "x": 8,
+            "y": 48
+          },
+          "id": 4,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "wideLayout": true
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "sum(weknora_processing_stale_total)",
+              "instant": true,
+              "legendFormat": "疑似停滞",
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "旧流程 · 状态超过70分钟未更新",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 5
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 8,
+            "x": 16,
+            "y": 48
+          },
+          "id": 5,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "wideLayout": true
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "sum(weknora_dead_letters_recent_total) or vector(0)",
+              "instant": true,
+              "legendFormat": "死信",
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "旧流程 · 最近5分钟死信",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 15,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 4,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "normal"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 52
+          },
+          "id": 9,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "weknora_knowledge_status_total",
+              "legendFormat": "{{parse_status}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "旧流程 · 知识处理状态趋势",
+          "type": "timeseries"
+        }
+      ]
     }
   ],
   "preload": false,
@@ -2386,8 +2395,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "MWE 知识库运行与任务异常",
+  "title": "WeKnora · 运行总览",
   "uid": "mwe-kb-observability-v1",
-  "version": 16,
+  "version": 18,
   "weekStart": "monday"
 }

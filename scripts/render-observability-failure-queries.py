@@ -7,6 +7,14 @@ GRAFANA = ROOT / "deploy/mwe-observability/grafana"
 DASHBOARD = GRAFANA / "dashboards/knowledgebase-overview.json"
 
 
+def leaf_panels(panels):
+    for panel in panels:
+        if panel.get('type') == 'row':
+            yield from leaf_panels(panel.get('panels', []))
+        else:
+            yield panel
+
+
 def size_label(column):
     # Human-facing KB/MB/GB use a documented 1024-based conversion. Never
     # substitute a limit, observed prefix or old knowledge version for size.
@@ -58,11 +66,11 @@ def render():
     before = json.loads(text)
     after = json.loads(text)
     for panel_id, (detail, count, variable) in queries().items():
-        panel = next(p for p in after["panels"] if p["id"] == panel_id)
+        panel = next(p for p in leaf_panels(after["panels"]) if p["id"] == panel_id)
         panel["targets"][0]["rawSql"] = detail
         var = next(v for v in after["templating"]["list"] if v["name"] == variable)
         var["query"] = var["definition"] = count
-    document_panel = next(p for p in after["panels"] if p["id"] == 10)
+    document_panel = next(p for p in leaf_panels(after["panels"]) if p["id"] == 10)
     document_panel["description"] = "WeKnora工作空间/知识库表示导入目标。腾讯文档路径仅使用源端source_path记录；当前历史未采集则显示未记录，不使用WeKnora文件夹或标题推断。腾讯文档源空间与技术ID在详情中。导入文件大小按1024换算KB/MB/GB，可能为转换后文件；未知显示未记录。悬停详情点击检查图标查看完整信息。保留逐文件恢复判定及50条分页，每轮错误样本最多100条。"
     document_panel["options"]["sortBy"] = [{"desc": True, "displayName": "最近失败时间"}]
     document_panel["fieldConfig"]["overrides"] = [
@@ -73,11 +81,11 @@ def render():
             {"id": "custom.width", "value": 90}]},
         *[{"matcher": {"id": "byName", "options": name}, "properties": [{"id": "custom.width", "value": width}]}
           for name, width in [("文档名称",260),("腾讯文档路径",240),("导入文件大小",115),("失败环节",110),("状态",110),("最近失败时间",175),("异常原因",300)]]]
-    next(p for p in after["panels"] if p["id"] == 11)["description"] = "有效数据源最新同步失败/部分成功汇总。具体文件见上方文档失败表；一次增量success不代表旧失败文件已重新处理。已删除源/知识库排除；每页50条。"
+    next(p for p in leaf_panels(after["panels"]) if p["id"] == 11)["description"] = "有效数据源最新同步失败/部分成功汇总。具体文件见上方文档失败表；一次增量success不代表旧失败文件已重新处理。已删除源/知识库排除；每页50条。"
     # Replace JSON string values, not a historical dashboard snapshot. This
     # preserves formatting and all other panels, paging scripts and variables.
     replacements = {}
-    for p, q in zip(before["panels"], after["panels"]):
+    for p, q in zip(leaf_panels(before["panels"]), leaf_panels(after["panels"])):
         if p != q:
             replacements[p["targets"][0]["rawSql"]] = q["targets"][0]["rawSql"]
             replacements[p["description"]] = q["description"]
@@ -93,7 +101,7 @@ def render():
     options_line = next(i for i in range(panel_line+1, len(lines)) if '"options":' in lines[i])
     # Decode the complete value: current dashboards may format an object over
     # many lines, so replacing only its first line leaves invalid JSON behind.
-    original_panel = next(p for p in before["panels"] if p["id"] == 10)
+    original_panel = next(p for p in leaf_panels(before["panels"]) if p["id"] == 10)
     for index, key in sorted(((field_line, "fieldConfig"), (options_line, "options")), reverse=True):
         if original_panel[key] == document_panel[key]:
             continue

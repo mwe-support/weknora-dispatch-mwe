@@ -155,9 +155,9 @@ def build_sql():
     # This patch must not restore old pager scripts, dead-letter filters, GPUs,
     # container navigation or any other already verified production UI.
     unchanged = json.loads(json.dumps(dashboard))
-    for old in baseline["panels"]:
+    for old in renderer.leaf_panels(baseline["panels"]):
         if old["id"] in (10, 11):
-            panel = next(p for p in unchanged["panels"] if p["id"] == old["id"])
+            panel = next(p for p in renderer.leaf_panels(unchanged["panels"]) if p["id"] == old["id"])
             panel["description"] = old["description"]
             panel["targets"][0]["rawSql"] = old["targets"][0]["rawSql"]
             if old["id"] == 10:
@@ -166,10 +166,16 @@ def build_sql():
         if old["name"] in ("doc_pages", "sync_pages"):
             var = next(v for v in unchanged["templating"]["list"] if v["name"] == old["name"])
             var["query"], var["definition"] = old["query"], old["definition"]
-    unchanged["version"] = baseline["version"]
-    assert unchanged == baseline, "unrelated dashboard UI or query changed"
+    # Native row grouping may change placement; retained infrastructure and
+    # historical tables must keep their queries, options and paging behavior.
+    current_panels = {p['id']:p for p in renderer.leaf_panels(unchanged['panels'])}
+    for old in renderer.leaf_panels(baseline['panels']):
+        if old['id'] in range(101,108):
+            continue
+        assert {k:v for k,v in current_panels[old['id']].items() if k!='gridPos'} == {k:v for k,v in old.items() if k!='gridPos'}, old['id']
+    assert unchanged['templating']==baseline['templating'], 'historical pager configuration changed'
     for pid, (detail, count, var) in q.items():
-        assert next(p for p in dashboard["panels"] if p["id"] == pid)["targets"][0]["rawSql"] == detail
+        assert next(p for p in renderer.leaf_panels(dashboard["panels"]) if p["id"] == pid)["targets"][0]["rawSql"] == detail
         v = next(v for v in dashboard["templating"]["list"] if v["name"] == var)
         assert v["definition"] == v["query"] == count
     return (FIXTURE + "\nCREATE TEMP VIEW actual AS " + doc_cte + " SELECT * FROM failure_rows;\n"
