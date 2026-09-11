@@ -86,6 +86,8 @@ services:
       WEKNORA_REDIS_HOST: ${WEKNORA_REDIS_HOST:-WeKnora-redis}
       WEKNORA_REDIS_PORT: ${WEKNORA_REDIS_PORT:-6379}
       WEKNORA_REDIS_PASSWORD: ${WEKNORA_REDIS_PASSWORD:?set WEKNORA_REDIS_PASSWORD}
+      LLAMA_GPU0_API_KEY: ${LLAMA_GPU0_API_KEY:?set LLAMA_GPU0_API_KEY}
+      LLAMA_GPU1_API_KEY: ${LLAMA_GPU1_API_KEY:?set LLAMA_GPU1_API_KEY}
     volumes:
       - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
       - ./alloy/blackbox.yml:/etc/alloy/blackbox.yml:ro

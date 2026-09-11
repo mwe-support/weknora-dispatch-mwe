@@ -71,6 +71,13 @@ chmod +x scripts/*.sh
 mode `0600`, creates/rotates a PostgreSQL read-only role, validates both
 external Docker networks, and starts the `backend` and `agent` profiles.
 
+The two llama.cpp `/metrics` scrapes use separate `LLAMA_GPU0_API_KEY` and
+`LLAMA_GPU1_API_KEY` values. The installer fills missing values from the running
+containers' `--api-key` arguments without printing or rotating them. Keep these
+values in the protected environment file and update them after a model-key
+rotation. `/health` returning 200 does not prove metrics authentication works;
+verify `up{job=~"q4-gpu.*"}` is 1 for both workers.
+
 Access Grafana directly from the `192.168.18.0/24` LAN:
 
 Open `http://192.168.18.25:13000`. Anonymous access and self-registration stay

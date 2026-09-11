@@ -22,6 +22,8 @@ if command -v docker >/dev/null 2>&1; then
     -e WEKNORA_REDIS_HOST=redis \
     -e WEKNORA_REDIS_PORT=6379 \
     -e WEKNORA_REDIS_PASSWORD=test \
+    -e LLAMA_GPU0_API_KEY=test \
+    -e LLAMA_GPU1_API_KEY=test \
     -v "$ROOT/alloy:/etc/alloy:ro" \
     grafana/alloy:v1.18.0 validate /etc/alloy/config.alloy
 fi

@@ -86,6 +86,32 @@ else
   chmod 600 "$SECRETS_FILE"
 fi
 
+# Reuse the running model keys without printing or rotating them. Existing
+# explicit values remain authoritative; key rotation requires updating them.
+python3 - "$SECRETS_FILE" <<'PY'
+import json, os, re, subprocess, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+text = path.read_text()
+additions = []
+for gpu in (0, 1):
+    name = f'LLAMA_GPU{gpu}_API_KEY'
+    if re.search(rf'^{name}=.+$', text, re.M):
+        continue
+    info = json.loads(subprocess.check_output(['docker', 'inspect', f'kb-q4-gpu{gpu}'], text=True))[0]
+    args = info['Config']['Cmd'] or []
+    if '--api-key' not in args or args.index('--api-key')+1 >= len(args):
+        raise SystemExit(f'Set {name} in the protected observability environment file')
+    key = args[args.index('--api-key')+1]
+    if not re.fullmatch(r'[A-Za-z0-9._~!@%+=:,-]+', key):
+        raise SystemExit(f'{name} requires manual env-file quoting')
+    additions.append(f'{name}={key}\n')
+if additions:
+    with path.open('a') as out:
+        out.write(('' if text.endswith('\n') else '\n') + ''.join(additions))
+os.chmod(path, 0o600)
+PY
+
 docker exec -i WeKnora-postgres psql -U weknora -d "$db_name" -v ON_ERROR_STOP=1 \
   -v app_schema=public -v observer_schema=mwe_observer -v observer_role=weknora_observer \
   < "$ROOT/grafana/queries/observer-access.sql" >/dev/null

@@ -161,12 +161,32 @@ prometheus.scrape "models" {
   targets = [
     { "__address__" = "kb-embed-text:8000", "job" = "embedding" },
     { "__address__" = "kb-rerank-text:8000", "job" = "reranker" },
-    { "__address__" = "kb-q4-gpu0:8000", "job" = "q4-gpu0" },
-    { "__address__" = "kb-q4-gpu1:8000", "job" = "q4-gpu1" },
   ]
   metrics_path    = "/metrics"
   scrape_interval = "30s"
   forward_to      = [prometheus.relabel.host.receiver]
+}
+
+// llama.cpp protects /metrics even though /health is public. Keep its keys
+// separate from the embedding and reranker scrape requests.
+prometheus.scrape "q4_gpu0" {
+  targets = [{ "__address__" = "kb-q4-gpu0:8000", "job" = "q4-gpu0" }]
+  metrics_path    = "/metrics"
+  scrape_interval = "30s"
+  authorization {
+    credentials = sys.env("LLAMA_GPU0_API_KEY")
+  }
+  forward_to = [prometheus.relabel.host.receiver]
+}
+
+prometheus.scrape "q4_gpu1" {
+  targets = [{ "__address__" = "kb-q4-gpu1:8000", "job" = "q4-gpu1" }]
+  metrics_path    = "/metrics"
+  scrape_interval = "30s"
+  authorization {
+    credentials = sys.env("LLAMA_GPU1_API_KEY")
+  }
+  forward_to = [prometheus.relabel.host.receiver]
 }
 
 prometheus.scrape "alloy" {
