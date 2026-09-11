@@ -48,7 +48,7 @@ func checkProcessingObserverViews(t *testing.T, db *gorm.DB, appSchema, dsn stri
 	for view := range processingHistoryViews {
 		require.NoError(t, reader.Exec("SELECT * FROM mwe_processing_"+view+" LIMIT 1").Error, view)
 	}
-	for _, table := range []string{"data_sources", "knowledges", "sync_logs", "task_dead_letters", "processing_jobs", "processing_history_rows", "resources"} {
+	for _, table := range []string{"data_sources", "knowledges", "sync_logs", "task_dead_letters", "processing_jobs", "processing_history_rows", "resources", "processing_legacy_evidence", "processing_legacy_drains", "mwe_processing_legacy_run_state", "mwe_processing_legacy_error_state", "mwe_processing_legacy_evidence_state"} {
 		require.Error(t, reader.Exec("SELECT * FROM "+appSchema+"."+table+" LIMIT 1").Error, table)
 	}
 	for _, table := range []string{"knowledges", "data_sources", "sync_logs", "knowledge_processing_spans", "task_dead_letters"} {
@@ -78,4 +78,22 @@ func checkProcessingObserverViews(t *testing.T, db *gorm.DB, appSchema, dsn stri
 		require.NoError(t, err)
 		require.NoError(t, reader.Exec(string(contents)+" SELECT * FROM failure_rows LIMIT 1").Error, file)
 	}
+	// Redacting the message changes its JSON digest. The safe evidence view
+	// must join the original hash first, then project the matching safe hash.
+	var digest string
+	require.NoError(t, db.Raw("SELECT encode(sha256(convert_to((result->'errors'->0)::text,'UTF8')),'hex') FROM sync_logs WHERE id = ?", "observer-log").Scan(&digest).Error)
+	require.NoError(t, db.Create(&types.ProcessingLegacyEvidence{ID: "observer-proof", ProcessingLegacyIdentity: types.ProcessingLegacyIdentity{TenantID: 1, KnowledgeBaseID: "kb", DataSourceID: "source", RunID: "observer-log", ErrorOrdinal: 1, ErrorDigest: digest}, Action: "manual_confirmed", SnapshotDigest: strings.Repeat("a", 64), ArtifactDigest: strings.Repeat("b", 64), EvidenceReference: "SECRET_OBSERVER_REFERENCE", EvidenceDigest: strings.Repeat("c", 64), Actor: "SECRET_OBSERVER_ACTOR", Reason: "SECRET_OBSERVER_REASON", OperationRequestID: "observer-proof", RequestDigest: strings.Repeat("d", 64)}).Error)
+	query, err := os.ReadFile(filepath.Join(filepath.Dir(file), "document_failures.sql"))
+	require.NoError(t, err)
+	var count int64
+	require.NoError(t, reader.Raw(string(query)+" SELECT count(*) FROM unresolved_file_errors WHERE sync_log_id = 'observer-log'").Scan(&count).Error)
+	require.Zero(t, count)
+	var proofRows []map[string]any
+	require.NoError(t, reader.Table("processing_legacy_evidence").Find(&proofRows).Error)
+	encoded, err := json.Marshal(proofRows)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "SECRET_")
+	require.NoError(t, db.Model(&types.SyncLog{}).Where("id = ?", "observer-log").Update("result", types.JSON(`{"errors":[{"title":"synthetic","file_id":"file","message":"SECRET_CHANGED_MESSAGE","actual_bytes":42,"category":"SOURCE_FETCH_FAILED"}]}`)).Error)
+	require.NoError(t, reader.Raw(string(query)+" SELECT count(*) FROM unresolved_file_errors WHERE sync_log_id = 'observer-log'").Scan(&count).Error)
+	require.EqualValues(t, 1, count, "same redacted text cannot reuse a proof of a different original error")
 }

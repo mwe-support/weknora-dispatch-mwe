@@ -54,3 +54,45 @@ func TestNativeResourceRequiresFreshScopedListing(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeMembershipTraversesCurrentRootInsteadOfOldReadableParent(t *testing.T) {
+	for _, scenario := range []string{"member", "moved-parent", "trashed-root", "wrong-identity"} {
+		t.Run(scenario, func(t *testing.T) {
+			calls := 0
+			read := func(_ context.Context, request NativeScanRequest) (*NativeResponse, error) {
+				calls++
+				body := `{"list":[],"finish":true}`
+				switch {
+				case request.Metadata:
+					body = `{"file_id":"root","title":"Root","status":"normal","is_folder":true}`
+					if scenario == "trashed-root" {
+						body = `{"file_id":"root","title":"Root","status":"trash","is_folder":true}`
+					}
+				case request.ParentID == "root" && scenario != "moved-parent":
+					body = `{"list":[{"id":"parent","title":"Parent","is_folder":true}],"finish":true}`
+				case request.ParentID == "parent" && request.Offset == 0:
+					body = `{"list":[{"id":"other","title":"Other"}],"finish":false}`
+				case request.ParentID == "parent":
+					body = `{"list":[{"id":"file","title":"File"}],"finish":true}`
+				}
+				return &NativeResponse{Data: json.RawMessage(body)}, nil
+			}
+			external := encodeHomeNodeResourceID("file")
+			if scenario == "wrong-identity" {
+				external = encodeHomeNodeResourceID("other")
+			}
+			entry, err := ReadNativeMembership(context.Background(), encodeHomeNodeResourceID("root"), "file", external, read)
+			if scenario == "member" {
+				require.NoError(t, err)
+				require.Equal(t, "Root/Parent", entry.FolderPath)
+				require.Equal(t, []string{"root", "parent"}, entry.Listing.Ancestors)
+				require.Equal(t, 4, calls)
+			} else {
+				require.Error(t, err)
+				if scenario == "moved-parent" {
+					require.Equal(t, 2, calls, "a still-readable old parent must not be followed after it leaves the root")
+				}
+			}
+		})
+	}
+}

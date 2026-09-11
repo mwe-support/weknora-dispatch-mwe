@@ -119,9 +119,6 @@ func (r *ProcessingRepository) CreateHistorySnapshot(ctx context.Context, tenant
 			query = query.Where("observed_at < ?", *filter.To)
 		}
 		order := "observed_at DESC, row_id DESC"
-		if filter.View == "attempt_timeline" || filter.View == "unresolved_incidents" {
-			order = "event_id DESC"
-		}
 		var rows []map[string]any
 		if err := query.Order(order).Limit(10001).Find(&rows).Error; err != nil {
 			return err

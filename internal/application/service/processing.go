@@ -51,7 +51,16 @@ func (s *ProcessingService) Dispatch(ctx context.Context) error {
 			failures = errors.Join(failures, err)
 			continue
 		}
-		queue := types.ProcessingQueue(step.Stage)
+		var metadata types.JSON
+		if step.Stage == "publish" {
+			job, err := s.repo.GetJob(ctx, op.TenantID, ref.JobID)
+			if err != nil {
+				failures = errors.Join(failures, err)
+				continue
+			}
+			metadata = job.Metadata
+		}
+		queue := types.ProcessingQueue(step.Stage, metadata)
 		id := fmt.Sprintf("processing-%s-%d-%d", ref.StepID, ref.Attempt, ref.DispatchSeq)
 		payload, err := json.Marshal(types.ProcessingTaskPayload{ProcessingRef: ref, TenantID: op.TenantID})
 		if err != nil {
@@ -173,7 +182,7 @@ func (s *ProcessingService) Run(ctx context.Context, inspector *asynq.Inspector)
 					}
 					live := false
 					if inspector != nil {
-						task, inspectErr := inspector.GetTaskInfo(types.ProcessingQueue(step.Stage), step.QueueTaskID)
+						task, inspectErr := inspector.GetTaskInfo(types.ProcessingQueue(step.Stage, job.Metadata), step.QueueTaskID)
 						if inspectErr != nil && !errors.Is(inspectErr, asynq.ErrTaskNotFound) && !errors.Is(inspectErr, asynq.ErrQueueNotFound) {
 							continue
 						}

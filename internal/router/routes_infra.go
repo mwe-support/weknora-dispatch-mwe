@@ -292,6 +292,13 @@ func RegisterDataSourceRoutes(
 }
 
 func RegisterProcessingRoutes(r *gin.RouterGroup, h *handler.ProcessingHandler, g *rbacGuards) {
+	legacy := g.apiKeyGroup(r.Group("/knowledge-bases/:id/processing/legacy/sources/:source_id"), apiKeyManageDataSources(apiKeyFullAccess()))
+	legacy.GET("", g.Admin(), g.KBAccessOwn("id"), h.LegacyScope)
+	legacy.POST("/drains", g.Admin(), g.KBAccessOwn("id"), h.LegacyDrain)
+	legacy.POST("/runs/:run_id/retry", g.Admin(), g.KBAccessOwn("id"), h.LegacyRetry)
+	legacy.GET("/runs/:run_id/errors/:error_ordinal", g.Admin(), g.KBAccessOwn("id"), h.LegacyError)
+	legacy.POST("/runs/:run_id/errors/:error_ordinal/complete", g.Admin(), g.KBAccessOwn("id"), h.LegacyComplete)
+	legacy.POST("/runs/:run_id/errors/:error_ordinal/adopt", g.Admin(), g.KBAccessOwn("id"), h.LegacyAdopt)
 	jobs := g.apiKeyGroup(r.Group("/knowledge-bases/:id/processing/jobs"), apiKeyManageDataSources(apiKeyFullAccess()))
 	jobs.GET("", g.Viewer(), g.KBAccessRead("id"), h.History)
 	jobs.GET("/snapshots/:snapshot_id", g.Viewer(), g.KBAccessRead("id"), h.HistoryPage)

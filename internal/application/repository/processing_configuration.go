@@ -61,6 +61,13 @@ func (r *ProcessingRepository) ConfigurationDigests(ctx context.Context, tenant 
 }
 
 func lockProcessingConfigurationInputs(tx *gorm.DB, tenant uint64, id string) (map[string]any, error) {
+	if err := lockTenantParserConfiguration(tx, tenant, true); err != nil {
+		return nil, err
+	}
+	var owner types.Tenant
+	if err := tx.Where("id = ?", tenant).Take(&owner).Error; err != nil {
+		return nil, err
+	}
 	query := tx.Where("id = ? AND tenant_id = ?", id, tenant)
 	if tx.Dialector.Name() == "postgres" {
 		query = query.Clauses(clause.Locking{Strength: "SHARE"})
@@ -77,7 +84,7 @@ func lockProcessingConfigurationInputs(tx *gorm.DB, tenant uint64, id string) (m
 		"embedding": kb.EmbeddingModelID, "summary": kb.SummaryModelID, "vlm": kb.VLMConfig, "asr": kb.ASRConfig,
 		"storage": kb.StorageProviderConfig, "backend": kb.StorageBackendID, "legacy_storage": kb.StorageConfig,
 		"vector_store": kb.VectorStoreID, "extract": kb.ExtractConfig, "faq": kb.FAQConfig,
-		"questions": kb.QuestionGenerationConfig, "wiki": kb.WikiConfig, "indexing": kb.IndexingStrategy}
+		"questions": kb.QuestionGenerationConfig, "wiki": kb.WikiConfig, "indexing": kb.IndexingStrategy, "tenant_parser": owner.ParserEngineConfig.ToOverridesMap()}
 	ids := []string{kb.EmbeddingModelID, kb.SummaryModelID, kb.VLMConfig.ModelID, kb.ASRConfig.ModelID}
 	slices.Sort(ids)
 	ids = slices.Compact(ids)
@@ -102,4 +109,19 @@ func lockProcessingConfigurationInputs(tx *gorm.DB, tenant uint64, id string) (m
 		}{model.Name, model.Type, model.Source, model.Status, model.Parameters}
 	}
 	return inputs, nil
+}
+
+// Configuration readers must not SHARE-lock the quota row: independent
+// processing transactions later update that row and would deadlock on upgrade.
+// Settings writers take this key before touching the tenant row; quota-only
+// writers do not acquire it. SQLite already serializes concurrent writes.
+func lockTenantParserConfiguration(tx *gorm.DB, tenant uint64, shared bool) error {
+	if tx.Dialector.Name() != "postgres" {
+		return nil
+	}
+	function := "pg_advisory_xact_lock"
+	if shared {
+		function += "_shared"
+	}
+	return tx.Exec("SELECT "+function+"(hashtextextended(?,0))", fmt.Sprintf("tenant-parser/%d", tenant)).Error
 }

@@ -29,8 +29,20 @@ func (e *processingDocumentExecution) indexChunks(ctx context.Context, stage str
 		return nil, errors.New("INDEX_SOURCE_INVALID")
 	}
 	var chunks []*types.Chunk
-	if err := e.dependency(ctx, stage, "body", stage, &chunks); err != nil {
-		return nil, err
+	legacyIndexed := map[string]bool{}
+	if e.document.LegacyEvidenceID != "" && (stage == "chunk" || stage == "images") {
+		var legacy processingLegacyManifest
+		if err := e.dependency(ctx, "legacy_snapshot", "body", "legacy_snapshot", &legacy); err != nil {
+			return nil, err
+		}
+		chunks = legacy.Chunks
+		for _, item := range legacy.Indexes {
+			legacyIndexed[item.ChunkID] = true
+		}
+	} else {
+		if err := e.dependency(ctx, stage, "body", stage, &chunks); err != nil {
+			return nil, err
+		}
 	}
 	result := make([]*types.Chunk, 0, len(chunks))
 	for _, chunk := range chunks {
@@ -38,6 +50,9 @@ func (e *processingDocumentExecution) indexChunks(ctx context.Context, stage str
 			return nil, errors.New("INDEX_CHUNK_SCOPE_INVALID")
 		}
 		if (stage == "chunk" && chunk.ChunkType == types.ChunkTypeText) || (stage == "summary" && chunk.ChunkType == types.ChunkTypeSummary) || (stage == "images" && (chunk.ChunkType == types.ChunkTypeImageOCR || chunk.ChunkType == types.ChunkTypeImageCaption)) {
+			if e.document.LegacyEvidenceID != "" && stage == "chunk" && !legacyIndexed[chunk.ID] {
+				continue
+			}
 			result = append(result, chunk)
 		}
 	}
@@ -49,6 +64,16 @@ func (e *processingDocumentExecution) indexChunks(ctx context.Context, stage str
 
 func (e *processingDocumentExecution) indexBarrier(ctx context.Context) (types.ProcessingOutcome, error) {
 	stage := "chunk"
+	if e.lease.Step.Stage == "legacy_indexes" {
+		stage = "legacy"
+		var legacy processingLegacyManifest
+		if err := e.dependency(ctx, "legacy_snapshot", "body", "legacy_snapshot", &legacy); err != nil {
+			return types.ProcessingOutcome{}, err
+		}
+		if legacy.Reembed {
+			stage = "legacy_reembed"
+		}
+	}
 	if e.lease.Step.Stage == "summary_index" {
 		stage = "summary"
 	}
@@ -84,9 +109,12 @@ func (e *processingDocumentExecution) indexBarrier(ctx context.Context) (types.P
 				contents = append(contents, item.Content)
 			}
 			fingerprint := processingFingerprint(e.lease.Step.InputFingerprint, stage, contents)
-			specs = append(specs,
-				types.ProcessingStepSpec{Stage: "embedding", UnitKey: unit, Phase: e.lease.Step.Phase, Input: input, InputFingerprint: fingerprint},
-				types.ProcessingStepSpec{Stage: "index", UnitKey: unit, Phase: e.lease.Step.Phase, Input: input, InputFingerprint: fingerprint, DependsOn: []string{"embedding/" + unit}})
+			index := types.ProcessingStepSpec{Stage: "index", UnitKey: unit, Phase: e.lease.Step.Phase, Input: input, InputFingerprint: fingerprint}
+			if stage != "legacy" {
+				specs = append(specs, types.ProcessingStepSpec{Stage: "embedding", UnitKey: unit, Phase: e.lease.Step.Phase, Input: input, InputFingerprint: fingerprint})
+				index.DependsOn = []string{"embedding/" + unit}
+			}
+			specs = append(specs, index)
 		}
 		next := time.Now().UTC().Add(time.Second)
 		return types.ProcessingOutcome{Status: types.ProcessingWaitingExternal, NextRunAt: &next, SealPlan: true, ChildSteps: specs}, nil
@@ -137,6 +165,26 @@ func (e *processingDocumentExecution) indexBarrier(ctx context.Context) (types.P
 }
 
 func (e *processingDocumentExecution) indexInputs(ctx context.Context, stage string) ([]*types.IndexInfo, error) {
+	if stage == "legacy" || stage == "legacy_reembed" {
+		var legacy processingLegacyManifest
+		if e.document.LegacyEvidenceID == "" {
+			return nil, errors.New("LEGACY_EVIDENCE_REQUIRED")
+		}
+		if err := e.dependency(ctx, "legacy_snapshot", "body", "legacy_snapshot", &legacy); err != nil {
+			return nil, err
+		}
+		if (stage == "legacy_reembed") != legacy.Reembed {
+			return nil, errors.New("LEGACY_INDEX_MODEL_PROOF_INVALID")
+		}
+		enabled := map[string]bool{}
+		for _, chunk := range legacy.Chunks {
+			enabled[chunk.ID] = chunk.IsEnabled
+		}
+		for _, item := range legacy.Indexes {
+			item.IsEnabled = enabled[item.ChunkID]
+		}
+		return legacy.Indexes, nil
+	}
 	knowledge, err := e.s.repo.GetKnowledgeByID(ctx, e.lease.Job.TenantID, e.lease.Job.KnowledgeID)
 	if err != nil {
 		return nil, err
@@ -263,11 +311,31 @@ func (e *processingDocumentExecution) prepareEmbeddings(ctx context.Context, ite
 
 func (e *processingDocumentExecution) indexBatch(ctx context.Context) (outcome types.ProcessingOutcome, runErr error) {
 	var items []*types.IndexInfo
-	if err := e.dependency(ctx, "embedding", e.lease.Step.UnitKey, "embedding", &items); err != nil {
+	var batch processingIndexBatch
+	if err := json.Unmarshal(e.lease.Step.Input, &batch); err != nil || len(batch.UnitIDs) == 0 || len(batch.UnitIDs) > processingEmbeddingBatchSize {
+		return types.ProcessingOutcome{}, errors.New("INDEX_BATCH_INVALID")
+	}
+	if batch.Stage == "legacy" {
+		entries, err := e.indexInputs(ctx, "legacy")
+		if err != nil {
+			return types.ProcessingOutcome{}, err
+		}
+		byID := map[string]*types.IndexInfo{}
+		for _, item := range entries {
+			byID[item.SourceID] = item
+		}
+		for _, id := range batch.UnitIDs {
+			item := byID[id]
+			if item == nil {
+				return types.ProcessingOutcome{}, errors.New("LEGACY_INDEX_BATCH_INVALID")
+			}
+			delete(byID, id)
+			items = append(items, item)
+		}
+	} else if err := e.dependency(ctx, "embedding", e.lease.Step.UnitKey, "embedding", &items); err != nil {
 		return types.ProcessingOutcome{}, err
 	}
-	var batch processingIndexBatch
-	if err := json.Unmarshal(e.lease.Step.Input, &batch); err != nil || len(items) == 0 || len(items) != len(batch.UnitIDs) {
+	if len(items) == 0 || len(items) != len(batch.UnitIDs) {
 		return types.ProcessingOutcome{}, errors.New("INDEX_BATCH_INVALID")
 	}
 	for i, item := range items {

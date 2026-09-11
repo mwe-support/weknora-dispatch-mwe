@@ -17,6 +17,9 @@ import (
 )
 
 func (e *processingDocumentExecution) scan(ctx context.Context) (types.ProcessingOutcome, error) {
+	if e.lease.Step.Stage == "legacy_retry_coverage" {
+		return e.legacyRetryCoverage(ctx)
+	}
 	if e.lease.Step.Stage == "scan_scope" {
 		return types.ProcessingOutcome{Status: types.ProcessingBlocked, ErrorClass: "configuration", ErrorCode: "SCAN_SCOPE_INVALID", Message: "Select a valid Tencent Docs source scope and start a new sync"}, nil
 	}
@@ -99,6 +102,15 @@ func (e *processingDocumentExecution) scanPage(ctx context.Context, request tenc
 		children = append(children, processingScanSpec("scan_page", e.lease.Step.ID, *page.Next, true))
 	}
 	for _, entry := range page.Entries {
+		if entry.Disposition == "document" {
+			allowed, err := e.legacyRetryAllows(entry)
+			if err != nil {
+				return types.ProcessingOutcome{}, err
+			}
+			if !allowed {
+				continue
+			}
+		}
 		items = append(items, types.SyncRunItem{Kind: entry.Disposition, ExternalID: entry.ExternalID})
 		if entry.Disposition == "document" {
 			children = append(children, processingScanSpec("scan_document", e.lease.Step.ID, entry, false))
@@ -117,6 +129,9 @@ func (e *processingDocumentExecution) scanDocument(ctx context.Context, read ten
 	var entry tencentdocs.NativeScanEntry
 	if json.Unmarshal(e.lease.Step.Input, &entry) != nil || entry.FileID == "" || entry.ExternalID == "" || entry.Disposition != "document" {
 		return types.ProcessingOutcome{}, errors.New("SCAN_DOCUMENT_INPUT_INVALID")
+	}
+	if allowed, err := e.legacyRetryAllows(entry); err != nil || !allowed {
+		return types.ProcessingOutcome{}, repository.ErrProcessingScope
 	}
 	response, err := read(ctx, "manage.query_file_info", map[string]interface{}{"file_id": entry.FileID}, true)
 	if err != nil {

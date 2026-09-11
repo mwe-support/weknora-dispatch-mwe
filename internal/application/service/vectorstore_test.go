@@ -1035,6 +1035,16 @@ func TestDeleteStore_Guard_RejectsBoundKB(t *testing.T) {
 	require.Empty(t, registry.unregistered, "registry must NOT be unregistered when guard fires")
 }
 
+func TestDeleteStore_Guard_RetainsOriginalLegacyDestination(t *testing.T) {
+	svc, db, _ := newGuardTestService(t)
+	insertGuardStore(t, db, "store-A", 1)
+	job := types.ProcessingJob{ID: "legacy-job", TenantID: 1, RetirementState: "retained", IndexDestination: types.JSON(`{"vector_store_id":"store-B"}`), Metadata: types.JSON(`{"legacy_index_destination":{"vector_store_id":"store-A"}}`)}
+	require.NoError(t, db.Create(&job).Error)
+	require.ErrorContains(t, svc.DeleteStore(context.Background(), 1, "store-A"), "retained by processing")
+	require.NoError(t, db.Model(&job).Update("retirement_state", "deleted").Error)
+	require.NoError(t, svc.DeleteStore(context.Background(), 1, "store-A"))
+}
+
 func TestDeleteStore_Guard_IgnoresSoftDeletedKB(t *testing.T) {
 	ctx := context.Background()
 	svc, db, registry := newGuardTestService(t)

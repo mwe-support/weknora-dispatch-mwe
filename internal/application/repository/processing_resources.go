@@ -40,7 +40,7 @@ func (r *ProcessingRepository) ValidateLease(ctx context.Context, tenant uint64,
 }
 
 func (r *ProcessingRepository) RecordIndexDestination(ctx context.Context, tenant uint64, lease types.ProcessingLease, destination types.ProcessingIndexDestination) error {
-	if (lease.Step.Stage != "index" && lease.Step.Stage != "faq_write") || len(destination.Kinds) == 0 || destination.KnowledgeType == "" || destination.Dimension < 0 ||
+	if (lease.Step.Stage != "index" && lease.Step.Stage != "faq_write" && lease.Step.Stage != "legacy_snapshot") || len(destination.Kinds) == 0 || destination.KnowledgeType == "" || destination.Dimension < 0 ||
 		(slices.Contains(destination.Kinds, types.VectorRetrieverType) && destination.Dimension == 0) {
 		return ErrProcessingConflict
 	}
@@ -64,21 +64,37 @@ func (r *ProcessingRepository) RecordIndexDestination(ctx context.Context, tenan
 			}
 			return nil
 		}
-		if destination.VectorStoreID != nil && *destination.VectorStoreID != "" {
-			q := tx.Where("id = ? AND tenant_id = ?", *destination.VectorStoreID, tenant)
-			if tx.Dialector.Name() == "postgres" {
-				q = q.Clauses(clause.Locking{Strength: "SHARE"})
-			}
-			var store types.VectorStore
-			if err := q.Take(&store).Error; err != nil {
-				return err
-			}
+		if err := lockProcessingVectorStores(tx, tenant, destination); err != nil {
+			return err
 		}
 		if err := tx.Model(job).Update("index_destination", types.JSON(encoded)).Error; err != nil {
 			return err
 		}
 		return appendProcessingEvent(tx, job, types.ProcessingEvent{Type: "index_destination_recorded", StepID: lease.Step.ID, Attempt: lease.Ref.Attempt})
 	})
+}
+
+// Deletion takes UPDATE on the same rows before checking retained jobs.
+// Lock both routes in order when a legacy adoption moves between stores.
+func lockProcessingVectorStores(tx *gorm.DB, tenant uint64, destinations ...types.ProcessingIndexDestination) error {
+	var ids []string
+	for _, destination := range destinations {
+		if destination.VectorStoreID != nil && *destination.VectorStoreID != "" {
+			ids = append(ids, *destination.VectorStoreID)
+		}
+	}
+	slices.Sort(ids)
+	for _, id := range slices.Compact(ids) {
+		q := tx.Where("id = ? AND tenant_id = ?", id, tenant)
+		if tx.Dialector.Name() == "postgres" {
+			q = q.Clauses(clause.Locking{Strength: "SHARE"})
+		}
+		var store types.VectorStore
+		if err := q.Take(&store).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // The resource row is the shared exclusion point for every binding, including

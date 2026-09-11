@@ -24,6 +24,8 @@ func TestProcessingHandlerRetryScopesRevisionAndReceipt(t *testing.T) {
 	require.NoError(t, err)
 	raw.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = raw.Close() })
+	require.NoError(t, db.AutoMigrate(&types.Tenant{}))
+	require.NoError(t, db.Create(&types.Tenant{ID: 1, Name: "synthetic"}).Error)
 	require.NoError(t, db.AutoMigrate(&types.KnowledgeBase{}, &types.DataSource{}, &types.ProcessingJob{}, &types.ProcessingStep{}, &types.ProcessingEvent{}, &types.TaskPendingOp{}, &types.ProcessingArtifactReference{}))
 	require.NoError(t, db.Create(&types.KnowledgeBase{ID: "kb", TenantID: 1, Name: "synthetic"}).Error)
 	require.NoError(t, db.Create(&types.DataSource{ID: "source", TenantID: 1, KnowledgeBaseID: "kb", Status: types.DataSourceStatusActive}).Error)

@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm/clause"
 )
 
 type processingUnavailableStorage struct {
@@ -29,7 +30,7 @@ func TestProcessingKnowledgeNormalizesParsesAndCommitsRealChunks(t *testing.T) {
 	t.Setenv("SYSTEM_AES_KEY", "synthetic-32-byte-key-for-tests!")
 	db := processingServiceTestDatabase(t)
 	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.Knowledge{}, &types.Chunk{}))
-	require.NoError(t, db.Create(&types.Tenant{ID: 1, Name: "synthetic"}).Error)
+	require.NoError(t, db.Clauses(clause.OnConflict{UpdateAll: true}).Create(&types.Tenant{ID: 1, Name: "synthetic"}).Error)
 	r := repository.NewProcessingRepository(db)
 	fs := files.NewLocalFileService(t.TempDir(), "")
 	s := &knowledgeService{config: &config.Config{Conversation: &config.ConversationConfig{}},

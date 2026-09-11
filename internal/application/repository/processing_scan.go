@@ -100,6 +100,9 @@ func commitProcessingDiscovery(tx *gorm.DB, scan *types.ProcessingJob, step *typ
 		if err := saveProcessingRunItem(tx, scan, types.SyncRunItem{Kind: "document", ExternalID: input.ExternalID, JobID: job.ID, SourceRevision: job.SourceRevision, Disposition: disposition}); err != nil {
 			return err
 		}
+		if err := commitLegacyRetryAdmission(tx, scan, job, input); err != nil {
+			return err
+		}
 		detail, _ := json.Marshal(map[string]any{"document_job_id": job.ID, "generation": job.Generation})
 		if err := appendProcessingEvent(tx, scan, types.ProcessingEvent{Type: "document_admitted", StepID: step.ID, RunID: scan.OriginRunID, Detail: detail}); err != nil {
 			return err

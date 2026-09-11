@@ -6,6 +6,55 @@ import (
 	"strings"
 )
 
+// Start at the selected root: access to an old parent alone does not prove
+// that a document still belongs to that root. This proves membership only,
+// never that a previously exported byte snapshot is the current file version.
+func ReadNativeMembership(ctx context.Context, resourceID, fileID, externalID string, read NativeScanReadFunc) (*NativeScanEntry, error) {
+	if read == nil || fileID == "" || externalID == "" {
+		return nil, errors.New("RESOURCE_LISTING_PROOF_REQUIRED")
+	}
+	queue, err := NativeScanRoots([]string{resourceID})
+	if err != nil {
+		return nil, err
+	}
+	var bytes int64
+	for i := 0; i < len(queue); i++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if i >= maxMCPPagination {
+			return nil, errors.New("SCAN_LIMIT_EXCEEDED")
+		}
+		request := queue[i]
+		page, err := ReadNativeScanPage(ctx, request, func(ctx context.Context, _ string, _ map[string]interface{}, _ bool) (*NativeResponse, error) {
+			return read(ctx, request)
+		})
+		if err != nil {
+			return nil, err
+		}
+		bytes += max(page.Response.Bytes, int64(len(page.Response.Data)))
+		if bytes > maxExportBytes {
+			return nil, errors.New("SCAN_LIMIT_EXCEEDED")
+		}
+		for _, entry := range page.Entries {
+			if entry.FileID == fileID {
+				if entry.ExternalID != externalID || entry.Disposition != "document" {
+					return nil, errors.New("SCAN_IDENTITY_MISMATCH")
+				}
+				return &entry, nil
+			}
+		}
+		queue = append(queue, page.Children...)
+		if page.Next != nil {
+			queue = append(queue, *page.Next)
+		}
+		if len(queue) > maxMCPPagination {
+			return nil, errors.New("SCAN_LIMIT_EXCEEDED")
+		}
+	}
+	return nil, errors.New("RESOURCE_NO_LONGER_IN_SCOPE")
+}
+
 // A provider error alone never identifies an attachment. The original entry
 // must come from a confirmed listing, and only the existing exact unsupported
 // metadata contract permits this fallback.

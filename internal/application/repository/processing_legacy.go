@@ -10,7 +10,7 @@ import (
 // LegacyKnowledge excludes rows whose state is owned by the leased ledger.
 // Apply this to the UPDATE as well as discovery queries: a callback is not a lease.
 func LegacyKnowledge(db *gorm.DB) *gorm.DB {
-	return db.Where("COALESCE(metadata->>'processing_protocol', '') <> '2'")
+	return db.Where("COALESCE(CAST(metadata->>'processing_protocol' AS TEXT), '') <> '2'")
 }
 
 func (r *knowledgeRepository) HasProcessingKnowledge(ctx context.Context, tenant uint64, kb string) (bool, error) {
@@ -24,7 +24,7 @@ func (r *ProcessingRepository) LegacyKnowledgeTaskAllowed(ctx context.Context, k
 		return true, nil
 	}
 	query := r.db.WithContext(ctx).Unscoped().Model(&types.Knowledge{}).
-		Where("metadata->>'processing_protocol' = '2'")
+		Where("CAST(metadata->>'processing_protocol' AS TEXT) = '2'")
 	if chunkID == "" {
 		query = query.Where("id = ?", knowledgeID)
 	} else {

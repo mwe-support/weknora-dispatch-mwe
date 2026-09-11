@@ -10,13 +10,13 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -34,7 +34,7 @@ func (s *processingHistoryKBLookup) GetKnowledgeBaseByID(context.Context, string
 
 func TestProcessingHistoryRoutesRecheckAccessAndRejectScopedGlobalKeys(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	db, err := gorm.Open(database.SQLite(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	raw, err := db.DB()
 	require.NoError(t, err)
@@ -91,6 +91,11 @@ func TestProcessingHistoryRoutesRecheckAccessAndRejectScopedGlobalKeys(t *testin
 	for _, action := range []string{"retry", "cancel", "rebuild", "resolve-export", "pin", "rollback", "retire"} {
 		require.Equal(t, 403, call(http.MethodPost, local+"/a/"+action).Code, action)
 	}
+	legacy := "/api/v1/knowledge-bases/kb/processing/legacy/sources/source"
+	require.Equal(t, 403, call(http.MethodGet, legacy).Code)
+	for _, path := range []string{"/drains", "/runs/original/retry", "/runs/original/errors/1/complete", "/runs/original/errors/1/adopt"} {
+		require.Equal(t, 403, call(http.MethodPost, legacy+path).Code)
+	}
 	require.Equal(t, 403, call(http.MethodGet, "/api/v1/processing/jobs").Code)
 	kb.gone = true
 	require.Equal(t, 404, call(http.MethodGet, next).Code, "each page must recheck KB access")
@@ -105,6 +110,23 @@ func TestProcessingHistoryRoutesRecheckAccessAndRejectScopedGlobalKeys(t *testin
 	}
 	tenant = 1
 	kb.gone = false
+	require.NoError(t, db.AutoMigrate(&types.KnowledgeBase{}, &types.DataSource{}, &types.SyncLog{}, &types.Tenant{}))
+	require.NoError(t, db.Create(&types.Tenant{ID: 1, Name: "synthetic"}).Error)
+	require.NoError(t, db.Create(&types.KnowledgeBase{ID: "kb", TenantID: 1, Name: "synthetic"}).Error)
+	require.NoError(t, db.Create(&types.DataSource{ID: "source", TenantID: 1, KnowledgeBaseID: "kb", Type: types.ConnectorTypeTencentDocs, Status: types.DataSourceStatusActive, Config: types.JSON(`{"credentials":{"token":"SECRET_LEGACY_TOKEN"}}`)}).Error)
+	require.NoError(t, db.Create(&types.SyncLog{ID: "original", TenantID: 1, DataSourceID: "source", Result: types.JSON(`{"errors":[{"file_id":"synthetic","stage":"ingest","message":"SECRET_LEGACY_BODY"}]}`)}).Error)
+	scope := call(http.MethodGet, legacy)
+	require.Equal(t, 200, scope.Code, scope.Body.String())
+	require.NotContains(t, scope.Body.String(), "SECRET_")
+	row := call(http.MethodGet, legacy+"/runs/original/errors/1")
+	require.Equal(t, 200, row.Code, row.Body.String())
+	require.NotContains(t, row.Body.String(), "SECRET_")
+	tenant = 2
+	for _, path := range []string{"/drains", "/runs/original/retry", "/runs/original/errors/1/complete", "/runs/original/errors/1/adopt"} {
+		require.Equal(t, 403, call(http.MethodPost, legacy+path).Code)
+	}
+	require.Equal(t, 403, call(http.MethodGet, legacy).Code)
+	tenant = 1
 	key = &types.TenantAPIKeyScope{KeyID: 10, Capabilities: types.StringArray{string(types.APIKeyCapabilityManageDataSources)}, KnowledgeBaseIDs: types.StringArray{"kb"}}
 	require.Equal(t, 200, call(http.MethodGet, local).Code)
 	require.Equal(t, 403, call(http.MethodGet, "/api/v1/processing/jobs").Code)
@@ -118,4 +140,8 @@ func TestProcessingHistoryRoutesRecheckAccessAndRejectScopedGlobalKeys(t *testin
 	require.Equal(t, 200, call(http.MethodGet, globalNext).Code)
 	key.KeyID = 11
 	require.Equal(t, 404, call(http.MethodGet, globalNext).Code, "keys owned by the same user cannot share a snapshot")
+	key.FullAccess = false
+	key.Capabilities = types.StringArray{string(types.APIKeyCapabilityRetrieve)}
+	require.Equal(t, 403, call(http.MethodGet, legacy).Code)
+	require.Equal(t, 403, call(http.MethodPost, legacy+"/drains").Code)
 }

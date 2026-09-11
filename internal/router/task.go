@@ -411,6 +411,9 @@ func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker servic
 		if _, ok := taskTypesAffectingKnowledgeStatus[t.Type()]; !ok {
 			return
 		}
+		// Dead-letter callbacks run with a detached context outside the worker
+		// guard. Fence the UPDATE too if ownership changed after the guard read.
+		ctx = types.WithLegacyProcessing(ctx)
 		var probe deadLetterKnowledgePayload
 		if err := json.Unmarshal(t.Payload(), &probe); err != nil || probe.KnowledgeID == "" {
 			return

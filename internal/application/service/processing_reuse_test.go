@@ -14,13 +14,22 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource/connector/tencentdocs"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm/clause"
 )
 
 func TestProcessingRebuildReusesOnlyUnchangedStageInputs(t *testing.T) {
+	checkProcessingRebuildReuse(t, false)
+}
+
+func TestProcessingRebuildKeepsIndependentWikiExtraction(t *testing.T) {
+	checkProcessingRebuildReuse(t, true)
+}
+
+func checkProcessingRebuildReuse(t *testing.T, wiki bool) {
 	t.Setenv("SYSTEM_AES_KEY", "synthetic-32-byte-key-for-tests!")
 	db := processingServiceTestDatabase(t)
 	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.Knowledge{}, &types.Model{}, &types.SyncLog{}, &types.SyncRunItem{}))
-	require.NoError(t, db.Create(&types.Tenant{ID: 1, Name: "synthetic", RetrieverEngines: types.RetrieverEngines{Engines: []types.RetrieverEngineParams{{RetrieverEngineType: types.PostgresRetrieverEngineType, RetrieverType: types.VectorRetrieverType}, {RetrieverEngineType: types.PostgresRetrieverEngineType, RetrieverType: types.KeywordsRetrieverType}}}}).Error)
+	require.NoError(t, db.Clauses(clause.OnConflict{UpdateAll: true}).Create(&types.Tenant{ID: 1, Name: "synthetic", RetrieverEngines: types.RetrieverEngines{Engines: []types.RetrieverEngineParams{{RetrieverEngineType: types.PostgresRetrieverEngineType, RetrieverType: types.VectorRetrieverType}, {RetrieverEngineType: types.PostgresRetrieverEngineType, RetrieverType: types.KeywordsRetrieverType}}}}).Error)
 	for id, kind := range map[string]types.ModelType{"embed": types.ModelTypeEmbedding, "summary": types.ModelTypeKnowledgeQA, "vision": types.ModelTypeVLLM} {
 		require.NoError(t, db.Create(&types.Model{ID: id, TenantID: 1, Name: id, Type: kind, Source: types.ModelSourceRemote, Status: types.ModelStatusActive}).Error)
 	}
@@ -32,6 +41,9 @@ func TestProcessingRebuildReusesOnlyUnchangedStageInputs(t *testing.T) {
 	kb.QuestionGenerationConfig = &types.QuestionGenerationConfig{Enabled: true, QuestionCount: 1}
 	kb.IndexingStrategy.GraphEnabled = true
 	kb.ExtractConfig = &types.ExtractConfig{Enabled: true}
+	if wiki {
+		kb.IndexingStrategy.WikiEnabled = true
+	}
 	require.NoError(t, db.Save(&kb).Error)
 	r := repository.NewProcessingRepository(db)
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
@@ -43,6 +55,11 @@ func TestProcessingRebuildReusesOnlyUnchangedStageInputs(t *testing.T) {
 	s := &knowledgeService{config: &config.Config{Conversation: &config.ConversationConfig{GenerateSummaryPrompt: "Summarize the document.", GenerateQuestionsPrompt: "QUESTIONS-TEST {{content}} {{context}}"}, ExtractManager: &config.ExtractManagerConfig{ExtractGraph: &types.PromptTemplateStructured{Description: "GRAPH-TEST"}}},
 		kbService: &knowledgeBaseService{repo: repository.NewKnowledgeBaseRepository(db)}, tenantRepo: repository.NewTenantRepository(db), repo: repository.NewKnowledgeRepository(db), chunkRepo: repository.NewChunkRepository(db), fileSvc: store, modelService: models, retrieveEngine: registry}
 	s.graphEngine = NewProcessingGraphRepository(&processingTestGraph{writes: map[string]types.NameSpace{}}, r, true)
+	if wiki {
+		setupProcessingWiki(t, db, s, models.summary, false)
+		models.summary.wikiPageHook = nil
+		models.summary.wikiCalls = map[string]int{"wiki_summary": 1, "wiki_taxonomy_plan": 1, "wiki_index_intro": 1}
+	}
 	execute, err := NewKnowledgeProcessingExecutor(s, r, repository.NewDataSourceRepository(db))
 	require.NoError(t, err)
 	document := ProcessingDocumentSpec{FileID: "file", Kind: "smartcanvas", Title: "synthetic"}
@@ -102,6 +119,7 @@ func TestProcessingRebuildReusesOnlyUnchangedStageInputs(t *testing.T) {
 			before := *job
 			priorEmbed, priorSummary, priorOCR, priorCaption := models.embed.calls, models.summary.calls, models.vision.ocr, models.vision.caption
 			priorQuestion, priorGraph := models.summary.questionCalls, models.summary.graphCalls
+			priorWikiExtraction := models.summary.wikiCalls["wiki_candidate_slug"]
 			priorIndex := len(index.writes)
 			require.NoError(t, db.Model(job).Update("rollback_pin", true).Error)
 			require.NoError(t, db.Model(&types.Model{}).Where("id = ?", change).Update("name", change+"-updated").Error)
@@ -117,14 +135,24 @@ func TestProcessingRebuildReusesOnlyUnchangedStageInputs(t *testing.T) {
 			if change == "summary" {
 				require.Equal(t, priorSummary+1, models.summary.calls)
 				// A changed summary is embedded; source and image vectors are reused.
-				require.Equal(t, priorEmbed+2, models.embed.calls)
+				if wiki {
+					require.GreaterOrEqual(t, models.embed.calls, priorEmbed+2)
+				} else {
+					require.Equal(t, priorEmbed+2, models.embed.calls)
+				}
 				require.Greater(t, models.summary.questionCalls, priorQuestion)
 				require.Greater(t, models.summary.graphCalls, priorGraph)
+				if wiki {
+					require.Greater(t, models.summary.wikiCalls["wiki_candidate_slug"], priorWikiExtraction)
+				}
 			} else {
 				require.Equal(t, priorSummary, models.summary.calls)
 				require.Equal(t, priorQuestion, models.summary.questionCalls)
 				require.Equal(t, priorGraph, models.summary.graphCalls)
 				require.Greater(t, models.embed.calls, priorEmbed)
+				if wiki {
+					require.Equal(t, priorWikiExtraction, models.summary.wikiCalls["wiki_candidate_slug"])
+				}
 			}
 			var events []types.ProcessingEvent
 			require.NoError(t, db.Where("job_id = ? AND event_type = ?", job.ID, "artifact_copied").Find(&events).Error)

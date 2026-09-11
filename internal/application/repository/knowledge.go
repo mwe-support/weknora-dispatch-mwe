@@ -331,16 +331,22 @@ func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *ty
 	if knowledge.CustomMetadata == nil {
 		omit = append(append([]string{}, omitFieldsOnUpdate...), "custom_metadata")
 	}
-	if knowledge.GetMetadata()["datasource_version"] != "" {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Slow summary/index workers hold old snapshots. Lifecycle flags are
 		// owned by explicit source-version transitions, never by a full Save.
-		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			var current types.Knowledge
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "metadata").Where("id = ?", knowledge.ID).First(&current).Error; err != nil {
-				return err
+		var current types.Knowledge
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "metadata").Where("id = ? AND tenant_id = ?", knowledge.ID, knowledge.TenantID).First(&current).Error; err != nil {
+			return err
+		}
+		metadata := knowledge.GetMetadata()
+		latest := current.GetMetadata()
+		if latest["processing_protocol"] == "2" {
+			if types.IsLegacyProcessing(ctx) || metadata["processing_protocol"] != latest["processing_protocol"] || metadata["processing_job_id"] != latest["processing_job_id"] {
+				return ErrProcessingConflict
 			}
-			metadata := knowledge.GetMetadata()
-			latest := current.GetMetadata()
+		}
+		copy := *knowledge
+		if metadata["datasource_version"] != "" {
 			for _, key := range []string{"datasource_candidate", "datasource_index_ready", "datasource_processing_failed"} {
 				if value, ok := latest[key]; ok {
 					metadata[key] = value
@@ -348,17 +354,15 @@ func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *ty
 					delete(metadata, key)
 				}
 			}
-			copy := *knowledge
 			var err error
 			copy.Metadata, err = json.Marshal(metadata)
 			if err != nil {
 				return err
 			}
-			return tx.Omit(omit...).Save(&copy).Error
-		})
-	}
-	err := r.db.WithContext(ctx).Omit(omit...).Save(knowledge).Error
-	return err
+		}
+		// UPDATE cannot fall back to INSERT after an ownership/deletion race.
+		return tx.Model(&types.Knowledge{}).Where("id = ? AND tenant_id = ?", copy.ID, copy.TenantID).Select("*").Omit(omit...).Updates(&copy).Error
+	})
 }
 
 // UpdateKnowledgeBatch updates knowledge items in batch
@@ -366,7 +370,15 @@ func (r *knowledgeRepository) UpdateKnowledgeBatch(ctx context.Context, knowledg
 	if len(knowledgeList) == 0 {
 		return nil
 	}
-	return r.db.Debug().WithContext(ctx).Omit(omitFieldsOnUpdate...).Save(knowledgeList).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		repo := &knowledgeRepository{db: tx}
+		for _, knowledge := range knowledgeList {
+			if err := repo.UpdateKnowledge(ctx, knowledge); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // DeleteKnowledge deletes knowledge
@@ -558,8 +570,7 @@ func (r *knowledgeRepository) UpdateKnowledgeColumn(
 	column string,
 	value interface{},
 ) error {
-	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Update(column, value).Error
-	return err
+	return r.UpdateKnowledgeColumns(ctx, id, map[string]interface{}{column: value})
 }
 
 // UpdateKnowledgeColumns writes multiple columns in a single UPDATE so callers
@@ -574,7 +585,15 @@ func (r *knowledgeRepository) UpdateKnowledgeColumns(
 	if len(values) == 0 {
 		return nil
 	}
-	return r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Updates(values).Error
+	query := r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id)
+	if types.IsLegacyProcessing(ctx) {
+		query = query.Scopes(LegacyKnowledge)
+	}
+	result := query.Updates(values)
+	if result.Error == nil && result.RowsAffected == 0 && types.IsLegacyProcessing(ctx) {
+		return ErrProcessingConflict
+	}
+	return result.Error
 }
 
 // UpdateActiveDeletingKnowledgeColumns only touches rows that are still visible

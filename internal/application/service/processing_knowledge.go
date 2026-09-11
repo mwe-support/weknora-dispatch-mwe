@@ -22,15 +22,19 @@ import (
 )
 
 type ProcessingDocumentSpec struct {
-	FileID           string                       `json:"file_id"`
-	Kind             string                       `json:"kind"`
-	Title            string                       `json:"title"`
-	FolderPath       string                       `json:"folder_path"`
-	URL              string                       `json:"url"`
-	Language         string                       `json:"language"`
-	Resource         *tencentdocs.NativeScanEntry `json:"resource,omitempty"`
-	RevisionMode     string                       `json:"revision_mode,omitempty"`
-	IdentityRevision string                       `json:"identity_revision,omitempty"`
+	FileID                 string                            `json:"file_id"`
+	Kind                   string                            `json:"kind"`
+	Title                  string                            `json:"title"`
+	FolderPath             string                            `json:"folder_path"`
+	URL                    string                            `json:"url"`
+	Language               string                            `json:"language"`
+	Resource               *tencentdocs.NativeScanEntry      `json:"resource,omitempty"`
+	RevisionMode           string                            `json:"revision_mode,omitempty"`
+	IdentityRevision       string                            `json:"identity_revision,omitempty"`
+	LegacyEvidenceID       string                            `json:"legacy_evidence_id,omitempty"`
+	LegacyResourceID       string                            `json:"legacy_resource_id,omitempty"`
+	LegacyMembership       *tencentdocs.NativeScanEntry      `json:"legacy_membership,omitempty"`
+	LegacyIndexDestination *types.ProcessingIndexDestination `json:"legacy_index_destination,omitempty"`
 }
 
 // The version changes when parser/normalizer behavior changes. App prompts and
@@ -170,6 +174,12 @@ func (e *processingDocumentExecution) execute(ctx context.Context) (types.Proces
 		return outcome, err
 	}
 	switch e.lease.Step.Stage {
+	case "legacy_snapshot":
+		return e.snapshotLegacy(ctx)
+	case "legacy_indexes":
+		return e.indexBarrier(ctx)
+	case "legacy_retire_indexes":
+		return e.retireLegacyIndexes(ctx)
 	case "native_read", "export_start", "export_poll", "download":
 		source, err := e.sources.FindByID(ctx, e.lease.Job.DataSourceID)
 		if err != nil {
@@ -330,6 +340,11 @@ func (e *processingDocumentExecution) execute(ctx context.Context) (types.Proces
 		outcome.Result, _ = json.Marshal(map[string]int{"chunks": len(chunks)})
 		return outcome, nil
 	case "publish":
+		if e.document.LegacyEvidenceID != "" {
+			if err := e.verifyLegacyMembership(ctx); err != nil {
+				return types.ProcessingOutcome{}, err
+			}
+		}
 		if e.kb.Type == types.KnowledgeBaseTypeFAQ {
 			var mutations []types.ProcessingFAQMutation
 			if err := e.dependency(ctx, "faq_index", "body", "faq_index", &mutations); err != nil {

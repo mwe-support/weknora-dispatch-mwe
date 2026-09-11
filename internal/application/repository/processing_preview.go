@@ -30,12 +30,15 @@ func (r *knowledgeRepository) ProcessingFileSnapshot(ctx context.Context, tenant
 		}
 		stage := "assets"
 		var document struct {
-			Kind string `json:"kind"`
+			Kind             string `json:"kind"`
+			LegacyEvidenceID string `json:"legacy_evidence_id"`
 		}
 		if json.Unmarshal(job.Metadata, &document) != nil {
 			return ErrProcessingConflict
 		}
-		if knowledge.FileType == "docx" || (document.Kind == "resource" && types.IsSupportedKnowledgeFileExtension(knowledge.FileType)) {
+		if document.LegacyEvidenceID != "" && types.IsSupportedKnowledgeFileExtension(knowledge.FileType) {
+			stage = "legacy_snapshot"
+		} else if knowledge.FileType == "docx" || (document.Kind == "resource" && types.IsSupportedKnowledgeFileExtension(knowledge.FileType)) {
 			stage = "download"
 		} else if knowledge.FileType != "md" {
 			return ErrProcessingConflict

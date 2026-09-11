@@ -1,7 +1,6 @@
 package repository
 
 import (
-	"context"
 	"errors"
 	"time"
 
@@ -70,38 +69,6 @@ func stopProcessingJob(tx *gorm.DB, job *types.ProcessingJob, status, reason str
 		}
 	}
 	return appendProcessingEvent(tx, job, types.ProcessingEvent{Type: "job_invalidated", FromState: from, ToState: status, Message: reason})
-}
-
-// CancelProcessingKnowledge bridges the existing per-document cancel API. It
-// stops only this version, preserving any published retrieval artifacts. Source
-// serialization makes cancellation and every lease commit mutually exclusive.
-func (r *knowledgeRepository) CancelProcessingKnowledge(ctx context.Context, tenant uint64, id string) (*types.Knowledge, error) {
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var job types.ProcessingJob
-		if err := tx.Where("knowledge_id = ? AND tenant_id = ?", id, tenant).Take(&job).Error; err != nil {
-			return err
-		}
-		if _, err := lockProcessingSource(tx, job.DataSourceID); err != nil {
-			return err
-		}
-		if err := tx.Where("id = ? AND tenant_id = ?", job.ID, tenant).Take(&job).Error; err != nil {
-			return err
-		}
-		if job.Status == types.ProcessingCanceled {
-			return nil
-		}
-		if job.Status == types.ProcessingSucceeded || job.Status == types.ProcessingSuperseded {
-			return ErrProcessingConflict
-		}
-		if err := stopProcessingJob(tx, &job, types.ProcessingCanceled, "USER_CANCELED"); err != nil {
-			return err
-		}
-		return refreshProcessingRuns(tx, &job)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return r.GetKnowledgeByID(ctx, tenant, id)
 }
 
 func stopProcessingSteps(tx *gorm.DB, job *types.ProcessingJob, status, reason string, now time.Time) error {

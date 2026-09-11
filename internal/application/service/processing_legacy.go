@@ -9,11 +9,7 @@ import (
 )
 
 func (s *ProcessingService) LegacyTaskAllowed(ctx context.Context, task *asynq.Task) (bool, error) {
-	switch task.Type() {
-	case types.TypeDocumentProcess, types.TypeManualProcess, types.TypeFAQImport,
-		types.TypeSummaryGeneration, types.TypeQuestionGeneration, types.TypeImageMultimodal,
-		types.TypeKnowledgePostProcess, types.TypeChunkExtract, types.TypeDataTableSummary, types.TypeWikiIngest:
-	default:
+	if !legacyProcessingTask(task.Type()) || task.Type() == types.TypeDataSourceSync {
 		return true, nil
 	}
 	var payload struct {
@@ -26,6 +22,17 @@ func (s *ProcessingService) LegacyTaskAllowed(ctx context.Context, task *asynq.T
 	return s.repo.LegacyKnowledgeTaskAllowed(ctx, payload.KnowledgeID, payload.ChunkID)
 }
 
+func legacyProcessingTask(kind string) bool {
+	switch kind {
+	case types.TypeDocumentProcess, types.TypeManualProcess, types.TypeFAQImport,
+		types.TypeSummaryGeneration, types.TypeQuestionGeneration, types.TypeImageMultimodal,
+		types.TypeKnowledgePostProcess, types.TypeChunkExtract, types.TypeDataTableSummary, types.TypeWikiIngest, types.TypeDataSourceSync:
+		return true
+	default:
+		return false
+	}
+}
+
 // Both Redis and Lite workers use this boundary before any legacy handler I/O.
 // Explicit delete/reparse/clone operations retain their own control handlers.
 func (s *ProcessingService) GuardLegacyTask(next asynq.Handler) asynq.Handler {
@@ -33,6 +40,9 @@ func (s *ProcessingService) GuardLegacyTask(next asynq.Handler) asynq.Handler {
 		allowed, err := s.LegacyTaskAllowed(ctx, task)
 		if err != nil || !allowed {
 			return err
+		}
+		if legacyProcessingTask(task.Type()) {
+			ctx = types.WithLegacyProcessing(ctx)
 		}
 		return next.ProcessTask(ctx, task)
 	})

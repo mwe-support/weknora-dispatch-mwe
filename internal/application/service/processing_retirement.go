@@ -49,6 +49,23 @@ func (s *knowledgeService) retireProcessingVersion(ctx context.Context, repo *re
 		}
 	}
 	if lease.Step.CheckpointRef != "retirement:indexes_deleted" {
+		var document ProcessingDocumentSpec
+		if len(lease.Job.Metadata) > 0 && json.Unmarshal(lease.Job.Metadata, &document) != nil {
+			return types.ProcessingOutcome{}, errors.New("RETIREMENT_DOCUMENT_INVALID")
+		}
+		if document.LegacyEvidenceID != "" {
+			if document.LegacyIndexDestination == nil || lease.Job.KnowledgeID == "" {
+				return types.ProcessingOutcome{}, errors.New("LEGACY_INDEX_DESTINATION_UNVERIFIED")
+			}
+			old := *document.LegacyIndexDestination
+			engine, err := processingIndexEngine(ctx, s, lease.Job.TenantID, old)
+			if err != nil {
+				return types.ProcessingOutcome{}, err
+			}
+			if err := engine.DeleteByKnowledgeIDList(ctx, []string{lease.Job.KnowledgeID}, old.Dimension, old.KnowledgeType); err != nil {
+				return types.ProcessingOutcome{}, err
+			}
+		}
 		if len(lease.Job.IndexDestination) > 0 {
 			var destination types.ProcessingIndexDestination
 			if json.Unmarshal(lease.Job.IndexDestination, &destination) != nil || lease.Job.KnowledgeID == "" {

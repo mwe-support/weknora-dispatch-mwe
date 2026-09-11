@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm/clause"
 )
 
 func TestProcessingGarbageProtectsActivePinnedReferencedAndUncertainJobs(t *testing.T) {
@@ -74,7 +75,7 @@ func TestProcessingGarbageProtectsActivePinnedReferencedAndUncertainJobs(t *test
 func TestProcessingFAQResourceGarbageKeepsLiveAnswersAndFencesRestoration(t *testing.T) {
 	db := processingServiceTestDatabase(t)
 	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.Knowledge{}))
-	require.NoError(t, db.Create(&types.Tenant{ID: 1, Name: "synthetic"}).Error)
+	require.NoError(t, db.Clauses(clause.OnConflict{UpdateAll: true}).Create(&types.Tenant{ID: 1, Name: "synthetic"}).Error)
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 	local := files.NewLocalFileService(t.TempDir(), "")
 	path, err := local.SaveBytes(ctx, []byte("synthetic answer image"), 1, "answer.png", false)
@@ -169,7 +170,7 @@ func TestProcessingFAQGarbageUsesExactOriginalDestinationAndRetriesLostACK(t *te
 	db := processingServiceTestDatabase(t)
 	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.Knowledge{}))
 	tenant := &types.Tenant{ID: 1, Name: "synthetic", RetrieverEngines: types.RetrieverEngines{Engines: []types.RetrieverEngineParams{{RetrieverEngineType: types.PostgresRetrieverEngineType, RetrieverType: types.VectorRetrieverType}}}}
-	require.NoError(t, db.Create(tenant).Error)
+	require.NoError(t, db.Clauses(clause.OnConflict{UpdateAll: true}).Create(tenant).Error)
 	kb := &types.KnowledgeBase{}
 	require.NoError(t, db.First(kb).Error)
 	kb.Type = types.KnowledgeBaseTypeFAQ
@@ -231,7 +232,7 @@ func TestProcessingRetiredIndexesReconcileLateWritesWithoutTouchingLiveVersions(
 	db := processingServiceTestDatabase(t)
 	require.NoError(t, db.AutoMigrate(&types.Tenant{}))
 	tenant := &types.Tenant{ID: 1, Name: "synthetic", RetrieverEngines: types.RetrieverEngines{Engines: []types.RetrieverEngineParams{{RetrieverEngineType: types.PostgresRetrieverEngineType, RetrieverType: types.VectorRetrieverType}}}}
-	require.NoError(t, db.Create(tenant).Error)
+	require.NoError(t, db.Clauses(clause.OnConflict{UpdateAll: true}).Create(tenant).Error)
 	index := &processingPipelineIndex{vectors: true}
 	registry := retriever.NewRetrieveEngineRegistry(nil, nil)
 	require.NoError(t, registry.Register(retriever.NewKVHybridRetrieveEngine(index, types.PostgresRetrieverEngineType)))
@@ -280,7 +281,7 @@ func TestProcessingCompletedScanArtifactsRetireAndReplayKeepsIdentity(t *testing
 			db := processingServiceTestDatabase(t)
 			require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.SyncLog{}, &types.SyncRunItem{}))
 			tenant := &types.Tenant{ID: 1, Name: "synthetic"}
-			require.NoError(t, db.Create(tenant).Error)
+			require.NoError(t, db.Clauses(clause.OnConflict{UpdateAll: true}).Create(tenant).Error)
 			run := &types.SyncLog{ID: "completed-scan", TenantID: 1, DataSourceID: "source", Status: types.SyncLogStatusRunning}
 			require.NoError(t, db.Create(run).Error)
 			r := repository.NewProcessingRepository(db)

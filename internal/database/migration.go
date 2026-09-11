@@ -110,7 +110,7 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 
 	var m *migrate.Migrate
 	if opts.SQLiteDBPath != "" {
-		sqlDB, err := sql.Open("sqlite3", opts.SQLiteDBPath)
+		sqlDB, err := sql.Open(SQLiteDriverName, opts.SQLiteDBPath)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to open sqlite db for migration: %v", err)
 			wrapped := fmt.Errorf("failed to open sqlite db for migration: %w", err)

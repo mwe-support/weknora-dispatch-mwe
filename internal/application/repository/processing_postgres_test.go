@@ -43,6 +43,7 @@ func TestProcessingPostgresConcurrentGenerationClaimAndAtomicFailure(t *testing.
 	raw.SetMaxOpenConns(8)
 	t.Cleanup(func() { _ = raw.Close() })
 	require.NoError(t, db.AutoMigrate(&types.KnowledgeBase{}, &types.DataSource{}, &types.Tenant{}, &types.WikiPage{}))
+	require.NoError(t, db.Create(&types.Tenant{ID: 1, Name: "synthetic"}).Error)
 	require.NoError(t, db.Migrator().DropColumn(&types.WikiPage{}, "MutationRevision"))
 	require.NoError(t, db.Exec("INSERT INTO wiki_pages(id, tenant_id, knowledge_base_id, slug, content) VALUES ('migration-page', 1, 'kb', 'entity/migration', 'preserved synthetic content')").Error)
 	require.NoError(t, db.Create(&types.KnowledgeBase{ID: "kb", TenantID: 1, Name: "synthetic"}).Error)
@@ -158,4 +159,8 @@ func TestProcessingPostgresConcurrentGenerationClaimAndAtomicFailure(t *testing.
 		OutputManifestRef: "stale", OutputDigest: "stale"}), ErrProcessingConflict)
 	checkProcessingHistorySnapshotAndUnresolvedCleanup(t, r)
 	checkProcessingObserverViews(t, db, schema, dsn)
+	checkProcessingLegacyEvidence(t, r)
+	checkProcessingLegacyRetry(t, r)
+	checkProcessingLegacyHistory(t, r)
+	checkProcessingTenantParser(t, r)
 }

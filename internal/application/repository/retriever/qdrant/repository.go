@@ -181,15 +181,17 @@ func (q *qdrantRepository) Save(ctx context.Context,
 	}
 
 	collectionName := q.getCollectionName(dimension)
-	pointID := uuid.New().String()
+	pointID := processingPointID(embedding)
 	point := &qdrant.PointStruct{
 		Id:      qdrant.NewID(pointID),
 		Vectors: qdrant.NewVectors(embeddingDB.Embedding...),
 		Payload: createPayload(embeddingDB),
 	}
 
+	wait := true
 	_, err := q.client.Upsert(ctx, &qdrant.UpsertPoints{
 		CollectionName: collectionName,
+		Wait:           &wait,
 		Points:         []*qdrant.PointStruct{point},
 	})
 	if err != nil {
@@ -225,7 +227,7 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 
 		dimension := len(embeddingDB.Embedding)
 		point := &qdrant.PointStruct{
-			Id:      qdrant.NewID(uuid.New().String()),
+			Id:      qdrant.NewID(processingPointID(embedding)),
 			Vectors: qdrant.NewVectors(embeddingDB.Embedding...),
 			Payload: createPayload(embeddingDB),
 		}
@@ -255,8 +257,10 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 			}
 			batch := points[i:end]
 
+			wait := true
 			_, err := q.client.Upsert(ctx, &qdrant.UpsertPoints{
 				CollectionName: collectionName,
+				Wait:           &wait,
 				Points:         batch,
 			})
 			if err != nil {
@@ -282,7 +286,9 @@ func (q *qdrantRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList 
 	collectionName := q.getCollectionName(dimension)
 	log.Infof("[Qdrant] Deleting indices by chunk IDs from %s, count: %d", collectionName, len(chunkIDList))
 
+	wait := true
 	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
+		Wait:           &wait,
 		CollectionName: collectionName,
 		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 			Must: []*qdrant.Condition{
@@ -312,7 +318,9 @@ func (q *qdrantRepository) DeleteByKnowledgeIDList(ctx context.Context,
 	collectionName := q.getCollectionName(dimension)
 	log.Infof("[Qdrant] Deleting indices by knowledge IDs from %s, count: %d", collectionName, len(knowledgeIDList))
 
+	wait := true
 	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
+		Wait:           &wait,
 		CollectionName: collectionName,
 		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 			Must: []*qdrant.Condition{
@@ -342,7 +350,9 @@ func (q *qdrantRepository) DeleteBySourceIDList(ctx context.Context,
 	collectionName := q.getCollectionName(dimension)
 	log.Infof("[Qdrant] Deleting indices by source IDs from %s, count: %d", collectionName, len(sourceIDList))
 
+	wait := true
 	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
+		Wait:           &wait,
 		CollectionName: collectionName,
 		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 			Must: []*qdrant.Condition{
@@ -880,6 +890,16 @@ func createPayload(embedding *QdrantVectorEmbedding) map[string]*qdrant.Value {
 		fieldIsEnabled:       embedding.IsEnabled,
 	}
 	return qdrant.NewValueMap(payload)
+}
+
+// Ledger and staged FAQ identities name immutable index attempts. Replaying an
+// acknowledged batch must upsert the same point, including after a lost ACK.
+func processingPointID(item *types.IndexInfo) string {
+	_, _, err := types.ParseProcessingIndexSourceID(item.SourceID)
+	if err == nil || (len(item.SourceID) == 63 && strings.HasPrefix(item.SourceID, "fq-")) {
+		return uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("weknora-index/%s/%s/%d/%s", item.KnowledgeBaseID, item.KnowledgeID, item.SourceType, item.SourceID))).String()
+	}
+	return uuid.NewString()
 }
 
 func buildRetrieveResult(results []*types.IndexWithScore, retrieverType types.RetrieverType) []*types.RetrieveResult {

@@ -6,20 +6,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
 func processingTestStore(t *testing.T) *ProcessingRepository {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	db, err := gorm.Open(database.SQLite(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	raw, err := db.DB()
 	require.NoError(t, err)
 	raw.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = raw.Close() })
+	require.NoError(t, db.AutoMigrate(&types.Tenant{}))
+	require.NoError(t, db.Create(&types.Tenant{ID: 1, Name: "synthetic"}).Error)
 	require.NoError(t, db.AutoMigrate(&types.KnowledgeBase{}, &types.DataSource{}, &types.ProcessingJob{}, &types.ProcessingStep{}, &types.ProcessingEvent{}, &types.SyncRunItem{}, &types.TaskPendingOp{}, &types.ProcessingArtifactReference{}, &types.ProcessingStorageReservation{}, &types.ProcessingGraphWrite{}, &types.ProcessingWikiWrite{}, &types.WikiPage{}, &types.StoredResource{}, &types.ResourceBinding{}))
 	require.NoError(t, db.Create(&types.KnowledgeBase{ID: "kb", TenantID: 1, Name: "synthetic"}).Error)
 	require.NoError(t, db.AutoMigrate(&types.Chunk{}, &types.FAQIndexWrite{}))

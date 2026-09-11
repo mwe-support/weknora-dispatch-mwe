@@ -34,15 +34,20 @@ func processingStageInputs(kb *types.KnowledgeBase, cfg *config.Config, keys map
 		questions = cfg.Conversation.GenerateQuestionsPrompt
 	}
 	chat := processingFingerprint(keys["summary"], keys["model/"+kb.SummaryModelID])
+	var wikiExtraction any
+	if kb.WikiConfig != nil {
+		wikiExtraction = []any{kb.WikiConfig.ExtractionGranularity.Normalize(), kb.WikiConfig.ExtractionInstructions}
+	}
 	return map[string]string{
 		"native_read": native, "export_start": native, "export_poll": native, "download": native, "normalize": native,
 		"parse": parse, "assets": assets, "chunk": chunk, "text_index": processingFingerprint(chunk, embed),
 		"images": vision, "image_index": processingFingerprint(vision, embed),
 		"summary": processingFingerprint(chunk, chat, summary), "summary_index": processingFingerprint(chunk, chat, summary, embed),
 		"questions": processingFingerprint(vision, chat, questions, keys["questions"]), "question_index": processingFingerprint(vision, chat, questions, keys["questions"], embed),
-		"graph":       processingFingerprint(vision, chat, keys["extract"], cfg.ExtractManager),
-		"wiki":        processingFingerprint(vision, chat, keys["wiki"], embed),
-		"faq_prepare": processingFingerprint(assets, keys["faq"]), "faq_index": processingFingerprint(assets, keys["faq"], embed),
+		"graph":        processingFingerprint(vision, chat, keys["extract"], cfg.ExtractManager),
+		"wiki":         processingFingerprint(vision, chat, keys["wiki"], embed),
+		"wiki_extract": processingFingerprint(vision, chat, wikiExtraction),
+		"faq_prepare":  processingFingerprint(assets, keys["faq"]), "faq_index": processingFingerprint(assets, keys["faq"], embed),
 	}
 }
 
@@ -60,23 +65,6 @@ func (e *processingDocumentExecution) documentPlan(ctx context.Context, kind str
 	var cfg *config.Config
 	if e.s != nil {
 		cfg = e.s.config
-		keys, err = e.s.processingParserKey(ctx, e.kb.TenantID, keys)
-		if err != nil {
-			return nil, err
-		}
 	}
 	return ProcessingDocumentPlan(e.kb, kind, e.lease.Job.PipelineFingerprint+"/"+revision, processingStageInputs(e.kb, cfg, keys))
-}
-
-func (s *knowledgeService) processingParserKey(ctx context.Context, tenant uint64, keys map[string]string) (map[string]string, error) {
-	if s.tenantRepo != nil {
-		value, err := s.tenantRepo.GetTenantByID(ctx, tenant)
-		if err != nil {
-			return nil, err
-		}
-		keys["tenant_parser"] = processingFingerprint(value.ParserEngineConfig.ToOverridesMap())
-	} else {
-		keys["tenant_parser"] = processingFingerprint(s.getParserEngineOverridesFromContext(ctx))
-	}
-	return keys, nil
 }

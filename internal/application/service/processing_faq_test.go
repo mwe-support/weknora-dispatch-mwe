@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm/clause"
 )
 
 type processingFAQTags struct{ interfaces.KnowledgeTagService }
@@ -89,7 +90,7 @@ func TestProcessingManualFAQFailurePreservesPublishedAnswerAndMedia(t *testing.T
 	db := processingServiceTestDatabase(t)
 	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.Knowledge{}))
 	tenant := &types.Tenant{ID: 1, Name: "synthetic", RetrieverEngines: types.RetrieverEngines{Engines: []types.RetrieverEngineParams{{RetrieverEngineType: types.PostgresRetrieverEngineType, RetrieverType: types.VectorRetrieverType}}}}
-	require.NoError(t, db.Create(tenant).Error)
+	require.NoError(t, db.Clauses(clause.OnConflict{UpdateAll: true}).Create(tenant).Error)
 	var kb types.KnowledgeBase
 	require.NoError(t, db.First(&kb).Error)
 	kb.Type, kb.EmbeddingModelID = types.KnowledgeBaseTypeFAQ, "synthetic"
@@ -222,7 +223,7 @@ func runProcessingFAQSource(t *testing.T, scenario string) {
 	tenant := &types.Tenant{ID: 1, Name: "synthetic", RetrieverEngines: types.RetrieverEngines{Engines: []types.RetrieverEngineParams{
 		{RetrieverEngineType: types.PostgresRetrieverEngineType, RetrieverType: types.VectorRetrieverType},
 	}}}
-	require.NoError(t, db.Create(tenant).Error)
+	require.NoError(t, db.Clauses(clause.OnConflict{UpdateAll: true}).Create(tenant).Error)
 	var kb types.KnowledgeBase
 	require.NoError(t, db.First(&kb).Error)
 	kb.Type = types.KnowledgeBaseTypeFAQ

@@ -10,12 +10,13 @@ import (
 	files "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm/clause"
 )
 
 func TestProcessingResourceOwnershipFencesLateWritesAndPreservesOtherBindings(t *testing.T) {
 	db := processingServiceTestDatabase(t)
 	require.NoError(t, db.AutoMigrate(&types.Tenant{}))
-	require.NoError(t, db.Create(&types.Tenant{ID: 1, Name: "synthetic"}).Error)
+	require.NoError(t, db.Clauses(clause.OnConflict{UpdateAll: true}).Create(&types.Tenant{ID: 1, Name: "synthetic"}).Error)
 	require.NoError(t, db.AutoMigrate(&types.StoredResource{}, &types.ResourceBinding{}))
 	r := repository.NewProcessingRepository(db)
 	catalog := NewResourceCatalog(repository.NewResourceRepository(db))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -75,6 +76,114 @@ type ProcessingJob struct {
 
 func (ProcessingJob) TableName() string { return "processing_jobs" }
 
+// Historical errors retain their original log/ordinal/content identity. The
+// append-only evidence never rewrites a legacy attempt as a leased execution.
+type ProcessingLegacyIdentity struct {
+	TenantID        uint64 `json:"tenant_id" gorm:"not null;uniqueIndex:uq_legacy_resolution,priority:1;uniqueIndex:uq_legacy_operation,priority:1"`
+	KnowledgeBaseID string `json:"knowledge_base_id" gorm:"size:64;not null"`
+	DataSourceID    string `json:"datasource_id" gorm:"column:datasource_id;size:64;not null"`
+	RunID           string `json:"run_id" gorm:"size:64;not null;uniqueIndex:uq_legacy_resolution,priority:2"`
+	ErrorOrdinal    int    `json:"error_ordinal" gorm:"not null;uniqueIndex:uq_legacy_resolution,priority:3"`
+	ErrorDigest     string `json:"error_digest" gorm:"size:64;not null;uniqueIndex:uq_legacy_resolution,priority:4"`
+	ExternalID      string `json:"external_id" gorm:"size:512;not null"`
+	FileID          string `json:"file_id" gorm:"size:256;not null"`
+}
+
+type ProcessingLegacyEvidence struct {
+	ID                       string `json:"id" gorm:"size:64;primaryKey"`
+	ProcessingLegacyIdentity `gorm:"embedded"`
+	Action                   string    `json:"action" gorm:"size:32;not null;uniqueIndex:uq_legacy_resolution,priority:5"`
+	KnowledgeID              string    `json:"knowledge_id,omitempty" gorm:"size:64"`
+	SourceRevision           string    `json:"source_revision,omitempty" gorm:"size:256"`
+	Attempt                  int       `json:"attempt,omitempty"`
+	SnapshotDigest           string    `json:"snapshot_digest" gorm:"size:64;not null"`
+	ConfigurationRevision    string    `json:"configuration_revision" gorm:"size:64;not null"`
+	ArtifactDigest           string    `json:"artifact_digest" gorm:"size:64;not null"`
+	EvidenceReference        string    `json:"evidence_reference" gorm:"size:256;not null"`
+	EvidenceDigest           string    `json:"evidence_digest" gorm:"size:64;not null"`
+	JobID                    string    `json:"job_id,omitempty" gorm:"size:64;index"`
+	DrainID                  string    `json:"drain_id,omitempty" gorm:"size:64"`
+	Actor                    string    `json:"actor" gorm:"size:128;not null"`
+	Reason                   string    `json:"reason" gorm:"size:512;not null"`
+	OperationRequestID       string    `json:"operation_request_id" gorm:"size:128;not null;uniqueIndex:uq_legacy_operation,priority:2"`
+	RequestDigest            string    `json:"-" gorm:"size:64;not null"`
+	CreatedAt                time.Time `json:"created_at"`
+}
+
+func (ProcessingLegacyEvidence) TableName() string { return "processing_legacy_evidence" }
+
+type ProcessingLegacyResource struct {
+	Reference string
+	Bytes     int64
+	Digest    string
+	Kind      string
+}
+
+// An authenticated operator records the observed worker and queue inventory.
+// This is an explicit attestation, not an inference from a zero active counter.
+type ProcessingLegacyDrain struct {
+	ID                    string    `json:"id" gorm:"size:64;primaryKey"`
+	TenantID              uint64    `json:"tenant_id" gorm:"not null;uniqueIndex:uq_legacy_drain_operation,priority:1"`
+	KnowledgeBaseID       string    `json:"knowledge_base_id" gorm:"size:64;not null"`
+	DataSourceID          string    `json:"datasource_id" gorm:"column:datasource_id;size:64;not null"`
+	ScopeRevision         string    `json:"scope_revision" gorm:"size:64;not null"`
+	AuthRevision          string    `json:"-" gorm:"size:64;not null"`
+	ConfigurationRevision string    `json:"configuration_revision" gorm:"size:64;not null"`
+	Inventory             JSON      `json:"inventory" gorm:"type:jsonb;not null"`
+	EvidenceReference     string    `json:"evidence_reference" gorm:"size:256;not null"`
+	EvidenceDigest        string    `json:"evidence_digest" gorm:"size:64;not null"`
+	Actor                 string    `json:"actor" gorm:"size:128;not null"`
+	OperationRequestID    string    `json:"operation_request_id" gorm:"size:128;not null;uniqueIndex:uq_legacy_drain_operation,priority:2"`
+	RequestDigest         string    `json:"-" gorm:"size:64;not null"`
+	CheckedAt             time.Time `json:"checked_at"`
+	ExpiresAt             time.Time `json:"expires_at"`
+	CreatedAt             time.Time `json:"created_at"`
+}
+
+func (ProcessingLegacyDrain) TableName() string { return "processing_legacy_drains" }
+
+// A restricted rescan retains the original failure identities and a drained
+// delivery receipt. It observes fresh versions without replaying the old task.
+type ProcessingLegacyRetry struct {
+	TenantID           uint64                     `json:"tenant_id"`
+	KnowledgeBaseID    string                     `json:"knowledge_base_id"`
+	DataSourceID       string                     `json:"datasource_id"`
+	RunID              string                     `json:"run_id"`
+	DeadLetterID       int64                      `json:"dead_letter_id"`
+	QueueTaskID        string                     `json:"queue_task_id"`
+	PayloadDigest      string                     `json:"payload_digest"`
+	DrainID            string                     `json:"drain_id"`
+	Errors             []ProcessingLegacyIdentity `json:"errors"`
+	Actor              string                     `json:"actor"`
+	Reason             string                     `json:"reason"`
+	OperationRequestID string                     `json:"operation_request_id"`
+}
+
+type ProcessingLegacyRetryScan struct {
+	LegacyRetry   *ProcessingLegacyRetry `json:"legacy_retry,omitempty"`
+	RequestDigest string                 `json:"request_digest,omitempty"`
+}
+
+type ProcessingLegacyDrainInventory struct {
+	Complete bool `json:"complete"`
+	Workers  []struct {
+		OldInstanceID string `json:"old_instance_id"`
+		ReplacementID string `json:"replacement_id"`
+		ImageDigest   string `json:"image_digest"`
+		ExitConfirmed bool   `json:"exit_confirmed"`
+		GuardProtocol int    `json:"guard_protocol"`
+	} `json:"workers"`
+	Queues []struct {
+		Queue           string `json:"queue"`
+		InventoryDigest string `json:"inventory_digest"`
+		Tasks           []struct {
+			TaskID        string `json:"task_id"`
+			PayloadDigest string `json:"payload_digest"`
+			State         string `json:"state"`
+		} `json:"tasks"`
+	} `json:"queues"`
+}
+
 // Persisted before the first index write. Cleanup must use the original store
 // and vector dimension even if the KB, model or tenant defaults have changed.
 type ProcessingIndexDestination struct {
@@ -105,6 +214,17 @@ type ProcessingExportResolution struct {
 }
 
 type processingLeaseContextKey struct{}
+
+type legacyProcessingContextKey struct{}
+
+func WithLegacyProcessing(ctx context.Context) context.Context {
+	return context.WithValue(ctx, legacyProcessingContextKey{}, true)
+}
+
+func IsLegacyProcessing(ctx context.Context) bool {
+	legacy, _ := ctx.Value(legacyProcessingContextKey{}).(bool)
+	return legacy
+}
 
 func WithProcessingLease(ctx context.Context, lease ProcessingLease) context.Context {
 	return context.WithValue(ctx, processingLeaseContextKey{}, lease)
@@ -244,9 +364,17 @@ type ProcessingTaskPayload struct {
 }
 
 // ProcessingQueue preserves the existing hard isolation between worker pools.
-func ProcessingQueue(stage string) string {
+func ProcessingQueue(stage string, metadata ...JSON) string {
+	if stage == "publish" && len(metadata) > 0 {
+		var document struct {
+			LegacyEvidenceID string `json:"legacy_evidence_id"`
+		}
+		if json.Unmarshal(metadata[0], &document) == nil && document.LegacyEvidenceID != "" {
+			return QueueSync // Fresh membership verification can require provider pagination.
+		}
+	}
 	switch stage {
-	case "scan_page", "scan_document", "discover", "metadata", "fetch", "native_read", "export_start", "export_poll", "download", "normalize":
+	case "scan_page", "scan_document", "discover", "metadata", "fetch", "native_read", "export_start", "export_poll", "download", "normalize", "legacy_snapshot":
 		return QueueSync
 	case "summary", "embedding", "faq_embedding":
 		return QueueSummary
@@ -258,9 +386,9 @@ func ProcessingQueue(stage string) string {
 		return QueueQuestion
 	case "wiki", "wiki_extract", "wiki_dedup", "wiki_cite", "wiki_summary_part", "wiki_summary", "wiki_prepare", "wiki_taxonomy_input", "wiki_taxonomy", "wiki_taxonomy_vectors", "wiki_taxonomy_plan", "wiki_pages", "wiki_page", "wiki_links":
 		return QueueWiki
-	case "index", "text_index", "summary_index", "faq_prepare", "faq_index", "faq_entry", "faq_write", "publish":
+	case "index", "text_index", "summary_index", "faq_prepare", "faq_index", "faq_entry", "faq_write", "publish", "legacy_indexes":
 		return QueuePostProcess
-	case "retire", "retire_previous", "wiki_retire_page", "cleanup":
+	case "retire", "retire_previous", "wiki_retire_page", "cleanup", "legacy_retire_indexes":
 		return QueueMaintenance
 	default:
 		return QueueDefault

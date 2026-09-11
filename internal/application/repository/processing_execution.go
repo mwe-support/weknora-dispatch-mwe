@@ -198,6 +198,15 @@ func finishProcessingStep(tx *gorm.DB, job *types.ProcessingJob, step *types.Pro
 			return err
 		}
 	}
+	if step.Stage == "legacy_retry_coverage" && outcome.Status == types.ProcessingSucceeded {
+		complete, err := NewProcessingRepository(tx).LegacyRetryCoverage(tx.Statement.Context, job)
+		if err != nil {
+			return err
+		}
+		if !complete {
+			outcome = types.ProcessingOutcome{Status: types.ProcessingBlocked, ErrorClass: "conflict", ErrorCode: "LEGACY_RETRY_FILES_MISSING", Message: "Requested files are missing from the restricted retry"}
+		}
+	}
 	event := stepEvent(step, eventType, step.Status)
 	if err := commitProcessingDiscovery(tx, job, step, outcome); err != nil {
 		return err
@@ -238,6 +247,11 @@ func finishProcessingStep(tx *gorm.DB, job *types.ProcessingJob, step *types.Pro
 		}
 		step.OutputManifestRef, step.OutputDigest = outcome.OutputManifestRef, outcome.OutputDigest
 		step.Status, step.FinishedAt = types.ProcessingSucceeded, &now
+		if step.Stage == "legacy_retire_indexes" {
+			if err := releaseLegacyIndexCharge(tx, job); err != nil {
+				return err
+			}
+		}
 		if step.Stage == "graph_apply" || outcome.GraphWriteID != "" {
 			if err := commitProcessingGraph(tx, job, step, outcome.GraphWriteID); err != nil {
 				return err
@@ -402,6 +416,9 @@ func finishProcessingStep(tx *gorm.DB, job *types.ProcessingJob, step *types.Pro
 		if err := appendProcessingEvent(tx, job, types.ProcessingEvent{Type: "verified_empty_source", StepID: step.ID, ToState: types.ProcessingSkipped}); err != nil {
 			return err
 		}
+		if err := resolveRetriedLegacyJob(tx, job); err != nil {
+			return err
+		}
 	}
 	if step.Status == types.ProcessingSucceeded {
 		var incidents []int64
@@ -484,6 +501,12 @@ func refreshProcessingJob(tx *gorm.DB, job *types.ProcessingJob) error {
 		if job.Kind == types.ProcessingJobDocument {
 			if err := tx.Model(&types.Knowledge{}).Where("id = ? AND tenant_id = ? AND knowledge_base_id = ?", job.KnowledgeID, job.TenantID, job.KnowledgeBaseID).
 				Updates(map[string]any{"parse_status": types.ParseStatusCompleted, "processed_at": now, "error_message": ""}).Error; err != nil {
+				return err
+			}
+			if err := resolveAdoptedLegacyJob(tx, job); err != nil {
+				return err
+			}
+			if err := resolveRetriedLegacyJob(tx, job); err != nil {
 				return err
 			}
 		}

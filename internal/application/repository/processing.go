@@ -41,6 +41,7 @@ func (r *ProcessingRepository) JobDetail(ctx context.Context, tenant uint64, id 
 // after a migration/configuration error. This runs before workers are started.
 func (r *ProcessingRepository) VerifySchema(ctx context.Context) error {
 	for _, query := range []string{
+		"SELECT original_error_digest, linked_job_id FROM mwe_processing_attempt_timeline WHERE 1=0",
 		"SELECT id, revision, active_index_manifest, index_destination FROM processing_jobs WHERE 1=0",
 		"SELECT id, step_attempt, dispatch_seq, input_fingerprint FROM processing_steps WHERE 1=0",
 		"SELECT job_id, job_revision, event_type FROM processing_events WHERE 1=0",
@@ -56,6 +57,8 @@ func (r *ProcessingRepository) VerifySchema(ctx context.Context) error {
 		"SELECT id, chunk_id, state, source_ids, destination, estimated_bytes, storage_released FROM faq_index_writes WHERE 1=0",
 		"SELECT id, principal, kb_scope, filter_digest, expires_at FROM processing_history_snapshots WHERE 1=0",
 		"SELECT snapshot_id, rank, payload FROM processing_history_rows WHERE 1=0",
+		"SELECT id, error_digest, snapshot_digest, configuration_revision, job_id FROM processing_legacy_evidence WHERE 1=0",
+		"SELECT id, scope_revision, inventory, expires_at FROM processing_legacy_drains WHERE 1=0",
 	} {
 		if err := r.db.WithContext(ctx).Exec(query).Error; err != nil {
 			return fmt.Errorf("lifecycle schema is unavailable: %w", err)

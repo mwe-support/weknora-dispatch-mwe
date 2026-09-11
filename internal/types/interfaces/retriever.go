@@ -7,6 +7,13 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// ProcessingIndexReader is an optional, read-only migration capability. The
+// caller must first resolve the tenant-owned engine and provide exact source
+// IDs; migration never scans a whole knowledge base or creates a collection.
+type ProcessingIndexReader interface {
+	ReadProcessingIndexes(ctx context.Context, kbID, knowledgeID string, dimension int, sourceIDs []string) ([]*types.IndexInfo, error)
+}
+
 // RetrieveEngine defines the retrieve engine interface
 type RetrieveEngine interface {
 	// EngineType gets the retrieve engine type

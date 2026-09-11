@@ -22,6 +22,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm/clause"
 )
 
 type processingPipelineModels struct {
@@ -73,7 +74,8 @@ func (m processingPipelineModels) GetChatModel(context.Context, string) (chat.Ch
 
 type processingPipelineEmbedder struct {
 	embedding.Embedder
-	calls int
+	calls     int
+	dimension int
 }
 
 func (m *processingPipelineEmbedder) BatchEmbed(_ context.Context, inputs []string) ([][]float32, error) {
@@ -81,10 +83,18 @@ func (m *processingPipelineEmbedder) BatchEmbed(_ context.Context, inputs []stri
 	result := make([][]float32, len(inputs))
 	for i := range inputs {
 		result[i] = []float32{0.25, 0.75}
+		if m.dimension == 3 {
+			result[i] = append(result[i], 0.5)
+		}
 	}
 	return result, nil
 }
-func (*processingPipelineEmbedder) GetDimensions() int { return 2 }
+func (m *processingPipelineEmbedder) GetDimensions() int {
+	if m.dimension > 0 {
+		return m.dimension
+	}
+	return 2
+}
 func (m *processingPipelineEmbedder) BatchEmbedWithPool(ctx context.Context, _ embedding.Embedder, inputs []string) ([][]float32, error) {
 	return m.BatchEmbed(ctx, inputs)
 }
@@ -239,7 +249,7 @@ func TestProcessingPipelineRetriesOnlyFailedStageAndPublishesConfirmedVectors(t 
 			db := processingServiceTestDatabase(t)
 			require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.Knowledge{}, &types.Chunk{}, &types.Model{}))
 			require.NoError(t, db.Create(&types.Model{ID: "synthetic-vision", TenantID: 1, Name: "synthetic", Type: types.ModelTypeVLLM, Source: types.ModelSourceRemote, Status: types.ModelStatusActive}).Error)
-			require.NoError(t, db.Create(&types.Tenant{ID: 1, Name: "synthetic", RetrieverEngines: types.RetrieverEngines{Engines: []types.RetrieverEngineParams{
+			require.NoError(t, db.Clauses(clause.OnConflict{UpdateAll: true}).Create(&types.Tenant{ID: 1, Name: "synthetic", RetrieverEngines: types.RetrieverEngines{Engines: []types.RetrieverEngineParams{
 				{RetrieverEngineType: types.PostgresRetrieverEngineType, RetrieverType: types.VectorRetrieverType},
 				{RetrieverEngineType: types.PostgresRetrieverEngineType, RetrieverType: types.KeywordsRetrieverType},
 			}}}).Error)

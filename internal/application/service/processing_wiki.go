@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -27,18 +28,26 @@ func (e *processingDocumentExecution) wikiSource(ctx context.Context) ([]chunkBa
 		return nil, nil, err
 	}
 	revisions := make(map[string]int, len(chunks))
-	rows, err := e.s.chunkRepo.ListChunksByKnowledgeID(ctx, e.lease.Job.TenantID, e.lease.Job.KnowledgeID)
-	if err != nil {
-		return nil, nil, err
+	ids := make([]string, len(chunks))
+	for i, chunk := range chunks {
+		ids[i] = chunk.ID
 	}
-	stored := make(map[string]*types.Chunk, len(rows))
-	for _, row := range rows {
-		stored[row.ID] = row
+	stored := make(map[string]*types.Chunk, len(chunks))
+	// ListChunksByKnowledgeID is text-only; Wiki also consumes the confirmed
+	// OCR/caption chunks. Read their exact IDs with a bounded SQL parameter set.
+	for start := 0; start < len(ids); start += 256 {
+		rows, err := e.s.chunkRepo.ListChunksByID(ctx, e.lease.Job.TenantID, ids[start:min(start+256, len(ids))])
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, row := range rows {
+			stored[row.ID] = row
+		}
 	}
 	text := make([]*types.Chunk, 0, len(chunks))
 	for i, chunk := range chunks {
 		current := stored[chunk.ID]
-		if current == nil || !current.IsEnabled || current.ContentRevision != chunk.ContentRevision || current.Content != chunk.Content {
+		if current == nil || current.KnowledgeID != e.lease.Job.KnowledgeID || current.KnowledgeBaseID != e.kb.ID || !current.IsEnabled || current.ContentRevision != chunk.ContentRevision || current.Content != chunk.Content {
 			return nil, nil, errors.New("WIKI_SOURCE_CHANGED")
 		}
 		revisions[chunk.ID] = chunk.ContentRevision
@@ -76,11 +85,23 @@ func (e *processingDocumentExecution) wikiBarrier(ctx context.Context) (types.Pr
 	if err != nil {
 		return types.ProcessingOutcome{}, err
 	}
+	revision, keys, err := e.repo.ConfigurationDigests(ctx, e.lease.Job.TenantID, e.kb.ID)
+	if err != nil {
+		return types.ProcessingOutcome{}, err
+	}
+	if revision != e.lease.Job.ConfigurationRevision {
+		return types.ProcessingOutcome{}, repository.ErrProcessingScope
+	}
+	extractInput := processingStageInputs(e.kb, e.s.config, keys)["wiki_extract"]
 	var specs []types.ProcessingStepSpec
 	var extracted, prepared, summaries []string
 	for i := range batches {
 		unit := strconv.Itoa(i)
-		specs = append(specs, e.wikiStep("wiki_extract", unit))
+		extraction := e.wikiStep("wiki_extract", unit)
+		// Candidate extraction reads only document content and the chat model;
+		// shared-slug matching below also depends on the current embedding model.
+		extraction.InputFingerprint = processingFingerprint(extractInput, wikiBatchContent(batches[i]), unit, types.ResolveLanguageName(ctx, e.document.Language), agent.WikiCandidateSlugPrompt)
+		specs = append(specs, extraction)
 		extracted = append(extracted, "wiki_extract/"+unit)
 		specs = append(specs, e.wikiStep("wiki_cite", unit, "wiki_dedup/body"), e.wikiStep("wiki_summary_part", unit, "wiki_dedup/body"))
 		prepared = append(prepared, "wiki_cite/"+unit)
@@ -241,6 +262,24 @@ func (e *processingDocumentExecution) wikiStage(ctx context.Context) (types.Proc
 	}
 	if out, cached, err := e.wikiCheckpoint(ctx, nil); err != nil || cached {
 		return out, err
+	}
+	if e.lease.Step.Stage == "wiki_extract" {
+		data, _, _, found, err := e.reusableBytes(ctx, "wiki_extract")
+		if err != nil {
+			return types.ProcessingOutcome{}, err
+		}
+		if found {
+			var result combinedExtraction
+			if json.Unmarshal(data, &result) != nil {
+				return types.ProcessingOutcome{}, errors.New("REUSE_WIKI_EXTRACTION_INVALID")
+			}
+			if err := validateProcessingWikiExtraction(result); err != nil {
+				return types.ProcessingOutcome{}, err
+			}
+			out, err := e.wikiSuccess(ctx, result)
+			out.CopiedArtifact = true
+			return out, err
+		}
 	}
 	model, err := e.s.modelService.GetChatModel(ctx, e.kb.SummaryModelID)
 	if err != nil {

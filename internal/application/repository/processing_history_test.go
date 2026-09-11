@@ -17,12 +17,26 @@ import (
 
 func installProcessingHistoryTestSchema(t *testing.T, db *gorm.DB) {
 	t.Helper()
-	require.NoError(t, db.AutoMigrate(&types.Knowledge{}, &types.TaskDeadLetter{}))
+	require.NoError(t, db.AutoMigrate(&types.Knowledge{}, &types.TaskDeadLetter{}, &types.SyncLog{}))
 	dialect, version := "sqlite", "000010"
 	if db.Dialector.Name() == "postgres" {
 		dialect, version = "versioned", "000087"
 	}
 	data, err := os.ReadFile(filepath.Join("..", "..", "..", "migrations", dialect, version+"_processing_lifecycle.up.sql"))
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(string(data)).Error)
+	version = "000011"
+	if dialect == "versioned" {
+		version = "000088"
+	}
+	data, err = os.ReadFile(filepath.Join("..", "..", "..", "migrations", dialect, version+"_processing_lifecycle.up.sql"))
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(string(data)).Error)
+	version = "000012"
+	if dialect == "versioned" {
+		version = "000089"
+	}
+	data, err = os.ReadFile(filepath.Join("..", "..", "..", "migrations", dialect, version+"_processing_lifecycle.up.sql"))
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(string(data)).Error)
 }

@@ -2770,13 +2770,7 @@ func (s *knowledgeService) CancelKnowledgeParse(
 		return nil, werrors.NewNotFoundError("knowledge not found")
 	}
 	if existing.GetMetadata()["processing_protocol"] == "2" {
-		controller, ok := s.repo.(interface {
-			CancelProcessingKnowledge(context.Context, uint64, string) (*types.Knowledge, error)
-		})
-		if !ok {
-			return nil, werrors.NewInternalServerError("Processing lifecycle control is unavailable")
-		}
-		return controller.CancelProcessingKnowledge(ctx, tenantID, knowledgeID)
+		return nil, werrors.NewBadRequestError("Use the processing history controls to cancel this version")
 	}
 
 	switch existing.ParseStatus {

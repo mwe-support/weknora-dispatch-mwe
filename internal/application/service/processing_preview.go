@@ -33,6 +33,8 @@ func (s *knowledgeService) processingKnowledgeFile(ctx context.Context, knowledg
 	kind := "assets"
 	if step.Stage == "download" {
 		kind = "source_file"
+	} else if step.Stage == "legacy_snapshot" {
+		kind = "legacy_snapshot"
 	}
 	body, err := NewProcessingArtifacts(files, s.resourceCatalog).Read(ctx, job, step, kind, step.OutputManifestRef, step.OutputDigest)
 	if err != nil {
@@ -44,6 +46,15 @@ func (s *knowledgeService) processingKnowledgeFile(ctx context.Context, knowledg
 			return nil, "", errors.New("processing file artifact is invalid")
 		}
 		body = []byte(parsed.MarkdownContent)
+	} else if kind == "legacy_snapshot" {
+		var legacy processingLegacyManifest
+		if json.Unmarshal(body, &legacy) != nil || legacy.SourceFile.Path == "" {
+			return nil, "", errors.New("legacy file artifact is invalid")
+		}
+		body, err = NewProcessingArtifacts(files, s.resourceCatalog).Read(ctx, job, step, "source_file", legacy.SourceFile.Path, legacy.SourceFile.Digest)
+		if err != nil {
+			return nil, "", err
+		}
 	}
 	// Storage I/O runs outside a DB transaction. Recheck publication and the
 	// exact artifact before releasing any plaintext after a concurrent change.

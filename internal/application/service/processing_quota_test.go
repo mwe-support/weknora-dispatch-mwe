@@ -14,12 +14,13 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm/clause"
 )
 
 func TestProcessingQuotaReservesBeforeConcurrentPhysicalWrites(t *testing.T) {
 	db := processingServiceTestDatabase(t)
 	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.StorageBackend{}))
-	require.NoError(t, db.Create(&types.Tenant{ID: 1, Name: "synthetic", StorageQuota: 100}).Error)
+	require.NoError(t, db.Clauses(clause.OnConflict{UpdateAll: true}).Create(&types.Tenant{ID: 1, Name: "synthetic", StorageQuota: 100}).Error)
 	r := repository.NewProcessingRepository(db)
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 	job, err := r.EnsureJob(ctx, types.ProcessingJob{Kind: types.ProcessingJobDocument, TenantID: 1, KnowledgeBaseID: "kb", DataSourceID: "source", ExternalID: "quota", SourceRevision: "v1", PipelineFingerprint: "p1"})

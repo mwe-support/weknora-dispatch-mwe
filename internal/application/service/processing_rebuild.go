@@ -26,6 +26,9 @@ func RebuildProcessingVersion(ctx context.Context, knowledge interfaces.Knowledg
 	if json.Unmarshal(job.Metadata, &document) != nil || document.FileID == "" {
 		return nil, errors.New("processing source identity is unavailable")
 	}
+	if document.LegacyEvidenceID != "" {
+		return nil, errors.New("LEGACY_SNAPSHOT_REBUILD_REQUIRES_NEW_SOURCE_SCAN")
+	}
 	before, err := repo.ConfigurationRevision(ctx, tenant, job.KnowledgeBaseID)
 	if err != nil {
 		return nil, err
@@ -42,10 +45,6 @@ func RebuildProcessingVersion(ctx context.Context, knowledge interfaces.Knowledg
 		return nil, repository.ErrProcessingScope
 	}
 	pipeline := ProcessingPipelineFingerprint(s.config)
-	keys, err = s.processingParserKey(ctx, tenant, keys)
-	if err != nil {
-		return nil, err
-	}
 	plan, err := ProcessingDocumentPlan(kb, document.Kind, pipeline+"/"+after, processingStageInputs(kb, s.config, keys))
 	if err != nil {
 		return nil, err

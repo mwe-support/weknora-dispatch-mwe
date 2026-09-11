@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -63,7 +63,7 @@ func processingServiceTestStore(t *testing.T) *repository.ProcessingRepository {
 
 func processingServiceTestDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
-	var dialector gorm.Dialector = sqlite.Open(":memory:")
+	var dialector gorm.Dialector = database.SQLite(":memory:")
 	if dsn := os.Getenv("PROCESSING_TEST_POSTGRES"); dsn != "" {
 		require.Contains(t, dsn, "host=lifecycle-pg ")
 		require.Contains(t, dsn, "dbname=lifecycle_test ")
@@ -84,6 +84,8 @@ func processingServiceTestDatabase(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	raw.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = raw.Close() })
+	require.NoError(t, db.AutoMigrate(&types.Tenant{}))
+	require.NoError(t, db.Create(&types.Tenant{ID: 1, Name: "synthetic"}).Error)
 	require.NoError(t, db.AutoMigrate(&types.KnowledgeBase{}, &types.DataSource{}, &types.ProcessingJob{}, &types.ProcessingStep{}, &types.ProcessingEvent{}, &types.TaskPendingOp{}, &types.ProcessingArtifactReference{}, &types.ProcessingStorageReservation{}, &types.ProcessingGraphWrite{}, &types.ProcessingWikiWrite{}, &types.WikiPage{}, &types.StoredResource{}, &types.ResourceBinding{}, &types.Chunk{}, &types.FAQIndexWrite{}))
 	require.NoError(t, db.Create(&types.KnowledgeBase{ID: "kb", TenantID: 1, Name: "synthetic"}).Error)
 	require.NoError(t, db.Create(&types.DataSource{ID: "source", TenantID: 1, KnowledgeBaseID: "kb", Name: "synthetic", Type: types.ConnectorTypeTencentDocs, Status: types.DataSourceStatusActive}).Error)

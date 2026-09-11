@@ -117,7 +117,12 @@ func (r *tenantRepository) SearchTenants(ctx context.Context, keyword string, te
 func (r *tenantRepository) UpdateTenant(ctx context.Context, tenant *types.Tenant) error {
 	persisted := *tenant
 	persisted.ParserEngineConfig = tenant.ParserEngineConfigForPersistence()
-	return r.db.WithContext(ctx).Model(&types.Tenant{}).Where("id = ?", tenant.ID).Updates(&persisted).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockTenantParserConfiguration(tx, tenant.ID, false); err != nil {
+			return err
+		}
+		return tx.Model(&types.Tenant{}).Where("id = ?", tenant.ID).Omit("storage_used").Updates(&persisted).Error
+	})
 }
 
 // DeleteTenant soft-deletes the tenant and every active membership row
