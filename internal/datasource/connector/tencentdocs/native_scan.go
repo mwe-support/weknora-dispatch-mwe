@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
 	"strings"
 )
@@ -22,12 +23,15 @@ type NativeScanRequest struct {
 }
 
 type NativeScanEntry struct {
-	ExternalID   string `json:"external_id"`
-	FileID       string `json:"file_id"`
-	Title        string `json:"title"`
-	DocumentType string `json:"document_type"`
-	FolderPath   string `json:"folder_path"`
-	Disposition  string `json:"disposition"`
+	ExternalID   string             `json:"external_id"`
+	FileID       string             `json:"file_id"`
+	Title        string             `json:"title"`
+	DocumentType string             `json:"document_type"`
+	FolderPath   string             `json:"folder_path"`
+	Disposition  string             `json:"disposition"`
+	NodeType     string             `json:"node_type,omitempty"`
+	URL          string             `json:"url,omitempty"`
+	Listing      *NativeScanRequest `json:"listing,omitempty"`
 }
 
 type NativeScanPage struct {
@@ -178,7 +182,7 @@ func ReadNativeScanPage(ctx context.Context, request NativeScanRequest, read Nat
 			if home.IsFolder {
 				kind = "folder"
 			}
-			nodes = append(nodes, Node{ID: home.ID, Title: home.Title, Type: kind, HasChildren: home.IsFolder})
+			nodes = append(nodes, Node{ID: home.ID, Title: home.Title, Type: kind, HasChildren: home.IsFolder, URL: home.URL})
 		}
 	}
 	if len(nodes) == 0 && !finished {
@@ -194,6 +198,16 @@ func ReadNativeScanPage(ctx context.Context, request NativeScanRequest, read Nat
 		}
 		seen[node.ID] = true
 		entry := NativeScanEntry{ExternalID: fetchedNodeResourceID(ref.spaceID, node.ID), FileID: node.ID, Title: node.Title, DocumentType: strings.ToLower(node.DocumentType), FolderPath: request.FolderPath}
+		entry.NodeType = node.Type
+		if parsed, err := url.Parse(node.URL); err == nil && parsed.Scheme == "https" && parsed.Host == "docs.qq.com" && parsed.User == nil {
+			parsed.RawQuery, parsed.Fragment = "", ""
+			entry.URL = parsed.String()
+		}
+		if !request.Metadata {
+			listing := request
+			listing.Offset, listing.Page, listing.PreviousDigest = 0, 0, ""
+			entry.Listing = &listing
+		}
 		switch {
 		case isLinkNode(node):
 			entry.Disposition = "link"

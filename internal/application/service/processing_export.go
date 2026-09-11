@@ -40,22 +40,32 @@ func (e *processingDocumentExecution) parseExport(ctx context.Context) (types.Pr
 	if err := e.dependency(ctx, "normalize", "body", "normalize", &receipt); err != nil {
 		return types.ProcessingOutcome{}, err
 	}
-	if receipt.FileName != "source.docx" {
+	ext := strings.TrimPrefix(path.Ext(receipt.FileName), ".")
+	if !types.IsSupportedKnowledgeFileExtension(ext) || receipt.FileName != "source."+ext {
+		return types.ProcessingOutcome{}, errors.New("EXPORT_FORMAT_UNSUPPORTED")
+	}
+	if e.document.Kind == "doc" && ext != "docx" {
 		return types.ProcessingOutcome{}, errors.New("DOC_FULL_EXPORT_REQUIRED")
 	}
-	textRuns, images, err := processingDOCXInventory(data)
-	if err != nil {
-		return types.ProcessingOutcome{}, err
+	var textRuns map[string]int
+	images := 0
+	if ext == "docx" {
+		textRuns, images, err = processingDOCXInventory(data)
+		if err != nil {
+			return types.ProcessingOutcome{}, err
+		}
+	} else if ext == "pdf" && !bytes.HasPrefix(data, []byte("%PDF-")) {
+		return types.ProcessingOutcome{}, errors.New("PDF_HEADER_INVALID")
 	}
 	config := ResolveProcessConfig(e.kb, nil)
 	overrides := e.s.getParserEngineOverridesFromContext(ctx)
-	applyParserRuleOverrides(overrides, config.ChunkingConfig, "docx")
-	engine := config.ChunkingConfig.ResolveParserEngine("docx")
-	reader := e.s.resolveDocReader(ctx, engine, "docx", false, overrides)
+	applyParserRuleOverrides(overrides, config.ChunkingConfig, ext)
+	engine := config.ChunkingConfig.ResolveParserEngine(ext)
+	reader := e.s.resolveDocReader(ctx, engine, ext, false, overrides)
 	if reader == nil {
 		return types.ProcessingOutcome{}, errors.New("DOCREADER_UNAVAILABLE")
 	}
-	result, err := e.s.callDocReaderWithTimeout(ctx, reader, &types.ReadRequest{FileContent: data, FileName: receipt.FileName, FileType: "docx", Title: e.document.Title,
+	result, err := e.s.callDocReaderWithTimeout(ctx, reader, &types.ReadRequest{FileContent: data, FileName: receipt.FileName, FileType: ext, Title: e.document.Title,
 		ParserEngine: engine, RequestID: e.lease.Step.ID, ParserEngineOverrides: overrides})
 	if errors.Is(err, docparser.ErrMinerUTransient) {
 		next := time.Now().UTC().Add(30 * time.Second)
@@ -67,14 +77,18 @@ func (e *processingDocumentExecution) parseExport(ctx context.Context) (types.Pr
 	if result == nil || result.Error != "" || result.IsAudio || len(result.MarkdownContent) > processingArtifactLimit {
 		return types.ProcessingOutcome{}, errors.New("DOCREADER_RESULT_INVALID")
 	}
-	if err := validateProcessingDOCXText(textRuns, images, result); err != nil {
-		return types.ProcessingOutcome{}, err
+	if ext == "docx" {
+		if err := validateProcessingDOCXText(textRuns, images, result); err != nil {
+			return types.ProcessingOutcome{}, err
+		}
 	}
 	if result.Metadata == nil {
 		result.Metadata = map[string]string{}
 	}
-	result.Metadata["parser_engine"], result.Metadata["source_type"] = engine, "doc"
-	result.Metadata["verified_export_text_runs"], result.Metadata["export_images"] = fmt.Sprint(len(textRuns)), fmt.Sprint(images)
+	result.Metadata["parser_engine"], result.Metadata["source_type"] = engine, e.document.Kind
+	if ext == "docx" {
+		result.Metadata["verified_export_text_runs"], result.Metadata["export_images"] = fmt.Sprint(len(textRuns)), fmt.Sprint(images)
+	}
 	parsed, err := e.prepareParsedImages(ctx, *result)
 	if err != nil {
 		return types.ProcessingOutcome{}, err
@@ -183,9 +197,6 @@ func validateProcessingDOCXText(textRuns map[string]int, images int, result *typ
 	}
 	if len(result.ImageRefs) < images {
 		return errors.New("DOCX_IMAGE_COVERAGE_INCOMPLETE")
-	}
-	if len(textRuns) == 0 && images == 0 {
-		return errors.New("VERIFIED_BODY_EMPTY")
 	}
 	return nil
 }

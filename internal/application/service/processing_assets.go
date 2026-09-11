@@ -135,6 +135,9 @@ func (e *processingDocumentExecution) assetBarrier(ctx context.Context) (types.P
 	out, err := e.success(ctx, "assets", parsed)
 	out.SealPlan = !e.lease.Step.PlanSealed
 	out.Completeness = "complete"
+	if strings.TrimSpace(parsed.MarkdownContent) == "" && len(parsed.Assets) == 0 {
+		out.Completeness = "verified_empty"
+	}
 	out.Result, _ = json.Marshal(map[string]any{"images": len(parsed.Assets), "media_bytes": total, "ocr_requested": e.kb.IsMultimodalEnabled()})
 	return out, err
 }

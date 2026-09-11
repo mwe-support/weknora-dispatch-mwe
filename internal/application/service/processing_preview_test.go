@@ -28,7 +28,7 @@ func (s processingPreviewFiles) GetFile(ctx context.Context, path string) (io.Re
 }
 
 func TestProcessingPreviewReadsOnlyPublishedVerifiedFile(t *testing.T) {
-	for _, fileType := range []string{"md", "docx"} {
+	for _, fileType := range []string{"md", "docx", "pdf"} {
 		t.Run(fileType, func(t *testing.T) {
 			t.Setenv("SYSTEM_AES_KEY", "synthetic-32-byte-key-for-tests!")
 			db := processingServiceTestDatabase(t)
@@ -38,13 +38,23 @@ func TestProcessingPreviewReadsOnlyPublishedVerifiedFile(t *testing.T) {
 			s := &knowledgeService{repo: repository.NewKnowledgeRepository(db), fileSvc: fileService,
 				kbService: &knowledgeBaseService{repo: repository.NewKnowledgeBaseRepository(db)}}
 			job := types.ProcessingJob{ID: "preview-job", TenantID: 1, KnowledgeBaseID: "kb", DataSourceID: "source", KnowledgeID: "preview-knowledge", Kind: types.ProcessingJobDocument, Generation: 1, IsPublished: true, PublicationEpoch: 1, RetirementState: "retained"}
+			job.Metadata = types.JSON(`{"kind":"smartcanvas"}`)
+			if fileType == "docx" {
+				job.Metadata = types.JSON(`{"kind":"doc"}`)
+			}
+			if fileType == "pdf" {
+				job.Metadata = types.JSON(`{"kind":"resource"}`)
+			}
 			step := types.ProcessingStep{ID: "preview-step", JobID: job.ID, Stage: "assets", UnitKey: "body", Status: types.ProcessingSucceeded, Attempt: 1, InputFingerprint: "input"}
 			body := []byte("# Synthetic complete body\n\n![image](resource://AbCdEfGhIjKlMnOpQrStUv)\n\nTAIL-7391")
 			stored, _ := json.Marshal(processingParsed{ReadResult: types.ReadResult{MarkdownContent: string(body)}})
 			kind := "assets"
-			if fileType == "docx" {
+			if fileType == "docx" || fileType == "pdf" {
 				step.Stage, kind = "download", "source_file"
 				body = []byte("PK\x03\x04synthetic exact source bytes")
+				if fileType == "pdf" {
+					body = []byte("%PDF-1.4 synthetic exact source bytes")
+				}
 				stored = body
 			}
 			var err error

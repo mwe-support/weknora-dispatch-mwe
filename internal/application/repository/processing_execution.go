@@ -126,6 +126,25 @@ func (r *ProcessingRepository) FinishStep(ctx context.Context, tenant uint64, le
 }
 
 func finishProcessingStep(tx *gorm.DB, job *types.ProcessingJob, step *types.ProcessingStep, outcome types.ProcessingOutcome, now time.Time, eventType string) error {
+	if outcome.Completeness == "verified_empty" {
+		if job.Kind != types.ProcessingJobDocument || step.Stage != "assets" || step.Phase != types.ProcessingPhasePrepare || outcome.Status != types.ProcessingSucceeded || outcome.OutputManifestRef == "" || outcome.OutputDigest == "" || len(outcome.ChildSteps) != 0 {
+			return ErrProcessingConflict
+		}
+		var published int64
+		if err := processingLogicalQuery(tx, *job).Where("is_published = ?", true).Count(&published).Error; err != nil {
+			return err
+		}
+		job.Completeness = "verified_empty"
+		if err := tx.Model(job).Update("completeness", job.Completeness).Error; err != nil {
+			return err
+		}
+		step.OutputManifestRef, step.OutputDigest = outcome.OutputManifestRef, outcome.OutputDigest
+		outcome.Status = types.ProcessingSkipped
+		if published > 0 {
+			outcome.Status, outcome.ErrorClass, outcome.ErrorCode = types.ProcessingBlocked, "completeness", "SOURCE_EMPTY"
+			outcome.Message = "The new source revision is empty; the previous published version remains available"
+		}
+	}
 	if step.Stage == "retire_previous" && outcome.Status == types.ProcessingSucceeded {
 		var err error
 		outcome, err = finishProcessingPreviousRetirement(tx, job, step, now)
@@ -191,6 +210,16 @@ func finishProcessingStep(tx *gorm.DB, job *types.ProcessingJob, step *types.Pro
 	step.ErrorClass, step.ErrorCode, step.ErrorMessage = outcome.ErrorClass, outcome.ErrorCode, outcome.Message
 	step.NextRunAt = nil
 	switch outcome.Status {
+	case types.ProcessingSkipped:
+		if outcome.Completeness != "verified_empty" || step.Stage != "assets" {
+			return ErrProcessingConflict
+		}
+		if outcome.SealPlan {
+			if err := sealProcessingChildren(tx, job, step, nil); err != nil {
+				return err
+			}
+		}
+		step.Status, step.FinishedAt = types.ProcessingSkipped, &now
 	case types.ProcessingSucceeded:
 		if outcome.OutputManifestRef == "" || outcome.OutputDigest == "" {
 			return errors.New("processing success requires a verified output manifest and digest")
@@ -337,6 +366,18 @@ func finishProcessingStep(tx *gorm.DB, job *types.ProcessingJob, step *types.Pro
 	if err := tx.Save(step).Error; err != nil {
 		return err
 	}
+	if step.Status == types.ProcessingSkipped {
+		if err := stopProcessingSteps(tx, job, types.ProcessingSkipped, "VERIFIED_EMPTY", now); err != nil {
+			return err
+		}
+		job.Status, job.FinishedAt = types.ProcessingSkipped, &now
+		if err := tx.Model(job).Updates(map[string]any{"status": job.Status, "finished_at": now, "readiness": "pending"}).Error; err != nil {
+			return err
+		}
+		if err := appendProcessingEvent(tx, job, types.ProcessingEvent{Type: "verified_empty_source", StepID: step.ID, ToState: types.ProcessingSkipped}); err != nil {
+			return err
+		}
+	}
 	if step.Status == types.ProcessingSucceeded {
 		var incidents []int64
 		if err := tx.Model(&types.ProcessingEvent{}).Where("job_id = ? AND step_id = ? AND error_class <> '' AND resolves_event_id IS NULL", job.ID, step.ID).
@@ -372,6 +413,9 @@ func processingRetryDelay(stepID string, retries int) time.Duration {
 }
 
 func refreshProcessingJob(tx *gorm.DB, job *types.ProcessingJob) error {
+	if job.Status == types.ProcessingSkipped {
+		return nil
+	}
 	var steps []types.ProcessingStep
 	if err := tx.Where("job_id = ?", job.ID).Find(&steps).Error; err != nil {
 		return err

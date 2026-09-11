@@ -29,7 +29,13 @@ func (r *knowledgeRepository) ProcessingFileSnapshot(ctx context.Context, tenant
 			return err
 		}
 		stage := "assets"
-		if knowledge.FileType == "docx" {
+		var document struct {
+			Kind string `json:"kind"`
+		}
+		if json.Unmarshal(job.Metadata, &document) != nil {
+			return ErrProcessingConflict
+		}
+		if knowledge.FileType == "docx" || (document.Kind == "resource" && types.IsSupportedKnowledgeFileExtension(knowledge.FileType)) {
 			stage = "download"
 		} else if knowledge.FileType != "md" {
 			return ErrProcessingConflict

@@ -76,7 +76,7 @@ func ProcessingDocumentPlan(kb *types.KnowledgeBase, kind, input string) ([]type
 		return nil, errors.New("VLM_CONFIGURATION_INVALID")
 	}
 	switch kind {
-	case "doc", "smartcanvas", "sheet", "smartsheet":
+	case "doc", "smartcanvas", "sheet", "smartsheet", "resource":
 	default:
 		return nil, errors.New("NATIVE_TYPE_UNSUPPORTED")
 	}
@@ -94,7 +94,7 @@ func ProcessingDocumentPlan(kb *types.KnowledgeBase, kind, input string) ([]type
 	}
 	prepare, projection := types.ProcessingPhasePrepare, types.ProcessingPhaseProjection
 	add("native_read", prepare, false)
-	if kind == "doc" {
+	if kind == "doc" || kind == "resource" {
 		add("export_start", prepare, false, "native_read")
 		add("export_poll", prepare, false, "export_start")
 		add("download", prepare, false, "export_poll")

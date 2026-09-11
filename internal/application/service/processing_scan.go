@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
@@ -40,7 +41,7 @@ func (e *processingDocumentExecution) scan(ctx context.Context) (types.Processin
 		return client.ReadNative(ctx, tool, args)
 	}
 	if e.lease.Step.Stage == "scan_document" {
-		return e.scanDocument(ctx, read)
+		return e.scanDocument(ctx, read, client.ReadScan)
 	}
 	if e.lease.Step.Stage != "scan_page" {
 		return types.ProcessingOutcome{}, errors.New("SCAN_STAGE_INVALID")
@@ -112,18 +113,24 @@ func (e *processingDocumentExecution) scanPage(ctx context.Context, request tenc
 	return types.ProcessingOutcome{Status: types.ProcessingWaitingExternal, NextRunAt: &next, SealPlan: true, ChildSteps: children, DiscoveredItems: items, CheckpointRef: checkpoint}, nil
 }
 
-func (e *processingDocumentExecution) scanDocument(ctx context.Context, read tencentdocs.NativeReadFunc) (types.ProcessingOutcome, error) {
+func (e *processingDocumentExecution) scanDocument(ctx context.Context, read tencentdocs.NativeReadFunc, listing ...tencentdocs.NativeScanReadFunc) (types.ProcessingOutcome, error) {
 	var entry tencentdocs.NativeScanEntry
 	if json.Unmarshal(e.lease.Step.Input, &entry) != nil || entry.FileID == "" || entry.ExternalID == "" || entry.Disposition != "document" {
 		return types.ProcessingOutcome{}, errors.New("SCAN_DOCUMENT_INPUT_INVALID")
 	}
 	response, err := read(ctx, "manage.query_file_info", map[string]interface{}{"file_id": entry.FileID}, true)
 	if err != nil {
+		if tencentdocs.NativeResourceFallback(entry, err) && len(listing) == 1 {
+			return e.scanResource(ctx, entry, listing[0])
+		}
 		return types.ProcessingOutcome{}, err
 	}
 	var info tencentdocs.FileInfo
 	if response == nil || json.Unmarshal(response.Data, &info) != nil || info.ID != entry.FileID || info.Status != "normal" || info.IsFolder {
 		return types.ProcessingOutcome{}, errors.New("SCAN_IDENTITY_MISMATCH")
+	}
+	if (info.Type == "resource" || (types.IsSupportedKnowledgeFileExtension(info.Type) && !slices.Contains([]string{"doc", "sheet", "smartcanvas", "smartsheet"}, strings.ToLower(info.Type)))) && len(listing) == 1 {
+		return e.scanResource(ctx, entry, listing[0])
 	}
 	plan, err := ProcessingDocumentPlan(e.kb, info.Type, e.lease.Job.PipelineFingerprint+"/"+e.lease.Job.ConfigurationRevision)
 	if err != nil {
@@ -165,5 +172,25 @@ func (e *processingDocumentExecution) scanDocument(ctx context.Context, read ten
 	}
 	outcome.AdmitDocuments = []types.ProcessingAdmission{{Job: types.ProcessingJob{Kind: types.ProcessingJobDocument, TenantID: e.lease.Job.TenantID, KnowledgeBaseID: e.lease.Job.KnowledgeBaseID, DataSourceID: e.lease.Job.DataSourceID,
 		ExternalID: entry.ExternalID, SourceRevision: revision, SourceDigest: fmt.Sprintf("%x", sha256.Sum256(metadata)), PipelineFingerprint: e.lease.Job.PipelineFingerprint, Metadata: metadata}, Steps: plan}}
+	return outcome, nil
+}
+
+func (e *processingDocumentExecution) scanResource(ctx context.Context, entry tencentdocs.NativeScanEntry, read tencentdocs.NativeScanReadFunc) (types.ProcessingOutcome, error) {
+	if err := tencentdocs.VerifyNativeResource(ctx, entry, read); err != nil {
+		return types.ProcessingOutcome{}, err
+	}
+	plan, err := ProcessingDocumentPlan(e.kb, "resource", e.lease.Job.PipelineFingerprint+"/"+e.lease.Job.ConfigurationRevision)
+	if err != nil {
+		return types.ProcessingOutcome{}, err
+	}
+	metadata, _ := json.Marshal(ProcessingDocumentSpec{FileID: entry.FileID, Kind: "resource", Title: entry.Title, FolderPath: entry.FolderPath, URL: entry.URL, Resource: &entry, RevisionMode: "export_snapshot"})
+	// The provider exposes no content version for uploaded resources. A fresh
+	// scan must export once; retries keep the same task and confirmed file.
+	revision := fmt.Sprintf("%x", sha256.Sum256(append([]byte(e.lease.Job.OriginRunID+"\x00"), metadata...)))
+	outcome, err := e.success(ctx, "scan_document", map[string]string{"external_id": entry.ExternalID, "revision": revision, "revision_mode": "export_snapshot"})
+	if err != nil {
+		return outcome, err
+	}
+	outcome.AdmitDocuments = []types.ProcessingAdmission{{Job: types.ProcessingJob{Kind: types.ProcessingJobDocument, TenantID: e.lease.Job.TenantID, KnowledgeBaseID: e.lease.Job.KnowledgeBaseID, DataSourceID: e.lease.Job.DataSourceID, ExternalID: entry.ExternalID, SourceRevision: revision, SourceDigest: fmt.Sprintf("%x", sha256.Sum256(metadata)), PipelineFingerprint: e.lease.Job.PipelineFingerprint, Metadata: metadata}, Steps: plan}}
 	return outcome, nil
 }

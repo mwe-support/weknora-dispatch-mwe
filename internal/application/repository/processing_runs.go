@@ -142,10 +142,10 @@ func refreshProcessingRuns(tx *gorm.DB, job *types.ProcessingJob) error {
 		scanStopped := scan.Status == types.ProcessingSucceeded || scan.Status == types.ProcessingBlocked || processingTerminal(scan.Status)
 		if scanStopped && snapshot.Active == 0 && (snapshot.Unadmitted == 0 || scan.Status != types.ProcessingSucceeded) {
 			status = types.SyncLogStatusFailed
-			if snapshot.Succeeded > 0 {
+			if snapshot.Succeeded+snapshot.Skipped > 0 {
 				status = types.SyncLogStatusPartial
 			}
-			if snapshot.DiscoveryComplete && snapshot.Succeeded == snapshot.Documents {
+			if snapshot.DiscoveryComplete && snapshot.Succeeded+snapshot.Skipped == snapshot.Documents {
 				status = types.SyncLogStatusSuccess
 			}
 			if scan.Status == types.ProcessingCanceled || scan.Status == types.ProcessingSuperseded || (snapshot.Failed+snapshot.Blocked == 0 && snapshot.Canceled+snapshot.Superseded > 0) {

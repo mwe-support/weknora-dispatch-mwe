@@ -197,7 +197,7 @@ func processingStepEligible(job *types.ProcessingJob, step *types.ProcessingStep
 	if step.Phase == types.ProcessingPhaseRetire {
 		return !job.IsCurrent && !job.IsPublished && !job.RollbackPin && step.ExpectedPublicationEpoch == job.PublicationEpoch && job.RetirementState != "deleted"
 	}
-	if job.Status == types.ProcessingCanceled || job.RetirementState == "deleted" {
+	if job.Status == types.ProcessingCanceled || job.Status == types.ProcessingSkipped || job.RetirementState == "deleted" {
 		return false
 	}
 	switch step.Phase {

@@ -136,7 +136,7 @@ func (r *ProcessingRepository) CollectProcessingGarbage(ctx context.Context, aft
 	eligible := func(tx *gorm.DB) *gorm.DB {
 		return tx.Where("id > ? AND is_published = ? AND rollback_pin = ? AND retirement_state = ? AND updated_at < ?", after, false, false, "retained", cutoff).
 			Where("(kind = ? AND is_current = ? AND status IN ?) OR (kind = ? AND status IN ?)", types.ProcessingJobDocument, false,
-				[]string{types.ProcessingSucceeded, types.ProcessingFailed, types.ProcessingCanceled, types.ProcessingSuperseded}, types.ProcessingJobScan,
+				[]string{types.ProcessingSucceeded, types.ProcessingFailed, types.ProcessingCanceled, types.ProcessingSuperseded, types.ProcessingSkipped}, types.ProcessingJobScan,
 				[]string{types.ProcessingSucceeded, types.ProcessingCanceled, types.ProcessingSuperseded})
 	}
 	var jobs []types.ProcessingJob

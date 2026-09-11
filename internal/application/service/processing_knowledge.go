@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -20,12 +22,14 @@ import (
 )
 
 type ProcessingDocumentSpec struct {
-	FileID     string `json:"file_id"`
-	Kind       string `json:"kind"`
-	Title      string `json:"title"`
-	FolderPath string `json:"folder_path"`
-	URL        string `json:"url"`
-	Language   string `json:"language"`
+	FileID       string                       `json:"file_id"`
+	Kind         string                       `json:"kind"`
+	Title        string                       `json:"title"`
+	FolderPath   string                       `json:"folder_path"`
+	URL          string                       `json:"url"`
+	Language     string                       `json:"language"`
+	Resource     *tencentdocs.NativeScanEntry `json:"resource,omitempty"`
+	RevisionMode string                       `json:"revision_mode,omitempty"`
 }
 
 // The version changes when parser/normalizer behavior changes. App prompts and
@@ -179,6 +183,21 @@ func (e *processingDocumentExecution) execute(ctx context.Context) (types.Proces
 			return types.ProcessingOutcome{}, err
 		}
 		defer client.Close()
+		if e.document.Kind == "resource" {
+			if e.document.Resource == nil || e.document.Resource.FileID != e.document.FileID || e.document.Resource.ExternalID != e.lease.Job.ExternalID || e.document.Resource.Listing == nil || !slices.Contains(configuration.ResourceIDs, e.document.Resource.Listing.ResourceID) {
+				return types.ProcessingOutcome{}, errors.New("RESOURCE_LISTING_PROOF_REQUIRED")
+			}
+			verify := func(ctx context.Context) error {
+				return tencentdocs.VerifyNativeResource(tencentdocs.WithManagedRetries(ctx), *e.document.Resource, client.ReadScan)
+			}
+			if e.lease.Step.Stage != "native_read" {
+				return e.exportStage(ctx, client, verify)
+			}
+			if err := verify(ctx); err != nil {
+				return types.ProcessingOutcome{}, err
+			}
+			return e.success(ctx, "native_snapshot", tencentdocs.NativeSnapshot{FileID: e.document.FileID, Kind: "resource", RevisionKey: e.lease.Job.SourceRevision, CoverageComplete: true, RequiresExport: true})
+		}
 		read := func(ctx context.Context, tool string, args map[string]interface{}, verify bool) (*tencentdocs.NativeResponse, error) {
 			return client.ReadNative(tencentdocs.WithManagedRetries(ctx), tool, args)
 		}
@@ -200,7 +219,7 @@ func (e *processingDocumentExecution) execute(ctx context.Context) (types.Proces
 		if err := e.dependency(ctx, "native_read", "body", "native_snapshot", &snapshot); err != nil {
 			return types.ProcessingOutcome{}, err
 		}
-		if e.document.Kind == "doc" {
+		if e.document.Kind == "doc" || e.document.Kind == "resource" {
 			if !snapshot.CoverageComplete || !snapshot.RequiresExport {
 				return types.ProcessingOutcome{}, errors.New("DOC_SOURCE_SNAPSHOT_INVALID")
 			}
@@ -209,7 +228,12 @@ func (e *processingDocumentExecution) execute(ctx context.Context) (types.Proces
 				return types.ProcessingOutcome{}, err
 			}
 			outcome, err := e.success(ctx, "normalize", ready)
-			outcome.Candidate = &types.Knowledge{Title: e.document.Title, FileName: e.document.Title + ".docx", FileType: "docx", Source: e.document.URL, FolderPath: e.document.FolderPath, EmbeddingModelID: e.kb.EmbeddingModelID}
+			ext := path.Ext(ready.FileName)
+			fileName := e.document.Title
+			if !strings.EqualFold(path.Ext(fileName), ext) {
+				fileName += ext
+			}
+			outcome.Candidate = &types.Knowledge{Title: e.document.Title, FileName: fileName, FileType: strings.TrimPrefix(ext, "."), Source: e.document.URL, FolderPath: e.document.FolderPath, EmbeddingModelID: e.kb.EmbeddingModelID}
 			return outcome, err
 		}
 		normalized, err := tencentdocs.NormalizeNativeSnapshot(&snapshot)
@@ -230,7 +254,7 @@ func (e *processingDocumentExecution) execute(ctx context.Context) (types.Proces
 		}
 		return outcome, nil
 	case "parse":
-		if e.document.Kind == "doc" {
+		if e.document.Kind == "doc" || e.document.Kind == "resource" {
 			return e.parseExport(ctx)
 		}
 		var normalized tencentdocs.NativeNormalized
