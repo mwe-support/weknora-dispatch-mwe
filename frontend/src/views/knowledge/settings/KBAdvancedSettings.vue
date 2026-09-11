@@ -11,36 +11,26 @@
       <div class="setting-row">
         <div class="setting-info">
           <label>{{ $t('knowledgeEditor.advanced.questionGeneration.label') }}</label>
-          <p class="desc">{{ $t('knowledgeEditor.advanced.questionGeneration.description') }}</p>
+          <p class="desc">{{ $t('knowledgeEditor.advanced.questionGeneration.countDescription') }}</p>
         </div>
         <div class="setting-control">
-          <t-switch
-            v-model="localQuestionGeneration.enabled"
-            @change="handleQuestionGenerationToggle"
-            size="medium"
+          <t-input-number
+            v-model="localQuestionGeneration.questionCount"
+            :min="0"
+            :max="10"
+            :step="1"
+            :decimal-places="0"
+            :aria-label="$t('knowledgeEditor.advanced.questionGeneration.countLabel')"
+            :placeholder="$t('knowledgeEditor.advanced.questionGeneration.countLabel')"
+            theme="normal"
+            @change="handleQuestionGenerationChange"
+            style="width: 120px;"
           />
         </div>
       </div>
 
       <!-- Question Generation configuration -->
       <div v-if="localQuestionGeneration.enabled" class="subsection">
-        <div class="setting-row">
-          <div class="setting-info">
-            <label>{{ $t('knowledgeEditor.advanced.questionGeneration.countLabel') }}</label>
-            <p class="desc">{{ $t('knowledgeEditor.advanced.questionGeneration.countDescription') }}</p>
-          </div>
-          <div class="setting-control">
-            <t-input-number
-              v-model="localQuestionGeneration.questionCount"
-              :min="1"
-              :max="10"
-              :step="1"
-              theme="normal"
-              @change="handleQuestionGenerationChange"
-              style="width: 120px;"
-            />
-          </div>
-        </div>
         <div class="setting-row setting-row-vertical">
           <div class="setting-info">
             <label>{{ $t('knowledgeEditor.advanced.questionGeneration.instructionsLabel') }}</label>
@@ -105,26 +95,21 @@ const emit = defineEmits<{
   'update:tableMetadataInstructions': [value: string]
 }>()
 
-const localQuestionGeneration = ref<QuestionGenerationConfig>(
-  props.questionGeneration
-    ? { ...props.questionGeneration, customInstructions: props.questionGeneration.customInstructions || '' }
-    : { enabled: false, questionCount: 3, customInstructions: '' }
-)
+const questionConfig = (value?: QuestionGenerationConfig): QuestionGenerationConfig => {
+  const count = value?.enabled ? (value.questionCount ?? 0) : 0
+  return { enabled: count > 0, questionCount: count, customInstructions: value?.customInstructions || '' }
+}
+const localQuestionGeneration = ref<QuestionGenerationConfig>(questionConfig(props.questionGeneration))
 
 watch(() => props.questionGeneration, (newVal) => {
   if (newVal) {
-    localQuestionGeneration.value = { customInstructions: '', ...newVal }
+    localQuestionGeneration.value = questionConfig(newVal)
   }
 }, { deep: true })
 
-const handleQuestionGenerationToggle = () => {
-  if (!localQuestionGeneration.value.enabled) {
-    localQuestionGeneration.value.questionCount = 3
-  }
-  emit('update:questionGeneration', localQuestionGeneration.value)
-}
-
 const handleQuestionGenerationChange = () => {
+  localQuestionGeneration.value.questionCount = Math.max(0, Math.min(10, Math.trunc(Number(localQuestionGeneration.value.questionCount) || 0)))
+  localQuestionGeneration.value.enabled = localQuestionGeneration.value.questionCount > 0
   emit('update:questionGeneration', localQuestionGeneration.value)
 }
 </script>

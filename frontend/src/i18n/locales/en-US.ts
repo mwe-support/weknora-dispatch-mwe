@@ -2600,7 +2600,7 @@ export default {
         label: 'AI Question Generation',
         description: 'Generate related questions for each chunk using LLM during document parsing to improve retrieval recall. Enabling this will increase document parsing time.',
         countLabel: 'Question Count',
-        countDescription: 'Number of questions to generate per document chunk (1-10)',
+        countDescription: 'Questions per document chunk (0–10). 0 disables generation; off by default.',
         instructionsLabel: 'Question Generation Instructions',
         instructionsDescription: 'Specify audience, scenario, and wording while the system retains the stable output format',
         instructionsPlaceholder: 'For example: generate natural customer-support questions and avoid exam-style wording…'

@@ -806,8 +806,8 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       customInstructions: ''
     },
     questionGenerationConfig: {
-      enabled: true,
-      questionCount: 3,
+      enabled: false,
+      questionCount: 0,
       customInstructions: ''
     },
     wikiConfig: {
@@ -937,7 +937,7 @@ const loadKBData = async (kbIdOverride?: string) => {
       },
       questionGenerationConfig: {
         enabled: kb.question_generation_config?.enabled || false,
-        questionCount: kb.question_generation_config?.question_count || 3,
+        questionCount: kb.question_generation_config?.question_count ?? 0,
         customInstructions: kb.question_generation_config?.custom_instructions || ''
       },
       wikiConfig: {
@@ -1291,16 +1291,16 @@ const buildSubmitData = () => {
   // extract_config is sent below along with indexing_strategy
 
   // 添加问题生成配置
-  if (formData.value.questionGenerationConfig?.enabled) {
+  if (formData.value.questionGenerationConfig?.enabled && formData.value.questionGenerationConfig.questionCount > 0) {
     data.question_generation_config = {
       enabled: true,
-      question_count: formData.value.questionGenerationConfig.questionCount || 3,
+      question_count: formData.value.questionGenerationConfig.questionCount ?? 0,
       custom_instructions: formData.value.questionGenerationConfig.customInstructions || ''
     }
   } else {
     data.question_generation_config = {
       enabled: false,
-      question_count: 3,
+      question_count: 0,
       custom_instructions: formData.value.questionGenerationConfig?.customInstructions || ''
     }
   }
@@ -1479,7 +1479,7 @@ const doSubmit = async () => {
         },
         questionGeneration: {
           enabled: data.question_generation_config?.enabled || false,
-          questionCount: data.question_generation_config?.question_count || 3,
+          questionCount: data.question_generation_config?.question_count ?? 0,
           customInstructions: data.question_generation_config?.custom_instructions || ''
         }
       }

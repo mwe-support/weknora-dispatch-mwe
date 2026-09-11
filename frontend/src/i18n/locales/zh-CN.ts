@@ -3325,7 +3325,7 @@ export default {
         label: 'AI 问题生成',
         description: '解析文档时调用大模型为每个分块生成相关问题，提高检索召回率。启用后会增加文档解析耗时。',
         countLabel: '生成问题数量',
-        countDescription: '每个文档分块生成的问题数量（1-10）',
+        countDescription: '每个文档分块生成的问题数量（0–10）；0 表示不生成，默认关闭',
         instructionsLabel: '问题生成要求',
         instructionsDescription: '指定问题面向的人群、场景和表达方式，系统仍维护稳定输出格式',
         instructionsPlaceholder: '例如：生成客服用户常问的自然语言问题，避免考试题式表达…'

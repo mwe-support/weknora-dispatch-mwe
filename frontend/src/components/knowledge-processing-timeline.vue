@@ -1422,7 +1422,7 @@ const processConfigLines = computed<string[]>(() => {
 
   const qg = o.question_generation_config
   if (qg?.enabled != null) {
-    lines.push(`${t(k('question'))}: ${qg.enabled ? t(k('questionOn'), { n: qg.question_count ?? 3 }) : t(k('off'))}`)
+    lines.push(`${t(k('question'))}: ${qg.enabled ? t(k('questionOn'), { n: qg.question_count ?? 0 }) : t(k('off'))}`)
   }
 
   const graph = o.graph_enabled ?? o.extract_config?.enabled

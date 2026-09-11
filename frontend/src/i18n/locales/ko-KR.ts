@@ -3324,7 +3324,7 @@ export default {
         label: 'AI 질문 생성',
         description: '문서 파싱 시 대규모 모델을 호출하여 각 청크에 대한 관련 질문을 생성하여 검색 재현율을 향상시킵니다. 활성화하면 문서 파싱 시간이 증가합니다.',
         countLabel: '생성 질문 수',
-        countDescription: '각 문서 청크에서 생성할 질문 수 (1-10)',
+        countDescription: '문서 청크당 생성할 질문 수(0–10). 0은 생성 안 함이며 기본값입니다.',
         instructionsLabel: '질문 생성 지침',
         instructionsDescription: '안정적인 출력 형식을 유지하면서 대상, 상황 및 표현 방식을 지정합니다',
         instructionsPlaceholder: '예: 시험 문제 형식을 피하고 자연스러운 고객 지원 질문을 생성…'

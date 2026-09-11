@@ -494,15 +494,17 @@
                           </div>
                           <div class="setting-control setting-control-inline">
                             <t-input-number
-                              v-if="uiState.questionGenerationConfig.enabled"
                               v-model="uiState.questionGenerationConfig.questionCount"
-                              :min="1"
+                              :min="0"
                               :max="10"
                               :step="1"
+                              :decimal-places="0"
+                              :aria-label="t('knowledgeEditor.advanced.questionGeneration.countLabel')"
+                              :placeholder="t('knowledgeEditor.advanced.questionGeneration.countLabel')"
+                              @change="uiState.questionGenerationConfig.enabled = Number(uiState.questionGenerationConfig.questionCount) > 0"
                               theme="normal"
                               :style="{ width: '88px' }"
                             />
-                            <t-switch v-model="uiState.questionGenerationConfig.enabled" size="medium" />
                           </div>
                         </div>
                         <div v-if="uiState.questionGenerationConfig.enabled" class="setting-row setting-row-vertical">
@@ -1071,7 +1073,7 @@ function createDefaultUIState(): UploadUIState {
     },
     multimodalConfig: { enabled: false, vllmModelId: '', descriptionLanguage: '', customInstructions: '' },
     asrConfig: { enabled: false, modelId: '', language: '' },
-    questionGenerationConfig: { enabled: true, questionCount: 3, customInstructions: '' },
+    questionGenerationConfig: { enabled: false, questionCount: 0, customInstructions: '' },
     nodeExtractConfig: {
       enabled: false,
       text: '',
@@ -1117,8 +1119,8 @@ function initFromKbInfo(kb: any) {
       language: kb.asr_config?.language || '',
     },
     questionGenerationConfig: {
-      enabled: kb.question_generation_config?.enabled ?? true,
-      questionCount: kb.question_generation_config?.question_count || 3,
+      enabled: Boolean(kb.question_generation_config?.enabled && (kb.question_generation_config?.question_count ?? 0) > 0),
+      questionCount: kb.question_generation_config?.enabled ? (kb.question_generation_config?.question_count ?? 0) : 0,
       customInstructions: kb.question_generation_config?.custom_instructions || '',
     },
     nodeExtractConfig: {
@@ -1227,6 +1229,8 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
     if (qg.enabled != null) s.questionGenerationConfig.enabled = qg.enabled
     if (qg.question_count != null) s.questionGenerationConfig.questionCount = qg.question_count
     if (qg.custom_instructions != null) s.questionGenerationConfig.customInstructions = qg.custom_instructions
+    s.questionGenerationConfig.enabled = s.questionGenerationConfig.enabled && s.questionGenerationConfig.questionCount > 0
+    if (!s.questionGenerationConfig.enabled) s.questionGenerationConfig.questionCount = 0
   }
   const ec = o.extract_config
   if (ec) {
