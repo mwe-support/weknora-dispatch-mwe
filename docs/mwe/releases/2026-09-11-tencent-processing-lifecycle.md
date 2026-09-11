@@ -2,7 +2,7 @@
 
 上游：WeKnora **v0.7.2**。目标：`mwe-support/weknora-dispatch-mwe` / `weknora-v0.7.2`。基线：`dab6feaee7f62292ddbd2c5b3d9a897ba569e626`。
 
-状态：隔离环境实现、全量回归、实际 HTTP/MCP/页面验收和最终复审已通过，**生产发布尚未执行**。生产放行以本记录后续的发布结果为准。设计依据：[生命周期契约](../design/2026-09-10-tencent-sync-lifecycle.md)、[历史复审](../design/2026-09-10-tencent-sync-review.md)。
+状态：隔离环境实现、全量回归、实际 HTTP/MCP/页面验收和最终复审已通过，**2026-09-11 12:12（Asia/Shanghai）已部署生产，线上复核通过**。实际运行产物与备份见文末“生产发布结果”；前文开发过程中的待验收状态保留为历史记录。设计依据：[生命周期契约](../design/2026-09-10-tencent-sync-lifecycle.md)、[历史复审](../design/2026-09-10-tencent-sync-review.md)。
 
 ## 变更与提交分组
 
@@ -173,7 +173,7 @@ H14 与旧历史补充：
 
 最终全量检查 `248-full-go-final-green.log`：隔离环境执行 `python tmp/lifecycle-20260910/run-tests.py --postgres --neo4j --qdrant ./... -count=1` 全部通过，源码 SHA-256 `84874a708e7ad124555c2f6c521bf4699b4fe30eeab6103d5091753a275944be`；repository 64.859 秒、service 394.279 秒。该归档与已运行 247 镜像的运行时代码由发布准备阶段逐文件核对，文档变化另计。提交按已通过验证的功能检查点整理为 P1、A1、C1、A2、R1、H1、S1，再提交页面/观测和最终记录；整理不改写当前工作区，不包含无关恢复测试。
 
-## 待切换发布产物
+## 首轮候选产物（App 后被 S2 替代）
 
 已逐文件核对 1,796 个运行时源码文件，247 运行镜像与 248 全量回归一致。发布整理只规范生成 SQL 的结尾空行；生成器 `--check` 及监控查询生成一致性检查通过，SQL 语义不变。生产前端镜像另在隔离容器启动，HTML 与已验收 bundle 字节一致，nginx 配置和真实 API 代理均通过；该临时容器随后移除。
 
@@ -206,3 +206,26 @@ PASS — source SHA-256 392586ed50800c9f5ae5a5463408b95d2a00a581eb482daf69d28874
 S2 的 MinIO/Qdrant 自动用例采用合成模型和来源成员响应；真实 HTTP 样本覆盖腾讯附件导出及存储链路，未调用模型。真实模型、48 图与 Wiki 等场景的实测边界仍以前文记录为准。此修正使上表首轮 App 候选作废；最终 App 使用独立 `v0.7.2-processing-lifecycle-20260911-minio` 标识，前端保持已验收镜像。新增底层对象目录可由资源中保存的确切路径读回和回收；回滚仍受前述协议版本限制。
 
 最终补充全量命令 `python tmp/lifecycle-20260910/run-tests.py --postgres --qdrant --neo4j --minio ./... -count=1` 全部通过，证据 `253-full-go-minio-green.log`，源码 SHA-256 `abe9d09ca803827a00a8e01ab4c8a7b66affc3d61c37a0d7da7a4e4bd7730c7c`；repository 62.075 秒、service 439.269 秒。发布准备再次核对全部 1,796 个运行时源码文件与实际运行镜像一致，并验证原前端镜像的 nginx、入口字节及对新应用的 API 代理。S2 的 Standards 和 Spec 两项静态补审均为 0 P1/P2。浏览器实际打开 MinIO 中的双页 PDF，`app-live-minio-preview.png` 与 DOM 已保存并查看；未用接口成功替代浏览器渲染结果。
+
+## 生产发布结果
+
+2026-09-11 12:12:32（Asia/Shanghai），在 `marvel-kb`（实际 hostname `test`）完成发布。运行代码提交 `72fd096138d90c07086c52fe72748a81376339bd`，已推送到主项目的 `weknora-v0.7.2`，MCP 专属仓库无本批代码变更。本节及页首状态修订属于 D4 发布审计文档提交，不改变运行镜像。
+
+| 项目 | 实际结果 |
+|---|---|
+| App | `marvel/weknora-app:v0.7.2-processing-lifecycle-20260911-minio`；镜像 ID `sha256:1a0c73fb3b6c8af31c603f462f200eb0924ae6c844c6af99bf3d0161cae30555` |
+| 二进制 | 运行容器内 SHA-256 `4adde29cdb830a92545788264954247026ab0a80893f8c25bf98eeada1b5431a`，与隔离验收一致 |
+| 前端 | `marvel/weknora-ui:v0.7.2-processing-lifecycle-20260911`；镜像 ID `sha256:581426bfbbc1b6b781d4bcb4aafe48812eb684273836998bc2668717c0bd221b`；公网入口 SHA-256 与上文一致 |
+| 数据库 | 迁移 79 → 89，dirty=false；全部现有腾讯来源启用新协议 |
+| 应用健康 | App/frontend Docker health 均 healthy；公网入口及 auth/config HTTP 200；后续复查未见 panic/fatal |
+| 监控 | 13 个相关文件更新；六个新视图实际查询全部成功；新 observer 登录只读、直接读取原业务表被拒绝 |
+| 历史保护 | 两条原 running 的整行摘要在停机、升级和 12:16 的复核中均完全一致；所有归档投递保留；部署没有创建生产恢复作业 |
+| 变更边界 | 只更换 App/frontend，重启 Grafana/Alloy 并重载 Prometheus 配置；其他业务容器的 ID 和启动时间全部不变；来源日程、范围、模型与凭据保持原配置 |
+
+停妥旧应用后重新检查 9 个队列与 outbox 为空，再备份数据库。备份为 `/public/knowledgebase/results/processing-lifecycle-20260911/weknora-before.dump`，136,797,263 字节，SHA-256 `d1ac9b687746245c693f7a48059c3b1bc976e83bf7dd570e8baadec283ed302d`。`pg_restore --list` 成功，648 个目录条目并确认包含知识与同步历史数据；本批验证的是归档可读性，没有宣称执行完整还原演练。备份目录权限 0700，文件 0600；旧 override、监控文件和容器清单同目录保存。
+
+Chrome 使用现有账号验证生产“处理生命周期”页面：旧文档显示可用但历史阶段未核实，筛选可返回完整 1/1 合成样本。新 Grafana 六面板、空间筛选及旧监控首页均已实际打开；页面控制台未见 error。旧流程“状态超过70分钟未更新”卡片仍显示 `No data`，不把它当作新的生命周期状态结论。截图和 DOM 证据为 `production-ui-history.*`、`production-ui-grafana.*`、`production-ui-overview.txt`。
+
+当前配置的生产 WeKnora MCP 成功列出账号可访问的 5 个 KB；只读查询已有合成目录样本返回 2 个正文/摘要结果，验收标记及原嵌套路径保持可读，未重新同步该来源。证据 `production-mcp-read-smoke.json`。完整部署及后续检查为 `production-deployed.json`、`production-postcheck.json`，服务器审计目录另保留 `deployed.json`、`postcheck.json`、排空清单和备份摘要。
+
+回滚不得仅重启不支持新协议的旧 App，亦不应对现有新账本直接执行 down migration。优先部署协议兼容的修复镜像；若确需恢复发布前数据库，必须先停妥全部写入端，协调对应存储与索引状态后使用所留备份。本次没有自动接管或重放生产历史异常，原旧记录仍需按已实现的证明/接管入口逐项核实，不能把本次部署成功表述为历史业务问题全部恢复。
