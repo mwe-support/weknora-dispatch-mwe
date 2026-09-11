@@ -144,12 +144,9 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 	}
 	// Process and store chunks
 	var opts ProcessChunksOptions
-	if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
+	if kb.QuestionGenerationConfig.EffectiveCount() > 0 {
 		opts.EnableQuestionGeneration = true
-		opts.QuestionCount = kb.QuestionGenerationConfig.QuestionCount
-		if opts.QuestionCount <= 0 {
-			opts.QuestionCount = 3
-		}
+		opts.QuestionCount = kb.QuestionGenerationConfig.EffectiveCount()
 	}
 	s.processChunks(ctx, kb, knowledge, chunks, opts)
 }
@@ -1556,6 +1553,10 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
 
+	if payload.QuestionCount <= 0 {
+		return nil
+	}
+
 	if strings.TrimSpace(s.config.Conversation.GenerateQuestionsPrompt) == "" {
 		exitStatus = "prompt_not_configured"
 		logger.Errorf(ctx, "GenerateQuestionsPrompt is empty: configure conversation.generate_questions_prompt_id")
@@ -1653,13 +1654,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		return fmt.Errorf("failed to init retrieve engine: %w", err)
 	}
 
-	questionCount := payload.QuestionCount
-	if questionCount <= 0 {
-		questionCount = 3
-	}
-	if questionCount > 10 {
-		questionCount = 10
-	}
+	questionCount := min(payload.QuestionCount, 10)
 
 	processOverrides, _ := knowledge.ProcessOverrides()
 	questionGenCfg := ResolveProcessConfig(kb, processOverrides).QuestionGenerationConfig
@@ -1897,6 +1892,10 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 			"language":       payload.Language,
 		})
 
+	if payload.QuestionCount <= 0 {
+		return nil
+	}
+
 	if strings.TrimSpace(s.config.Conversation.GenerateQuestionsPrompt) == "" {
 		exitStatus = "prompt_not_configured"
 		logger.Errorf(ctx, "GenerateQuestionsPrompt is empty: configure conversation.generate_questions_prompt_id")
@@ -1963,13 +1962,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		return fmt.Errorf("failed to init retrieve engine: %w", err)
 	}
 
-	questionCount := payload.QuestionCount
-	if questionCount <= 0 {
-		questionCount = 3
-	}
-	if questionCount > 10 {
-		questionCount = 10
-	}
+	questionCount := min(payload.QuestionCount, 10)
 
 	processOverrides, _ := knowledge.ProcessOverrides()
 	questionGenCfg := ResolveProcessConfig(kb, processOverrides).QuestionGenerationConfig
@@ -2225,12 +2218,9 @@ func (s *knowledgeService) RegenerateChunkQuestions(
 	}
 	overrides, _ := knowledge.ProcessOverrides()
 	config := ResolveProcessConfig(kb, overrides).QuestionGenerationConfig
-	count := config.QuestionCount
-	if count <= 0 {
-		count = 3
-	}
-	if count > 10 {
-		count = 10
+	count := config.EffectiveCount()
+	if count == 0 {
+		return nil, werrors.NewBadRequestError("Question generation is disabled; choose a positive question count first")
 	}
 	questions, err := s.generateQuestionsWithContext(
 		ctx, chatModel, chunk.Content, resolveNeighbor(chunk.PreChunkID),
@@ -2557,11 +2547,8 @@ func (s *knowledgeService) ReparseKnowledge(
 		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
 		enableMultimodel := reparseEff.EnableMultimodel
-		enableQuestionGeneration := reparseEff.QuestionGenerationConfig.Enabled
-		questionCount := reparseEff.QuestionGenerationConfig.QuestionCount
-		if questionCount <= 0 {
-			questionCount = 3
-		}
+		enableQuestionGeneration := reparseEff.QuestionGenerationConfig.EffectiveCount() > 0
+		questionCount := reparseEff.QuestionGenerationConfig.EffectiveCount()
 
 		lang := types.LanguageFromContextOrDefault(ctx)
 		taskPayload := types.DocumentProcessPayload{
@@ -2611,11 +2598,8 @@ func (s *knowledgeService) ReparseKnowledge(
 		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
 		enableMultimodel := reparseEff.EnableMultimodel
-		enableQuestionGeneration := reparseEff.QuestionGenerationConfig.Enabled
-		questionCount := reparseEff.QuestionGenerationConfig.QuestionCount
-		if questionCount <= 0 {
-			questionCount = 3
-		}
+		enableQuestionGeneration := reparseEff.QuestionGenerationConfig.EffectiveCount() > 0
+		questionCount := reparseEff.QuestionGenerationConfig.EffectiveCount()
 
 		lang := types.LanguageFromContextOrDefault(ctx)
 		taskPayload := types.DocumentProcessPayload{
@@ -2664,11 +2648,8 @@ func (s *knowledgeService) ReparseKnowledge(
 		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
 		enableMultimodel := reparseEff.EnableMultimodel
-		enableQuestionGeneration := reparseEff.QuestionGenerationConfig.Enabled
-		questionCount := reparseEff.QuestionGenerationConfig.QuestionCount
-		if questionCount <= 0 {
-			questionCount = 3
-		}
+		enableQuestionGeneration := reparseEff.QuestionGenerationConfig.EffectiveCount() > 0
+		questionCount := reparseEff.QuestionGenerationConfig.EffectiveCount()
 
 		lang := types.LanguageFromContextOrDefault(ctx)
 		taskPayload := types.DocumentProcessPayload{

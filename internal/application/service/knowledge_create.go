@@ -219,11 +219,8 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	logger.Info(ctx, "Enqueuing document processing task to Asynq")
 	enableMultimodelValue := eff.EnableMultimodel
 
-	enableQuestionGeneration := eff.QuestionGenerationConfig.Enabled
-	questionCount := eff.QuestionGenerationConfig.QuestionCount
-	if questionCount <= 0 {
-		questionCount = 3
-	}
+	enableQuestionGeneration := eff.QuestionGenerationConfig.EffectiveCount() > 0
+	questionCount := eff.QuestionGenerationConfig.EffectiveCount()
 
 	lang := types.LanguageFromContextOrDefault(ctx)
 	taskPayload := types.DocumentProcessPayload{
@@ -417,11 +414,8 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	// Enqueue URL processing task to Asynq
 	logger.Info(ctx, "Enqueuing URL processing task to Asynq")
 	enableMultimodelValue := eff.EnableMultimodel
-	enableQuestionGeneration := eff.QuestionGenerationConfig.Enabled
-	questionCount := eff.QuestionGenerationConfig.QuestionCount
-	if questionCount <= 0 {
-		questionCount = 3
-	}
+	enableQuestionGeneration := eff.QuestionGenerationConfig.EffectiveCount() > 0
+	questionCount := eff.QuestionGenerationConfig.EffectiveCount()
 
 	lang := types.LanguageFromContextOrDefault(ctx)
 	taskPayload := types.DocumentProcessPayload{
@@ -659,11 +653,8 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 
 	// Build async task payload
 	enableMultimodelValue := eff.EnableMultimodel
-	enableQuestionGeneration := eff.QuestionGenerationConfig.Enabled
-	questionCount := eff.QuestionGenerationConfig.QuestionCount
-	if questionCount <= 0 {
-		questionCount = 3
-	}
+	enableQuestionGeneration := eff.QuestionGenerationConfig.EffectiveCount() > 0
+	questionCount := eff.QuestionGenerationConfig.EffectiveCount()
 
 	lang := types.LanguageFromContextOrDefault(ctx)
 	taskPayload := types.DocumentProcessPayload{
@@ -930,14 +921,8 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
 		// Check question generation config
-		enableQuestionGeneration := false
-		questionCount := 3 // default
-		if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
-			enableQuestionGeneration = true
-			if kb.QuestionGenerationConfig.QuestionCount > 0 {
-				questionCount = kb.QuestionGenerationConfig.QuestionCount
-			}
-		}
+		questionCount := kb.QuestionGenerationConfig.EffectiveCount()
+		enableQuestionGeneration := questionCount > 0
 
 		lang := types.LanguageFromContextOrDefault(ctx)
 		taskPayload := types.DocumentProcessPayload{
@@ -1235,12 +1220,9 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 		EnableMultimodel: eff.EnableMultimodel && len(resolvedImages) > 0,
 		StoredImages:     resolvedImages,
 	}
-	if eff.QuestionGenerationConfig.Enabled {
+	if eff.QuestionGenerationConfig.EffectiveCount() > 0 {
 		opts.EnableQuestionGeneration = true
-		opts.QuestionCount = eff.QuestionGenerationConfig.QuestionCount
-		if opts.QuestionCount <= 0 {
-			opts.QuestionCount = 3
-		}
+		opts.QuestionCount = eff.QuestionGenerationConfig.EffectiveCount()
 	}
 
 	if eff.ChunkingConfig.EnableParentChild {

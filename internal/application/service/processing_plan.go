@@ -125,7 +125,7 @@ func ProcessingDocumentPlan(kb *types.KnowledgeBase, kind, input string, stageIn
 		add("summary", projection, false, "publish")
 		add("summary_index", projection, true, "summary")
 	}
-	if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
+	if kb.QuestionGenerationConfig.EffectiveCount() > 0 {
 		add("questions", projection, true, "publish")
 		add("question_index", projection, true, "questions")
 	}

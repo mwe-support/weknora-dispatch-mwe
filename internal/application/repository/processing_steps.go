@@ -32,6 +32,20 @@ func (r *ProcessingRepository) PlanSteps(ctx context.Context, tenant uint64, job
 			if job.PlanDigest == digest {
 				return nil
 			}
+			// An audited question-only disable operation can accept the same
+			// source admission without discarding its already confirmed work.
+			var receipt types.ProcessingEvent
+			if err := tx.Where("job_id = ? AND event_type = ?", job.ID, "questions_disabled").Order("id DESC").Take(&receipt).Error; err == nil {
+				var policy struct {
+					ConfigurationRevision string `json:"configuration_revision"`
+					PlanDigest            string `json:"compatible_plan_digest"`
+				}
+				if json.Unmarshal(receipt.Detail, &policy) == nil && policy.ConfigurationRevision == job.ConfigurationRevision && policy.PlanDigest == digest {
+					return nil
+				}
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
 			return ErrProcessingConflict
 		}
 		if !job.IsCurrent || processingTerminal(job.Status) {

@@ -25,6 +25,9 @@ func NewKnowledgeBaseRepository(db *gorm.DB) interfaces.KnowledgeBaseRepository 
 
 // CreateKnowledgeBase creates a new knowledge base
 func (r *knowledgeBaseRepository) CreateKnowledgeBase(ctx context.Context, kb *types.KnowledgeBase) error {
+	if kb.QuestionGenerationConfig == nil {
+		kb.QuestionGenerationConfig = &types.QuestionGenerationConfig{}
+	}
 	return r.db.WithContext(ctx).Create(kb).Error
 }
 
@@ -170,7 +173,13 @@ func (r *knowledgeBaseRepository) ListUserKBPinIDs(
 
 // UpdateKnowledgeBase updates a knowledge base
 func (r *knowledgeBaseRepository) UpdateKnowledgeBase(ctx context.Context, kb *types.KnowledgeBase) error {
-	return r.db.WithContext(ctx).Save(kb).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		actor, _ := types.UserIDFromContext(ctx)
+		if actor == "" {
+			actor = "system:knowledge-base-settings"
+		}
+		return updateKnowledgeBaseQuestionPolicy(tx, kb, actor, nil, false)
+	})
 }
 
 // DeleteKnowledgeBase deletes a knowledge base

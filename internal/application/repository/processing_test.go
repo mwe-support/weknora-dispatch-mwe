@@ -20,6 +20,11 @@ func processingTestStore(t *testing.T) *ProcessingRepository {
 	require.NoError(t, err)
 	raw.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = raw.Close() })
+	return processingTestStoreWithDB(t, db)
+}
+
+func processingTestStoreWithDB(t *testing.T, db *gorm.DB) *ProcessingRepository {
+	t.Helper()
 	require.NoError(t, db.AutoMigrate(&types.Tenant{}))
 	require.NoError(t, db.Create(&types.Tenant{ID: 1, Name: "synthetic"}).Error)
 	require.NoError(t, db.AutoMigrate(&types.KnowledgeBase{}, &types.DataSource{}, &types.ProcessingJob{}, &types.ProcessingStep{}, &types.ProcessingEvent{}, &types.SyncRunItem{}, &types.TaskPendingOp{}, &types.ProcessingArtifactReference{}, &types.ProcessingStorageReservation{}, &types.ProcessingGraphWrite{}, &types.ProcessingWikiWrite{}, &types.WikiPage{}, &types.StoredResource{}, &types.ResourceBinding{}))

@@ -716,6 +716,8 @@ func (s *systemSettingService) List(ctx context.Context) ([]*types.SystemSetting
 	// row visible would suggest it still controls runtime capacity, so retire it
 	// explicitly while preserving all genuinely unknown rows for diagnostics.
 	delete(byKey, "asynq.concurrency")
+	// A one-time data migration receipt is not a user-editable setting.
+	delete(byKey, types.QuestionDefaultsMigrationKey)
 
 	keys := make([]string, 0, len(registry))
 	for key := range registry {

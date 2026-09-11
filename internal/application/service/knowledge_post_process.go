@@ -216,7 +216,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	//    drains is bounded by the housekeeping finalizing sweep.
 	willSpawnSummary := len(textChunks) > 0
 	willSpawnQuestion := willSpawnSummary && kb.NeedsEmbeddingModel() &&
-		eff.QuestionGenerationConfig.Enabled
+		eff.QuestionGenerationConfig.EffectiveCount() > 0
 	willSpawnWiki := kb.IndexingStrategy.WikiEnabled && len(textChunks) > 0
 
 	// Question generation now fans out one subtask per plain text chunk
@@ -594,17 +594,11 @@ func (s *KnowledgePostProcessService) enqueueQuestionGenerationTasks(
 	if s.taskEnqueuer == nil || len(questionChunks) == 0 {
 		return 0
 	}
-	if !qg.Enabled {
+	if qg.EffectiveCount() == 0 {
 		return 0
 	}
 
-	questionCount := qg.QuestionCount
-	if questionCount <= 0 {
-		questionCount = 3
-	}
-	if questionCount > 10 {
-		questionCount = 10
-	}
+	questionCount := qg.EffectiveCount()
 
 	total := len(questionChunks)
 	enqueued := 0

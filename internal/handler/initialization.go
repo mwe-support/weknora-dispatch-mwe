@@ -142,7 +142,7 @@ type KBModelConfigRequest struct {
 	// 问题生成配置
 	QuestionGeneration struct {
 		Enabled            bool   `json:"enabled"`
-		QuestionCount      int    `json:"questionCount"`
+		QuestionCount      int    `json:"questionCount" binding:"gte=0,lte=10"`
 		CustomInstructions string `json:"customInstructions"`
 	} `json:"questionGeneration"`
 }
@@ -217,7 +217,7 @@ type InitializationRequest struct {
 
 	QuestionGeneration struct {
 		Enabled       bool `json:"enabled"`
-		QuestionCount int  `json:"questionCount"`
+		QuestionCount int  `json:"questionCount" binding:"gte=0,lte=10"`
 	} `json:"questionGeneration"`
 }
 
@@ -443,14 +443,8 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	}
 
 	// 更新问题生成配置
-	if req.QuestionGeneration.Enabled {
+	if req.QuestionGeneration.Enabled && req.QuestionGeneration.QuestionCount > 0 {
 		questionCount := req.QuestionGeneration.QuestionCount
-		if questionCount <= 0 {
-			questionCount = 3
-		}
-		if questionCount > 10 {
-			questionCount = 10
-		}
 		kb.QuestionGenerationConfig = &types.QuestionGenerationConfig{
 			Enabled:            true,
 			QuestionCount:      questionCount,
@@ -1599,13 +1593,14 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 
 	if kb.QuestionGenerationConfig != nil {
 		config["questionGeneration"] = map[string]interface{}{
-			"enabled":            kb.QuestionGenerationConfig.Enabled,
-			"questionCount":      kb.QuestionGenerationConfig.QuestionCount,
+			"enabled":            kb.QuestionGenerationConfig.EffectiveCount() > 0,
+			"questionCount":      kb.QuestionGenerationConfig.EffectiveCount(),
 			"customInstructions": kb.QuestionGenerationConfig.CustomInstructions,
 		}
 	} else {
 		config["questionGeneration"] = map[string]interface{}{
-			"enabled": false,
+			"enabled":       false,
+			"questionCount": 0,
 		}
 	}
 

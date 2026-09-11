@@ -89,6 +89,7 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 
 	// Match KnowledgeBase.IsGraphEnabled: graph fan-out requires extract to be on.
 	eff.GraphEnabled = eff.GraphEnabled && eff.ExtractConfig.Enabled
+	eff.QuestionGenerationConfig.Enabled = eff.QuestionGenerationConfig.EffectiveCount() > 0
 
 	return eff
 }
@@ -236,7 +237,9 @@ func defaultQuestionGenerationConfig(kb *types.KnowledgeBase) types.QuestionGene
 	if kb == nil || kb.QuestionGenerationConfig == nil {
 		return types.QuestionGenerationConfig{}
 	}
-	return *kb.QuestionGenerationConfig
+	config := *kb.QuestionGenerationConfig
+	config.Enabled = config.EffectiveCount() > 0
+	return config
 }
 
 func derefExtractConfig(cfg *types.ExtractConfig) types.ExtractConfig {

@@ -517,12 +517,23 @@ func (c VLMConfig) IsEnabled() bool {
 // These generated questions will be indexed separately to improve recall
 type QuestionGenerationConfig struct {
 	Enabled bool `yaml:"enabled"  json:"enabled"`
-	// Number of questions to generate per chunk (default: 3, max: 10)
-	QuestionCount int `yaml:"question_count" json:"question_count"`
+	// Number of questions per chunk. Zero disables generation (default: 0, max: 10).
+	QuestionCount int `yaml:"question_count" json:"question_count" binding:"gte=0,lte=10"`
 	// CustomInstructions describes the intended audience or question style.
 	// It is appended to the stable system question-generation template.
 	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty"`
 }
+
+// EffectiveCount preserves an explicit disabled flag and never turns zero into
+// an implicit model request. Legacy oversized payloads remain capped at ten.
+func (c *QuestionGenerationConfig) EffectiveCount() int {
+	if c == nil || !c.Enabled || c.QuestionCount <= 0 {
+		return 0
+	}
+	return min(c.QuestionCount, 10)
+}
+
+const QuestionDefaultsMigrationKey = "mwe.migration.question_defaults_zero.v1"
 
 // Value implements the driver.Valuer interface
 func (c QuestionGenerationConfig) Value() (driver.Value, error) {

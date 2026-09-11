@@ -62,7 +62,7 @@ func (e *processingDocumentExecution) generateChunkQuestions(ctx context.Context
 		return types.ProcessingOutcome{}, errors.New("QUESTION_INPUT_INVALID")
 	}
 	cfg := e.kb.QuestionGenerationConfig
-	if cfg == nil || !cfg.Enabled || e.kb.SummaryModelID == "" {
+	if cfg.EffectiveCount() == 0 || e.kb.SummaryModelID == "" {
 		return types.ProcessingOutcome{}, errors.New("QUESTION_CONFIGURATION_INVALID")
 	}
 	chunks, err := e.indexChunks(ctx, "chunk")
@@ -123,11 +123,7 @@ func (e *processingDocumentExecution) generateChunkQuestions(ctx context.Context
 		data, _ := json.Marshal(infos[c.ID])
 		return searchutil.EnrichContentWithImageInfo(c.Content, string(data))
 	}
-	count := cfg.QuestionCount
-	if count <= 0 {
-		count = 3
-	}
-	count = min(count, 10)
+	count := cfg.EffectiveCount()
 	var questions []string
 	data, _, _, reused, err := e.reusableBytes(ctx, "question")
 	if err != nil {
