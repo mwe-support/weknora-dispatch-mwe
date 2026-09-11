@@ -22,14 +22,15 @@ import (
 )
 
 type ProcessingDocumentSpec struct {
-	FileID       string                       `json:"file_id"`
-	Kind         string                       `json:"kind"`
-	Title        string                       `json:"title"`
-	FolderPath   string                       `json:"folder_path"`
-	URL          string                       `json:"url"`
-	Language     string                       `json:"language"`
-	Resource     *tencentdocs.NativeScanEntry `json:"resource,omitempty"`
-	RevisionMode string                       `json:"revision_mode,omitempty"`
+	FileID           string                       `json:"file_id"`
+	Kind             string                       `json:"kind"`
+	Title            string                       `json:"title"`
+	FolderPath       string                       `json:"folder_path"`
+	URL              string                       `json:"url"`
+	Language         string                       `json:"language"`
+	Resource         *tencentdocs.NativeScanEntry `json:"resource,omitempty"`
+	RevisionMode     string                       `json:"revision_mode,omitempty"`
+	IdentityRevision string                       `json:"identity_revision,omitempty"`
 }
 
 // The version changes when parser/normalizer behavior changes. App prompts and
@@ -186,6 +187,28 @@ func (e *processingDocumentExecution) execute(ctx context.Context) (types.Proces
 			return types.ProcessingOutcome{}, err
 		}
 		defer client.Close()
+		if e.document.Kind == "doc" && e.document.RevisionMode == "export_snapshot" {
+			verify := func(ctx context.Context) error {
+				response, err := client.ReadNative(tencentdocs.WithManagedRetries(ctx), "manage.query_file_info", map[string]interface{}{"file_id": e.document.FileID})
+				if err != nil {
+					return err
+				}
+				var metadata tencentdocs.FileInfo
+				if response == nil || json.Unmarshal(response.Data, &metadata) != nil || metadata.ID != e.document.FileID || metadata.Type != "doc" || metadata.Status != "normal" || metadata.IsFolder || processingDOCIdentity(metadata) != e.document.IdentityRevision {
+					return errors.New("SOURCE_CHANGED_DURING_READ")
+				}
+				return nil
+			}
+			if e.lease.Step.Stage != "native_read" {
+				return e.exportStage(ctx, client, verify)
+			}
+			if err := verify(ctx); err != nil {
+				return types.ProcessingOutcome{}, err
+			}
+			// This confirms identity, not body coverage. DOCX inventory, parser
+			// coverage and assets still gate publication of this export snapshot.
+			return e.success(ctx, "native_snapshot", tencentdocs.NativeSnapshot{FileID: e.document.FileID, Kind: "doc", RevisionKey: e.lease.Job.SourceRevision, CoverageComplete: true, RequiresExport: true})
+		}
 		if e.document.Kind == "resource" {
 			if e.document.Resource == nil || e.document.Resource.FileID != e.document.FileID || e.document.Resource.ExternalID != e.lease.Job.ExternalID || e.document.Resource.Listing == nil || !slices.Contains(configuration.ResourceIDs, e.document.Resource.Listing.ResourceID) {
 				return types.ProcessingOutcome{}, errors.New("RESOURCE_LISTING_PROOF_REQUIRED")

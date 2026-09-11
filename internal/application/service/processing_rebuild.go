@@ -50,7 +50,7 @@ func RebuildProcessingVersion(ctx context.Context, knowledge interfaces.Knowledg
 	if err != nil {
 		return nil, err
 	}
-	if document.Kind == "resource" {
+	if document.Kind == "resource" || document.RevisionMode == "export_snapshot" {
 		steps, err := repo.ListSteps(ctx, tenant, id)
 		if err != nil {
 			return nil, err

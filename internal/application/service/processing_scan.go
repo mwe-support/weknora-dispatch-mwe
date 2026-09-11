@@ -146,7 +146,8 @@ func (e *processingDocumentExecution) scanDocument(ctx context.Context, read ten
 		}
 		return response, err
 	})
-	if err != nil {
+	versionlessDOC := info.Type == "doc" && errors.Is(err, tencentdocs.ErrDOCRevisionUnavailable)
+	if err != nil && !versionlessDOC {
 		return types.ProcessingOutcome{}, err
 	}
 	if latest.ID != info.ID || latest.Type != info.Type {
@@ -165,7 +166,14 @@ func (e *processingDocumentExecution) scanDocument(ctx context.Context, read ten
 		parsed.RawQuery, parsed.Fragment = query.Encode(), ""
 		sourceURL = parsed.String()
 	}
-	metadata, _ := json.Marshal(ProcessingDocumentSpec{FileID: entry.FileID, Kind: info.Type, Title: latest.Title, FolderPath: entry.FolderPath, URL: sourceURL})
+	document := ProcessingDocumentSpec{FileID: entry.FileID, Kind: info.Type, Title: latest.Title, FolderPath: entry.FolderPath, URL: sourceURL}
+	if versionlessDOC {
+		// Fresh blank DOCs omit the provider version. Do not infer a stable
+		// content revision from mtime: export once per scan and hash full bytes.
+		document.RevisionMode, document.IdentityRevision = "export_snapshot", processingDOCIdentity(latest)
+		revision = processingFingerprint("doc-export-snapshot", e.lease.Job.OriginRunID, e.lease.Job.ID, document.IdentityRevision)
+	}
+	metadata, _ := json.Marshal(document)
 	outcome, err := e.success(ctx, "scan_document", map[string]string{"external_id": entry.ExternalID, "revision": revision})
 	if err != nil {
 		return outcome, err
@@ -173,6 +181,10 @@ func (e *processingDocumentExecution) scanDocument(ctx context.Context, read ten
 	outcome.AdmitDocuments = []types.ProcessingAdmission{{Job: types.ProcessingJob{Kind: types.ProcessingJobDocument, TenantID: e.lease.Job.TenantID, KnowledgeBaseID: e.lease.Job.KnowledgeBaseID, DataSourceID: e.lease.Job.DataSourceID,
 		ExternalID: entry.ExternalID, SourceRevision: revision, SourceDigest: fmt.Sprintf("%x", sha256.Sum256(metadata)), PipelineFingerprint: e.lease.Job.PipelineFingerprint, Metadata: metadata}, Steps: plan}}
 	return outcome, nil
+}
+
+func processingDOCIdentity(metadata tencentdocs.FileInfo) string {
+	return processingFingerprint(metadata.ID, metadata.Type, metadata.Title, metadata.ModifiedAt)
 }
 
 func (e *processingDocumentExecution) scanResource(ctx context.Context, entry tencentdocs.NativeScanEntry, read tencentdocs.NativeScanReadFunc) (types.ProcessingOutcome, error) {

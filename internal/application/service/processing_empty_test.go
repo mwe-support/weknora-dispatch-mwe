@@ -1,6 +1,8 @@
 package service
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"testing"
@@ -11,6 +13,52 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestProcessingVerifiedEmptyDOCXBypassesRejectingParser(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", "synthetic-32-byte-key-for-tests!")
+	makeDOCX := func(body string) []byte {
+		var b bytes.Buffer
+		z := zip.NewWriter(&b)
+		w, err := z.Create("word/document.xml")
+		require.NoError(t, err)
+		_, err = w.Write([]byte(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>` + body + `</w:body></w:document>`))
+		require.NoError(t, err)
+		require.NoError(t, z.Close())
+		return b.Bytes()
+	}
+	data := makeDOCX(`<w:p><w:pPr><w:spacing w:after="0"/></w:pPr></w:p><w:sectPr/>`)
+	runs, images, err := processingDOCXInventory(data)
+	require.NoError(t, err)
+	require.Empty(t, runs)
+	require.Zero(t, images)
+	require.True(t, processingDOCXIsEmpty(data))
+	for _, body := range []string{`<w:p><w:r><w:t>text</w:t></w:r></w:p>`, `<w:p><w:r><w:drawing/></w:r></w:p>`, `<w:tbl/>`, `<w:p><w:r><w:br/></w:r></w:p>`} {
+		require.False(t, processingDOCXIsEmpty(makeDOCX(body)), body)
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	job := types.ProcessingJob{ID: "empty-job", TenantID: 1, KnowledgeBaseID: "kb", DataSourceID: "source", Generation: 1}
+	e := processingDocumentExecution{lease: types.ProcessingLease{Job: job, Step: types.ProcessingStep{ID: "parse", JobID: job.ID, Stage: "parse", UnitKey: "body", Attempt: 1, InputFingerprint: "parse"}},
+		artifacts: NewProcessingArtifacts(files.NewLocalFileService(t.TempDir(), ""), nil), document: ProcessingDocumentSpec{Kind: "doc"}}
+	receipt, _ := json.Marshal(processingExportReceipt{FileName: "source.docx"})
+	for _, dependency := range []struct {
+		stage, kind string
+		body        []byte
+	}{{"download", "source_file", data}, {"normalize", "normalize", receipt}} {
+		step := types.ProcessingStep{ID: dependency.stage, JobID: job.ID, Stage: dependency.stage, UnitKey: "body", Attempt: 1, InputFingerprint: dependency.stage, Status: types.ProcessingSucceeded}
+		step.OutputManifestRef, step.OutputDigest, err = e.artifacts.Save(ctx, job, step, dependency.kind, dependency.body)
+		require.NoError(t, err)
+		e.steps = append(e.steps, step)
+	}
+	out, err := e.parseExport(ctx) // No reader configured: a parser call would fail.
+	require.NoError(t, err)
+	require.Equal(t, types.ProcessingSucceeded, out.Status)
+	parsedData, err := e.artifacts.Read(ctx, job, e.lease.Step, "parse", out.OutputManifestRef, out.OutputDigest)
+	require.NoError(t, err)
+	var parsed processingParsed
+	require.NoError(t, json.Unmarshal(parsedData, &parsed))
+	require.Empty(t, parsed.MarkdownContent)
+	require.Equal(t, "verified_empty_docx", parsed.Metadata["parser_engine"])
+}
 
 func TestProcessingVerifiedEmptySkipsOnlyFirstSourceVersion(t *testing.T) {
 	require.NoError(t, validateProcessingDOCXText(map[string]int{}, 0, &types.ReadResult{}), "a verified empty DOCX must reach the shared empty-source policy")

@@ -8,6 +8,8 @@ import (
 	"fmt"
 )
 
+var ErrDOCRevisionUnavailable = errors.New("DOC_REVISION_UNAVAILABLE")
+
 // ProbeNativeRevision performs only fresh, bounded reads. DOC metadata mtime
 // was observed unchanged after a confirmed edit, so its document version is
 // mandatory. This key is also reconstructed from the actual captured pages.
@@ -69,7 +71,7 @@ func nativeRevisionKey(metadata FileInfo, kind string, detail json.RawMessage) (
 			return "", err
 		}
 		if len(page.Version) == 0 || string(page.Version) == "null" || string(page.Version) == `""` {
-			return "", errors.New("DOC_REVISION_UNAVAILABLE")
+			return "", ErrDOCRevisionUnavailable
 		}
 		version = page.Version
 	case "smartcanvas":

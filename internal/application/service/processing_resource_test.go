@@ -53,4 +53,21 @@ func TestProcessingResourceAdmitsFullExportWithoutNativeMetadata(t *testing.T) {
 	require.NotEqual(t, first.Job.SourceRevision, again.AdmitDocuments[0].Job.SourceRevision)
 	_, err = e.scanDocument(ctx, read)
 	require.Error(t, err, "metadata errors alone cannot authorize export")
+	versionless := func(_ context.Context, tool string, _ map[string]interface{}, _ bool) (*tencentdocs.NativeResponse, error) {
+		if tool == "manage.query_file_info" {
+			return &tencentdocs.NativeResponse{Data: json.RawMessage(`{"file_id":"pdf","title":"Blank DOC","type":"doc","status":"normal","last_modify_time":7391}`)}, nil
+		}
+		return &tencentdocs.NativeResponse{Data: json.RawMessage(`{"nodes":[{"paragraph_id":"title","type":"Title"}],"pagination":{"has_more":true,"total_nodes":2,"returned_nodes":1}}`)}, nil
+	}
+	blank, err := e.scanDocument(ctx, versionless)
+	require.NoError(t, err)
+	require.Len(t, blank.AdmitDocuments, 1)
+	require.NoError(t, json.Unmarshal(blank.AdmitDocuments[0].Job.Metadata, &document))
+	require.Equal(t, "doc", document.Kind)
+	require.Equal(t, "export_snapshot", document.RevisionMode)
+	require.Len(t, document.IdentityRevision, 64)
+	e.lease.Job.OriginRunID = "run3"
+	newBlank, err := e.scanDocument(ctx, versionless)
+	require.NoError(t, err)
+	require.NotEqual(t, blank.AdmitDocuments[0].Job.SourceRevision, newBlank.AdmitDocuments[0].Job.SourceRevision, "mtime without a provider version must not skip a later export")
 }

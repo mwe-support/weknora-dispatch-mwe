@@ -57,6 +57,14 @@ func (e *processingDocumentExecution) parseExport(ctx context.Context) (types.Pr
 	} else if ext == "pdf" && !bytes.HasPrefix(data, []byte("%PDF-")) {
 		return types.ProcessingOutcome{}, errors.New("PDF_HEADER_INVALID")
 	}
+	if ext == "docx" && len(textRuns) == 0 && images == 0 && processingDOCXIsEmpty(data) {
+		// Parsers can reject an empty document. Only a fully validated archive
+		// containing empty paragraphs and layout properties can bypass parsing.
+		return e.success(ctx, "parse", processingParsed{ReadResult: types.ReadResult{Metadata: map[string]string{
+			"parser_engine": "verified_empty_docx", "source_type": e.document.Kind,
+			"verified_export_text_runs": "0", "export_images": "0",
+		}}})
+	}
 	config := ResolveProcessConfig(e.kb, nil)
 	overrides := e.s.getParserEngineOverridesFromContext(ctx)
 	applyParserRuleOverrides(overrides, config.ChunkingConfig, ext)
@@ -186,6 +194,62 @@ func processingDOCXText(text string) string {
 		}
 		return r
 	}, html.UnescapeString(text))
+}
+
+// Called only after processingDOCXInventory has checked every archive stream.
+// Unrecognized content, including drawings and secondary stories, is not empty.
+func processingDOCXIsEmpty(data []byte) bool {
+	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return false
+	}
+	found := false
+	for _, file := range archive.File {
+		if strings.HasPrefix(file.Name, "word/header") || strings.HasPrefix(file.Name, "word/footer") ||
+			file.Name == "word/footnotes.xml" || file.Name == "word/endnotes.xml" || strings.HasPrefix(file.Name, "word/embeddings/") {
+			return false
+		}
+		if file.Name != "word/document.xml" {
+			continue
+		}
+		stream, err := file.Open()
+		if err != nil {
+			return false
+		}
+		defer stream.Close()
+		decoder := xml.NewDecoder(stream)
+		for {
+			token, err := decoder.Token()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return false
+			}
+			switch token := token.(type) {
+			case xml.CharData:
+				if strings.TrimSpace(string(token)) != "" {
+					return false
+				}
+			case xml.StartElement:
+				if token.Name.Space != "http://schemas.openxmlformats.org/wordprocessingml/2006/main" {
+					return false
+				}
+				switch token.Name.Local {
+				case "body":
+					found = true
+				case "document", "p", "r":
+				case "pPr", "rPr", "sectPr":
+					if decoder.Skip() != nil {
+						return false
+					}
+				default:
+					return false
+				}
+			}
+		}
+	}
+	return found
 }
 
 func validateProcessingDOCXText(textRuns map[string]int, images int, result *types.ReadResult) error {
