@@ -330,7 +330,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'mo
               <div class="row-tag-chips" :ref="(el: any) => setupTagChipsObserver(el, item.id, (item.tags || []).length)"
                 :class="{ 'is-clickable': canEdit }" @click.stop="canEdit && emit('tag-edit', item)">
                 <t-tag v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))" :key="tag.id" size="small"
-                  variant="light-outline" class="row-tag">
+                  variant="light-outline" class="row-tag" max-width="100%" :title="tag.name">
                   {{ tag.name }}
                 </t-tag>
                 <span class="row-tag-overflow">+{{ getOverflowCount(item.id, (item.tags || []).length) }}</span>
@@ -339,7 +339,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'mo
             <div v-else class="row-tag-chips" :ref="(el: any) => setupTagChipsObserver(el, item.id, (item.tags || []).length)"
               :class="{ 'is-clickable': canEdit }" @click.stop="canEdit && emit('tag-edit', item)">
               <t-tag v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))" :key="tag.id" size="small"
-                variant="light-outline" class="row-tag">
+                variant="light-outline" class="row-tag" max-width="100%" :title="tag.name">
                 {{ tag.name }}
               </t-tag>
             </div>
@@ -754,18 +754,14 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'mo
 }
 
 .row-tag {
+  min-width: 0;
   max-width: 100%;
-
-  :deep(.t-tag__text) {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 120px;
-    display: inline-block;
-  }
 }
 
 .row-tag-chips {
   display: inline-flex;
+  width: 100%;
+  min-width: 0;
   align-items: center;
   gap: 4px;
   flex-wrap: nowrap;
@@ -776,6 +772,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'mo
 }
 
 .row-tag-overflow {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
