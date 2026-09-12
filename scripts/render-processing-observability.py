@@ -172,7 +172,8 @@ def outputs():
     for id,x in [(6,0),(7,12)]:retained[id]['gridPos']={'h':8,'w':12,'x':x,'y':7};home['panels'].append(retained[id])
     for id,x in [(1,0),(2,12)]:retained[id]['gridPos']={'h':4,'w':12,'x':x,'y':15};home['panels'].append(retained[id])
     infra=[]; y=20
-    for group in [[14,15,16,17],[18,19],[8,20,21,22],[23],[13]]:
+    hardware_header = [[108,109]] if 108 in retained and 109 in retained else []
+    for group in hardware_header + [[14,15,16,17],[18,19],[8,20,21,22],[23],[13]]:
         for id in group:
             p=retained[id];p['gridPos']['y']=y;infra.append(p)
         y+=max(retained[id]['gridPos']['h'] for id in group)

@@ -685,6 +685,38 @@
       },
       "panels": [
         {
+          "id": 108,
+          "type": "marcusolsson-dynamictext-panel",
+          "title": "硬件读数的时间与口径",
+          "pluginVersion": "6.3.0",
+          "gridPos": {
+            "x": 0,
+            "y": 20,
+            "w": 16,
+            "h": 4
+          },
+          "options": {
+            "afterRender": "const button=context.element.querySelector(\".kb-current-time\");if(button&&!button.dataset.ready){button.dataset.ready=\"true\";button.addEventListener(\"click\",()=>context.grafana.locationService.partial({from:\"now-6h\",to:\"now\"}));}",
+            "content": "<div class=\"kb-time-help\">硬件卡片显示<strong>所选结束时刻</strong>的最近采样，固定历史范围不会随刷新前移。<br>GPU 约每 30 秒采样；CPU、网卡和磁盘曲线为 5 分钟平均。<button class=\"kb-current-time\" type=\"button\">返回当前 6 小时</button></div>",
+            "defaultContent": "<div class=\"kb-time-help\">硬件卡片显示<strong>所选结束时刻</strong>的最近采样，固定历史范围不会随刷新前移。<br>GPU 约每 30 秒采样；CPU、网卡和磁盘曲线为 5 分钟平均。<button class=\"kb-current-time\" type=\"button\">返回当前 6 小时</button></div>",
+            "editor": {
+              "format": "auto",
+              "height": 100,
+              "language": "html"
+            },
+            "editors": [
+              "default"
+            ],
+            "externalScripts": [],
+            "externalStyles": [],
+            "helpers": "",
+            "renderMode": "everyRow",
+            "styles": ".kb-time-help{line-height:1.7;padding:8px 12px}.kb-current-time{margin-left:12px;padding:5px 10px;border:1px solid #ff9830;border-radius:4px;background:transparent;color:inherit;cursor:pointer}",
+            "wrap": false
+          },
+          "targets": []
+        },
+        {
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -694,7 +726,59 @@
               "color": {
                 "mode": "palette-classic"
               },
-              "unit": "percent"
+              "unit": "dateTimeAsIso",
+              "noValue": "无新采样"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "x": 16,
+            "y": 20,
+            "w": 8,
+            "h": 4
+          },
+          "id": 109,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "vertical",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value_and_name",
+            "wideLayout": true
+          },
+          "pluginVersion": "13.1.0",
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "kb_gpu_sample_timestamp_seconds * 1000",
+              "instant": true,
+              "legendFormat": "GPU {{gpu}}",
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "GPU 采样时间",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "percent",
+              "noValue": "无新采样"
             },
             "overrides": []
           },
@@ -702,7 +786,7 @@
             "h": 6,
             "w": 6,
             "x": 0,
-            "y": 20
+            "y": 24
           },
           "id": 14,
           "options": {
@@ -731,8 +815,9 @@
               "refId": "A"
             }
           ],
-          "title": "实时 GPU 占用",
-          "type": "stat"
+          "title": "GPU 占用",
+          "type": "stat",
+          "description": "显示顶部时间范围结束时刻的最近有效采样。不是硬件直读；采样中断时不沿用过期值。"
         },
         {
           "datasource": {
@@ -744,7 +829,8 @@
               "color": {
                 "mode": "palette-classic"
               },
-              "unit": "percent"
+              "unit": "percent",
+              "noValue": "无新采样"
             },
             "overrides": []
           },
@@ -752,7 +838,7 @@
             "h": 6,
             "w": 6,
             "x": 6,
-            "y": 20
+            "y": 24
           },
           "id": 15,
           "options": {
@@ -781,8 +867,9 @@
               "refId": "A"
             }
           ],
-          "title": "实时 GPU 显存占用",
-          "type": "stat"
+          "title": "GPU 显存使用率",
+          "type": "stat",
+          "description": "显示顶部时间范围结束时刻的最近有效采样。不是硬件直读；采样中断时不沿用过期值。 显存使用量 / 显存总量，单位 %；nvidia-smi 的 MiB 已按 1024² 换算为字节。"
         },
         {
           "datasource": {
@@ -811,7 +898,8 @@
                   }
                 ]
               },
-              "unit": "celsius"
+              "unit": "celsius",
+              "noValue": "无新采样"
             },
             "overrides": []
           },
@@ -819,7 +907,7 @@
             "h": 6,
             "w": 6,
             "x": 12,
-            "y": 20
+            "y": 24
           },
           "id": 16,
           "options": {
@@ -848,8 +936,9 @@
               "refId": "A"
             }
           ],
-          "title": "实时 GPU 温度",
-          "type": "stat"
+          "title": "GPU 温度",
+          "type": "stat",
+          "description": "显示顶部时间范围结束时刻的最近有效采样。不是硬件直读；采样中断时不沿用过期值。"
         },
         {
           "datasource": {
@@ -861,7 +950,8 @@
               "color": {
                 "mode": "palette-classic"
               },
-              "unit": "watt"
+              "unit": "watt",
+              "noValue": "无新采样"
             },
             "overrides": []
           },
@@ -869,7 +959,7 @@
             "h": 6,
             "w": 6,
             "x": 18,
-            "y": 20
+            "y": 24
           },
           "id": 17,
           "options": {
@@ -898,8 +988,9 @@
               "refId": "A"
             }
           ],
-          "title": "实时 GPU 功耗",
-          "type": "stat"
+          "title": "GPU 功耗",
+          "type": "stat",
+          "description": "显示顶部时间范围结束时刻的最近有效采样。不是硬件直读；采样中断时不沿用过期值。"
         },
         {
           "datasource": {
@@ -953,7 +1044,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 26
+            "y": 30
           },
           "id": 18,
           "options": {
@@ -1069,7 +1160,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 26
+            "y": 30
           },
           "id": 19,
           "options": {
@@ -1158,7 +1249,7 @@
             "h": 8,
             "w": 6,
             "x": 0,
-            "y": 34
+            "y": 38
           },
           "id": 8,
           "options": {
@@ -1181,7 +1272,7 @@
             {
               "editorMode": "code",
               "expr": "100 - avg by (host) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100",
-              "legendFormat": "CPU 使用",
+              "legendFormat": "非空闲（含 I/O 等待）",
               "range": true,
               "refId": "A"
             },
@@ -1193,8 +1284,9 @@
               "refId": "B"
             }
           ],
-          "title": "CPU 趋势",
-          "type": "timeseries"
+          "title": "CPU 非空闲（5分钟平均）",
+          "type": "timeseries",
+          "description": "各逻辑核计数求平均，100% 表示全核非空闲；I/O 等待单列显示，不与第一条曲线相加。与 top 的瞬时读数可能不同。"
         },
         {
           "datasource": {
@@ -1247,7 +1339,7 @@
             "h": 8,
             "w": 6,
             "x": 6,
-            "y": 34
+            "y": 38
           },
           "id": 20,
           "options": {
@@ -1276,14 +1368,15 @@
             },
             {
               "editorMode": "code",
-              "expr": "100 * (1 - node_memory_SwapFree_bytes / clamp_min(node_memory_SwapTotal_bytes, 1))",
+              "expr": "100 * (1 - node_memory_SwapFree_bytes / clamp_min(node_memory_SwapTotal_bytes, 1)) * (node_memory_SwapTotal_bytes > bool 0)",
               "legendFormat": "Swap 使用",
               "range": true,
               "refId": "B"
             }
           ],
-          "title": "内存趋势",
-          "type": "timeseries"
+          "title": "内存与 Swap 使用率",
+          "type": "timeseries",
+          "description": "内存使用率 = (MemTotal − MemAvailable) / MemTotal。操作系统可用总量可能小于安装容量；无 Swap 时使用率为 0%。"
         },
         {
           "datasource": {
@@ -1336,7 +1429,7 @@
             "h": 8,
             "w": 6,
             "x": 12,
-            "y": 34
+            "y": 38
           },
           "id": 21,
           "options": {
@@ -1358,21 +1451,22 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "sum by (host) (rate(node_network_receive_bytes_total{device!~\"lo|veth.*|br-.*|docker.*\"}[5m]))",
-              "legendFormat": "接收",
+              "expr": "rate(node_network_receive_bytes_total{job=\"integrations/host_network\",device!~\"lo|veth.*|br-.*|docker.*\"}[5m])",
+              "legendFormat": "{{device}} 接收",
               "range": true,
               "refId": "A"
             },
             {
               "editorMode": "code",
-              "expr": "sum by (host) (rate(node_network_transmit_bytes_total{device!~\"lo|veth.*|br-.*|docker.*\"}[5m]))",
-              "legendFormat": "发送",
+              "expr": "rate(node_network_transmit_bytes_total{job=\"integrations/host_network\",device!~\"lo|veth.*|br-.*|docker.*\"}[5m])",
+              "legendFormat": "{{device}} 发送",
               "range": true,
               "refId": "B"
             }
           ],
-          "title": "网络吞吐趋势",
-          "type": "timeseries"
+          "title": "主机网卡吞吐（5分钟平均）",
+          "type": "timeseries",
+          "description": "来自主机 PID 1 的网络命名空间。按网卡分别显示，包含 VPN 接口；不把物理接口与 VPN 的同一份流量相加。单位字节/秒，乘 8 才是 bit/s。"
         },
         {
           "datasource": {
@@ -1425,7 +1519,7 @@
             "h": 8,
             "w": 6,
             "x": 18,
-            "y": 34
+            "y": 38
           },
           "id": 22,
           "options": {
@@ -1460,24 +1554,40 @@
               "refId": "B"
             }
           ],
-          "title": "磁盘 I/O 趋势",
-          "type": "timeseries"
+          "title": "磁盘吞吐（5分钟平均）",
+          "type": "timeseries",
+          "description": "各设备分别显示读写字节/秒，不是磁盘已用空间。md 是 RAID 逻辑设备，nvme/sd 是物理设备，不能相加当作总吞吐。"
         },
         {
           "gridPos": {
             "h": 2,
             "w": 24,
             "x": 0,
-            "y": 42
+            "y": 46
           },
           "id": 23,
           "options": {
-            "content": "<div style=\"display:flex;align-items:center;gap:8px;height:100%;overflow-x:auto;white-space:nowrap;padding:0 12px\"><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-app\">App</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-docreader\">DocReader</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-frontend\">Frontend</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-mcp\">MCP</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-postgres\">PostgreSQL</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-redis\">Redis</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=WeKnora-minio\">MinIO</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-qdrant\">Qdrant</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-mineru-api\">MinerU</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-embed-text\">Embedding</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-rerank-text\">Reranker</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-q4-gpu0\">Q4‑GPU0</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-q4-gpu1\">Q4‑GPU1</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-q4-router\">Q4‑Router</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-alloy\">Alloy</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-grafana\">Grafana</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-loki\">Loki</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-prometheus\">Prometheus</a><a style=\"padding:12px 8px;text-decoration:none;flex:0 0 auto;white-space:nowrap\" href=\"/d/mwe-kb-observability-v1/088cff1?orgId=1&from=${__from}&to=${__to}&var-doc_page=${doc_page}&var-sync_page=${sync_page}&var-dead_page=${dead_page}&var-log_container=kb-observability-capability-probe\">Probe</a></div>",
-            "mode": "html"
+            "afterRender": "const root=context.element.querySelector(\".kb-log-tabs\");\nif(!root||root.dataset.ready===\"true\")return;\nroot.dataset.ready=\"true\";\nconst selected=context.grafana.replaceVariables(\"${log_container}\");\nfor(const button of root.querySelectorAll(\"button[data-container]\")){\n  button.setAttribute(\"aria-pressed\",String(button.dataset.container===selected));\n  button.addEventListener(\"click\",()=>{\n    for(const sibling of root.querySelectorAll(\"button[data-container]\"))sibling.setAttribute(\"aria-pressed\",String(sibling===button));\n    context.grafana.locationService.partial({\"var-log_container\":button.dataset.container});\n  });\n}",
+            "content": "<div class=\"kb-log-tabs\"><button type=\"button\" data-container=\"WeKnora-app\" aria-label=\"查看 App 日志\">App</button><button type=\"button\" data-container=\"WeKnora-docreader\" aria-label=\"查看 DocReader 日志\">DocReader</button><button type=\"button\" data-container=\"WeKnora-frontend\" aria-label=\"查看 Frontend 日志\">Frontend</button><button type=\"button\" data-container=\"WeKnora-mcp\" aria-label=\"查看 MCP 日志\">MCP</button><button type=\"button\" data-container=\"WeKnora-postgres\" aria-label=\"查看 PostgreSQL 日志\">PostgreSQL</button><button type=\"button\" data-container=\"WeKnora-redis\" aria-label=\"查看 Redis 日志\">Redis</button><button type=\"button\" data-container=\"WeKnora-minio\" aria-label=\"查看 MinIO 日志\">MinIO</button><button type=\"button\" data-container=\"kb-qdrant\" aria-label=\"查看 Qdrant 日志\">Qdrant</button><button type=\"button\" data-container=\"kb-mineru-api\" aria-label=\"查看 MinerU 日志\">MinerU</button><button type=\"button\" data-container=\"kb-embed-text\" aria-label=\"查看 Embedding 日志\">Embedding</button><button type=\"button\" data-container=\"kb-rerank-text\" aria-label=\"查看 Reranker 日志\">Reranker</button><button type=\"button\" data-container=\"kb-q4-gpu0\" aria-label=\"查看 Q4‑GPU0 日志\">Q4‑GPU0</button><button type=\"button\" data-container=\"kb-q4-gpu1\" aria-label=\"查看 Q4‑GPU1 日志\">Q4‑GPU1</button><button type=\"button\" data-container=\"kb-q4-router\" aria-label=\"查看 Q4‑Router 日志\">Q4‑Router</button><button type=\"button\" data-container=\"kb-observability-alloy\" aria-label=\"查看 Alloy 日志\">Alloy</button><button type=\"button\" data-container=\"kb-observability-grafana\" aria-label=\"查看 Grafana 日志\">Grafana</button><button type=\"button\" data-container=\"kb-observability-loki\" aria-label=\"查看 Loki 日志\">Loki</button><button type=\"button\" data-container=\"kb-observability-prometheus\" aria-label=\"查看 Prometheus 日志\">Prometheus</button><button type=\"button\" data-container=\"kb-observability-capability-probe\" aria-label=\"查看 Probe 日志\">Probe</button></div>",
+            "defaultContent": "<div class=\"kb-log-tabs\"><button type=\"button\" data-container=\"WeKnora-app\" aria-label=\"查看 App 日志\">App</button><button type=\"button\" data-container=\"WeKnora-docreader\" aria-label=\"查看 DocReader 日志\">DocReader</button><button type=\"button\" data-container=\"WeKnora-frontend\" aria-label=\"查看 Frontend 日志\">Frontend</button><button type=\"button\" data-container=\"WeKnora-mcp\" aria-label=\"查看 MCP 日志\">MCP</button><button type=\"button\" data-container=\"WeKnora-postgres\" aria-label=\"查看 PostgreSQL 日志\">PostgreSQL</button><button type=\"button\" data-container=\"WeKnora-redis\" aria-label=\"查看 Redis 日志\">Redis</button><button type=\"button\" data-container=\"WeKnora-minio\" aria-label=\"查看 MinIO 日志\">MinIO</button><button type=\"button\" data-container=\"kb-qdrant\" aria-label=\"查看 Qdrant 日志\">Qdrant</button><button type=\"button\" data-container=\"kb-mineru-api\" aria-label=\"查看 MinerU 日志\">MinerU</button><button type=\"button\" data-container=\"kb-embed-text\" aria-label=\"查看 Embedding 日志\">Embedding</button><button type=\"button\" data-container=\"kb-rerank-text\" aria-label=\"查看 Reranker 日志\">Reranker</button><button type=\"button\" data-container=\"kb-q4-gpu0\" aria-label=\"查看 Q4‑GPU0 日志\">Q4‑GPU0</button><button type=\"button\" data-container=\"kb-q4-gpu1\" aria-label=\"查看 Q4‑GPU1 日志\">Q4‑GPU1</button><button type=\"button\" data-container=\"kb-q4-router\" aria-label=\"查看 Q4‑Router 日志\">Q4‑Router</button><button type=\"button\" data-container=\"kb-observability-alloy\" aria-label=\"查看 Alloy 日志\">Alloy</button><button type=\"button\" data-container=\"kb-observability-grafana\" aria-label=\"查看 Grafana 日志\">Grafana</button><button type=\"button\" data-container=\"kb-observability-loki\" aria-label=\"查看 Loki 日志\">Loki</button><button type=\"button\" data-container=\"kb-observability-prometheus\" aria-label=\"查看 Prometheus 日志\">Prometheus</button><button type=\"button\" data-container=\"kb-observability-capability-probe\" aria-label=\"查看 Probe 日志\">Probe</button></div>",
+            "editor": {
+              "format": "auto",
+              "height": 100,
+              "language": "html"
+            },
+            "editors": [
+              "default"
+            ],
+            "externalScripts": [],
+            "externalStyles": [],
+            "helpers": "",
+            "renderMode": "everyRow",
+            "styles": ".kb-log-tabs{display:flex;gap:8px;align-items:center;height:100%;overflow-x:auto;white-space:nowrap;padding:0 12px}.kb-log-tabs button{color:inherit;background:transparent;border:1px solid #6b7280;border-radius:4px;padding:7px 10px;cursor:pointer;white-space:nowrap}.kb-log-tabs button[aria-pressed=\"true\"]{border-color:#ff9830;color:#ffb357}",
+            "wrap": false
           },
-          "pluginVersion": "13.1.0",
+          "pluginVersion": "6.3.0",
           "transparent": true,
-          "type": "text"
+          "type": "marcusolsson-dynamictext-panel"
         },
         {
           "datasource": {
@@ -1489,7 +1599,7 @@
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 44
+            "y": 48
           },
           "id": 13,
           "options": {
@@ -2397,6 +2507,6 @@
   "timezone": "browser",
   "title": "WeKnora · 运行总览",
   "uid": "mwe-kb-observability-v1",
-  "version": 18,
+  "version": 19,
   "weekStart": "monday"
 }
