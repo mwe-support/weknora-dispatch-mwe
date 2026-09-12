@@ -186,11 +186,15 @@ func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64, schedule s
 
 	// Layer 2: deterministic TaskID — all instances in the same minute produce the same ID
 	taskID := fmt.Sprintf("dssync:%s:%s", dataSourceID, time.Now().UTC().Truncate(time.Minute).Format("200601021504"))
+	syncTimeout := 2 * time.Hour
+	if ds.TencentFileSync {
+		syncTimeout = types.TencentSourceTaskTimeout
+	}
 
 	_, err = s.taskEnqueuer.Enqueue(task,
 		asynq.Queue(types.QueueSync),
 		asynq.MaxRetry(5),
-		asynq.Timeout(2*time.Hour),
+		asynq.Timeout(syncTimeout),
 		asynq.TaskID(taskID),
 	)
 	if err != nil {

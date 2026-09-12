@@ -26,6 +26,7 @@ type KnowledgePostProcessService struct {
 	pendingRepo   interfaces.TaskPendingOpsRepository
 	redisClient   *redis.Client
 	spanTracker   SpanTracker
+	sourceService interfaces.DataSourceService
 }
 
 func NewKnowledgePostProcessService(
@@ -36,6 +37,7 @@ func NewKnowledgePostProcessService(
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	redisClient *redis.Client,
 	spanTracker SpanTracker,
+	sourceService interfaces.DataSourceService,
 ) interfaces.TaskHandler {
 	return &KnowledgePostProcessService{
 		knowledgeRepo: knowledgeRepo,
@@ -45,6 +47,7 @@ func NewKnowledgePostProcessService(
 		pendingRepo:   pendingRepo,
 		redisClient:   redisClient,
 		spanTracker:   spanTracker,
+		sourceService: sourceService,
 	}
 }
 
@@ -139,6 +142,23 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		s.tracker().SkipSpan(ctx, postSpan,
 			"knowledge "+knowledge.ParseStatus+" before postprocess started")
 		return nil
+	}
+	if knowledge.GetMetadata()["datasource_async_publish"] == "true" {
+		if s.sourceService == nil {
+			return errors.New("source publication service unavailable")
+		}
+		published, err := s.sourceService.PublishSourceCandidate(ctx, payload.TenantID, knowledge.ID)
+		if err != nil {
+			return err
+		}
+		if !published {
+			s.tracker().SkipSpan(ctx, postSpan, "source candidate superseded or unavailable")
+			return nil
+		}
+		knowledge, err = s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, knowledge.ID)
+		if err != nil {
+			return err
+		}
 	}
 	if knowledge.IsDataSourceCandidate() && knowledge.ParseStatus == types.ParseStatusProcessing {
 		if knowledge.GetMetadata()["datasource_processing_failed"] != "" {

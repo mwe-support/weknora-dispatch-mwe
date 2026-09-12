@@ -49,13 +49,14 @@ func (r *candidateRepo) UpdateKnowledge(_ context.Context, k *types.Knowledge) e
 
 type candidateKS struct {
 	interfaces.KnowledgeService
-	r         *candidateRepo
-	createErr error
-	status    string
-	creates   int
-	ready     bool
-	failure   string
-	reparses  int
+	r             *candidateRepo
+	createErr     error
+	status        string
+	creates       int
+	ready         bool
+	failure       string
+	reparses      int
+	requireTenant bool
 }
 
 func (k *candidateKS) GetRepository() interfaces.KnowledgeRepository { return k.r }
@@ -75,7 +76,13 @@ func (k *candidateKS) CreateKnowledgeFromFile(_ context.Context, kb string, _ *m
 	k.r.rows[n.ID] = n
 	return n, nil
 }
-func (k *candidateKS) DeleteKnowledge(_ context.Context, id string) error {
+func (k *candidateKS) DeleteKnowledge(ctx context.Context, id string) error {
+	if k.requireTenant {
+		tenant, ok := types.TenantInfoFromContext(ctx)
+		if !ok || tenant.ID != 1 || ctx.Value(types.TenantIDContextKey) != uint64(1) {
+			return errors.New("tenant info not found in cleanup context")
+		}
+	}
 	k.r.events = append(k.r.events, "delete:"+id)
 	delete(k.r.rows, id)
 	return nil
@@ -85,6 +92,28 @@ func candidateFixture() (*DataSourceService, *candidateKS, *types.DataSource, *t
 	k := &candidateKS{r: r, status: "completed"}
 	return &DataSourceService{knowledgeService: k}, k, &types.DataSource{ID: "ds", TenantID: 1, KnowledgeBaseID: "kb", Type: types.ConnectorTypeTencentDocs}, &types.FetchedItem{ExternalID: "node", FileName: "doc.md", Content: []byte("new body")}
 }
+
+func (r *candidateRepo) PublishSourceCandidate(ctx context.Context, _ *types.DataSource, id string) (bool, error) {
+	k := r.rows[id]
+	m := k.GetMetadata()
+	delete(m, "datasource_candidate")
+	k.Metadata, _ = json.Marshal(m)
+	return true, r.UpdateKnowledge(ctx, k)
+}
+
+func TestTencentSourcePublicationRestoresTenantForCleanup(t *testing.T) {
+	s, k, ds, item := candidateFixture()
+	ds.TencentFileSync = true
+	s.dsRepo = &prepushSourceRepo{row: ds}
+	s.tenantRepo = &summaryRefreshTenantRepo{tenant: &types.Tenant{ID: 1}}
+	k.requireTenant = true
+	_, err := s.ingestItem(context.Background(), ds, item, nil)
+	require.NoError(t, err)
+	published, err := s.PublishSourceCandidate(context.Background(), 1, "candidate")
+	require.NoError(t, err)
+	require.True(t, published)
+	require.Equal(t, []string{"publish:candidate", "delete:old"}, k.r.events)
+}
 func TestTencentCandidatePreservesOldOnCreateFailure(t *testing.T) {
 	s, k, ds, item := candidateFixture()
 	k.createErr = errors.New("storage unavailable")
@@ -92,6 +121,21 @@ func TestTencentCandidatePreservesOldOnCreateFailure(t *testing.T) {
 	require.Error(t, err)
 	require.NotNil(t, k.r.rows["old"])
 	require.Empty(t, k.r.events)
+}
+
+func TestTencentCandidateFileSyncReturnsAfterSubmission(t *testing.T) {
+	s, k, ds, item := candidateFixture()
+	ds.TencentFileSync = true
+	k.status = types.ParseStatusPending
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := s.ingestItem(ctx, ds, item, nil)
+	require.NoError(t, err, "normal source fetch must not wait for parsing/embedding/summary")
+	require.Equal(t, 1, k.creates)
+	require.True(t, k.r.rows["candidate"].IsDataSourceCandidate())
+	require.Equal(t, "true", k.r.rows["candidate"].GetMetadata()["datasource_async_publish"])
+	require.NotNil(t, k.r.rows["old"])
+	require.Empty(t, k.r.events, "old content stays published until postprocess confirms readiness")
 }
 func TestTencentCandidateRejectsFailedEnqueue(t *testing.T) {
 	s, k, ds, item := candidateFixture()

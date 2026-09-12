@@ -78,6 +78,9 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 		return nil, datasource.ErrDataSourceInvalid
 	}
 	ds.LastSyncCursor, ds.LastSyncResult, ds.LastSyncAt = nil, nil, nil
+	if ds.Type == types.ConnectorTypeTencentDocs {
+		ds.TencentFileSync = true
+	}
 
 	// Validate knowledge base exists
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, ds.KnowledgeBaseID)
@@ -477,7 +480,7 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 	if err != nil {
 		return nil, err
 	}
-	if ProcessingLifecycleEnabled(ds) && ds.Status == types.DataSourceStatusPaused {
+	if (ProcessingLifecycleEnabled(ds) || ds.TencentFileSync) && ds.Status == types.DataSourceStatusPaused {
 		return nil, datasource.ErrDataSourceNotActive
 	}
 
@@ -512,8 +515,12 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 	langfuse.InjectTracing(ctx, payload)
 
 	payloadJSON, _ := json.Marshal(payload)
+	syncTimeout := 2 * time.Hour
+	if ds.TencentFileSync {
+		syncTimeout = types.TencentSourceTaskTimeout
+	}
 	task := asynq.NewTask(types.TypeDataSourceSync, payloadJSON,
-		asynq.Queue(types.QueueSync), asynq.MaxRetry(5), asynq.Timeout(2*time.Hour))
+		asynq.Queue(types.QueueSync), asynq.MaxRetry(5), asynq.Timeout(syncTimeout))
 
 	info, err := s.taskEnqueuer.Enqueue(task)
 	if err != nil {
@@ -613,7 +620,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) (
 		if errors.Is(retErr, datasource.ErrInvalidCredentials) || errors.Is(retErr, datasource.ErrInvalidConfig) || errors.Is(retErr, datasource.ErrDataSourceNotActive) {
 			retErr = fmt.Errorf("%w: %w", retErr, asynq.SkipRetry)
 		} else if tencentDocs && retErr != nil && !errors.Is(retErr, asynq.SkipRetry) {
-			retErr = fmt.Errorf("%w: %w", datasource.ErrTencentDocsSyncRetry, retErr)
+			// Individual files own their single compensation attempt. Never
+			// replay a complete source pass because one file or directory failed.
+			retErr = fmt.Errorf("%w: %w", retErr, asynq.SkipRetry)
 		}
 	}()
 	var payload types.DataSourceSyncPayload
@@ -654,6 +663,19 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) (
 	}
 	if ds.TenantID != payload.TenantID || syncLog.TenantID != ds.TenantID || syncLog.DataSourceID != ds.ID {
 		return fmt.Errorf("sync tenant/source mismatch: %w", asynq.SkipRetry)
+	}
+	if ds.TencentFileSync {
+		var recorded struct {
+			Protocol int `json:"protocol"`
+		}
+		_ = json.Unmarshal(syncLog.Result, &recorded)
+		if recorded.Protocol == types.ProcessingProtocol || syncLog.FinishedAt != nil {
+			return nil
+		}
+	}
+	if ds.TencentFileSync && ds.Status == types.DataSourceStatusPaused {
+		syncLog.Status, syncLog.FinishedAt, syncLog.ErrorMessage = types.SyncLogStatusCanceled, timePtr(time.Now().UTC()), "SOURCE_PAUSED"
+		return s.syncLogRepo.UpdateResult(ctx, syncLog)
 	}
 	if payload.FileRetryOnly && (ds.Status == types.DataSourceStatusPaused || syncLog.Status == types.SyncLogStatusSuccess || syncLog.Status == types.SyncLogStatusCanceled) {
 		if ds.Status == types.DataSourceStatusPaused {
@@ -945,6 +967,35 @@ func (s *DataSourceService) applyFetchedItem(
 	ctx context.Context, ds *types.DataSource, item *types.FetchedItem,
 	tagIDs []string, result *types.SyncResult,
 ) error {
+	if ds.TencentFileSync && item.Metadata["directory_only"] == "true" {
+		fail := func(err error) error {
+			result.Failed++
+			failure := syncItemIdentity(item)
+			failure.Code, failure.Category, failure.Stage, failure.Message = "INGEST_FAILED", "INGEST_FAILED", "directory", "Source folder update failed"
+			recordSyncError(result, failure)
+			return err
+		}
+		rows, err := s.knowledgeService.GetRepository().FindByMetadataKeyPrefix(ctx, ds.TenantID, ds.KnowledgeBaseID, "external_id", item.ExternalID)
+		if err != nil {
+			return fail(err)
+		}
+		for _, k := range rows {
+			meta := k.GetMetadata()
+			if meta["datasource_id"] != ds.ID || meta["external_id"] != item.ExternalID || meta["processing_protocol"] == "2" || k.ParseStatus != types.ParseStatusCompleted {
+				continue
+			}
+			meta["folder_path"], meta["source_path"] = item.Metadata["folder_path"], item.Metadata["source_path"]
+			body, err := json.Marshal(meta)
+			if err != nil {
+				return fail(err)
+			}
+			if err := s.knowledgeService.GetRepository().UpdateKnowledgeColumns(ctx, k.ID, map[string]interface{}{"folder_path": types.NormalizeKnowledgeFolderPath(meta["folder_path"]), "metadata": types.JSON(body)}); err != nil {
+				return fail(err)
+			}
+			result.Updated++
+			return nil
+		}
+	}
 	if item.IsDeleted {
 		if ds.SyncDeletions {
 			// Count only — actual KB deletion is intentionally not performed.
@@ -1010,6 +1061,13 @@ func (s *DataSourceService) applyFetchedItem(
 // instead of restarting from scratch.
 func streamStartCursor(ds *types.DataSource, forceFull bool, attempt int) (*types.SyncCursor, error) {
 	if forceFull && attempt == 0 {
+		if ds.Type == types.ConnectorTypeTencentDocs {
+			old, err := ds.ParseSyncCursor()
+			if err != nil || old == nil {
+				return old, err
+			}
+			return &types.SyncCursor{ConnectorCursor: map[string]interface{}{"file_retries": old.ConnectorCursor["file_retries"], "retry_scope": old.ConnectorCursor["retry_scope"]}}, nil
+		}
 		return nil, nil
 	}
 	return ds.ParseSyncCursor()
@@ -1149,8 +1207,20 @@ func (s *DataSourceService) processSyncStreaming(
 	}
 
 	result := &types.SyncResult{RetryRound: payload.FileRetryRound, RetryOf: payload.RetryOf}
+	if ds.TencentFileSync && attempt > 0 && len(syncLog.Result) > 0 {
+		var saved types.SyncResult
+		if json.Unmarshal(syncLog.Result, &saved) == nil && saved.Engine == "tencent-file-v1" {
+			result = &saved
+		}
+	}
+	config.SyncRunID = payload.SyncLogID
+	if ds.TencentFileSync {
+		result.Engine = "tencent-file-v1"
+	}
 	if payload.FileRetryOnly {
 		result.RetryState = "running"
+	}
+	if payload.FileRetryOnly || ds.TencentFileSync {
 		syncLog.Result, _ = result.ToJSON()
 		if err := s.syncLogRepo.UpdateResult(ctx, syncLog); err != nil {
 			return err
@@ -1174,7 +1244,9 @@ func (s *DataSourceService) processSyncStreaming(
 		// it in place so the Asynq retry resumes from there. Persist counts.
 		logger.Errorf(ctx, "streaming fetch failed: %v", fetchErr)
 		resultJSON, _ := result.ToJSON()
-		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON,
+		statusCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		s.updateSyncRunResult(statusCtx, ds, syncLog, result, resultJSON,
 			types.SyncLogStatusFailed, fmt.Sprintf("Fetch failed: %v", fetchErr), wasPaused)
 		return fetchErr
 	}

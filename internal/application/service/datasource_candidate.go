@@ -23,6 +23,13 @@ func (s *DataSourceService) ingestTencentCandidate(ctx context.Context, ds *type
 	}
 	identity, _ := json.Marshal([]any{ds.ID, item.ExternalID, item.UpdatedAt, item.FileName, item.Metadata["folder_path"], fmt.Sprintf("%x", sha256.Sum256(item.Content))})
 	version := fmt.Sprintf("%x", sha256.Sum256(identity))
+	if ds.TencentFileSync {
+		content := item.Metadata["source_fingerprint"]
+		if content == "" {
+			content = fmt.Sprintf("%x", sha256.Sum256(item.Content))
+		}
+		version = processingFingerprint("tencent-file-v1", ds.ID, item.ExternalID, content, item.FileName, item.Metadata["folder_path"], tencentSourceConfigDigest(ds))
+	}
 	repo := s.knowledgeService.GetRepository()
 	candidate, err := repo.FindByMetadataKey(ctx, ds.TenantID, ds.KnowledgeBaseID, "datasource_version", version)
 	if err != nil {
@@ -34,6 +41,10 @@ func (s *DataSourceService) ingestTencentCandidate(ctx context.Context, ds *type
 			"external_id": item.ExternalID, "source_resource_id": item.SourceResourceID,
 			"datasource_id": ds.ID, "datasource_version": version, "datasource_candidate": "true",
 			"source_fetch_completed_at": time.Now().UTC().Format(time.RFC3339Nano),
+		}
+		if ds.TencentFileSync {
+			metadata["datasource_async_publish"] = "true"
+			metadata["datasource_config_digest"] = tencentSourceConfigDigest(ds)
 		}
 		for key, value := range item.Metadata {
 			// Connector metadata cannot overwrite the candidate's ownership/version.
@@ -76,6 +87,14 @@ func (s *DataSourceService) ingestTencentCandidate(ctx context.Context, ds *type
 	}
 	if candidate == nil {
 		return false, errors.New("candidate creation returned no knowledge")
+	}
+	if ds.TencentFileSync {
+		if candidate.ParseStatus == types.ParseStatusFailed {
+			return false, errors.New(candidate.ErrorMessage)
+		}
+		// Submission, not downstream completion, ends this file's fetch slot.
+		// The existing postprocess fan-in publishes after core/image readiness.
+		return alreadyExisted, nil
 	}
 	// ponytail: reuse the sync worker as a completion barrier. This bounds each
 	// wait to ten minutes; very large deployments can replace it with a dedicated
@@ -191,7 +210,7 @@ func (s *DataSourceService) checkTencentCandidateScope(ctx context.Context, ds *
 		if latest == nil || latest.DeletedAt.Valid || (latest.Status == types.DataSourceStatusPaused && ds.Status != types.DataSourceStatusPaused) || latest.Status == types.DataSourceStatusDeleted {
 			return datasource.ErrDataSourceNotActive
 		}
-		if latest.TenantID != ds.TenantID || latest.KnowledgeBaseID != ds.KnowledgeBaseID || !bytes.Equal(latest.Config, ds.Config) {
+		if latest.TenantID != ds.TenantID || latest.KnowledgeBaseID != ds.KnowledgeBaseID || latest.TencentFileSync != ds.TencentFileSync || !bytes.Equal(latest.Config, ds.Config) {
 			return datasource.ErrInvalidConfig
 		}
 	}

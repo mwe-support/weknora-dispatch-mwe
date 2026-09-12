@@ -11,7 +11,7 @@ import (
 )
 
 func TestProcessingSourceChangesCloseWorkAndPreservePublishedArtifacts(t *testing.T) {
-	for _, action := range []string{"pause", "scope", "delete", "supersede"} {
+	for _, action := range []string{"pause", "scope", "delete", "supersede", "file_sync"} {
 		t.Run(action, func(t *testing.T) {
 			r := processingTestStore(t)
 			ctx := context.Background()
@@ -37,6 +37,9 @@ func TestProcessingSourceChangesCloseWorkAndPreservePublishedArtifacts(t *testin
 			source, err := sources.FindByID(ctx, "source")
 			require.NoError(t, err)
 			switch action {
+			case "file_sync":
+				source.TencentFileSync = true
+				require.NoError(t, sources.Update(ctx, source))
 			case "pause":
 				source.Status = types.DataSourceStatusPaused
 				require.NoError(t, sources.Update(ctx, source))

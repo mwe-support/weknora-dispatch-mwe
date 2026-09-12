@@ -156,6 +156,7 @@ func RegisterSyncHandlers(params SyncTaskParams) {
 	register(types.TypeImageMultimodal, params.ImageMultimodal.Handle)
 	register(types.TypeKnowledgePostProcess, params.KnowledgePostProcess.Handle)
 	register(types.TypeDataSourceSync, params.DataSourceService.ProcessSync)
+	register(types.TypeDataSourceFileRetry, params.DataSourceService.ProcessSync)
 	register(types.TypeWikiIngest, params.WikiIngest.Handle)
 	register(types.TypeWikiFinalize, params.WikiIngest.Handle)
 	for _, queue := range types.QueueDefinitions() {

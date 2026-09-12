@@ -166,7 +166,7 @@ func TestFileCompensationRealAsynqScheduleDeduplicates(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	info, err := inspector.GetQueueInfo(types.QueueSync)
+	info, err := inspector.GetQueueInfo(types.QueueSourceRetry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,14 +174,14 @@ func TestFileCompensationRealAsynqScheduleDeduplicates(t *testing.T) {
 		t.Fatalf("duplicate schedule: %+v, logs=%d", info, repo.creates)
 	}
 	for id := range repo.logs {
-		task, err := inspector.GetTaskInfo(types.QueueSync, "file-retry:"+id)
+		task, err := inspector.GetTaskInfo(types.QueueSourceRetry, "file-retry:"+id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if task.State != asynq.TaskStateScheduled || task.Type != types.TypeDataSourceSync {
+		if task.State != asynq.TaskStateScheduled || task.Type != types.TypeDataSourceFileRetry {
 			t.Fatalf("unexpected task: %+v", task)
 		}
-		if task.Timeout != 2*time.Hour {
+		if task.Timeout != types.TencentSourceTaskTimeout {
 			t.Fatalf("minute retries have insufficient task budget: %v", task.Timeout)
 		}
 	}

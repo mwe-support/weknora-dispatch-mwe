@@ -346,6 +346,12 @@ func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *ty
 			}
 		}
 		copy := *knowledge
+		if latest["datasource_async_publish"] == "true" {
+			if folder, ok := latest["folder_path"]; ok {
+				copy.FolderPath = types.NormalizeKnowledgeFolderPath(folder)
+			}
+			metadata["folder_path"], metadata["source_path"] = latest["folder_path"], latest["source_path"]
+		}
 		if metadata["datasource_version"] != "" {
 			for _, key := range []string{"datasource_candidate", "datasource_index_ready", "datasource_processing_failed"} {
 				if value, ok := latest[key]; ok {

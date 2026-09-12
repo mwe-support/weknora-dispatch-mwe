@@ -40,3 +40,41 @@ func TestDataSourceCandidateMetadataTransitionsAreConditional(t *testing.T) {
 	require.Equal(t, "wiki", got.GetMetadata()["datasource_processing_failed"])
 	require.Equal(t, "value", got.GetMetadata()["keep"])
 }
+
+func TestSourcePublicationIsReadyScopedAndMonotonic(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{DisableForeignKeyConstraintWhenMigrating: true})
+	require.NoError(t, err)
+	raw, _ := db.DB()
+	t.Cleanup(func() { _ = raw.Close() })
+	require.NoError(t, db.AutoMigrate(&types.Knowledge{}, &types.DataSource{}))
+	ds := &types.DataSource{ID: "source", TenantID: 1, KnowledgeBaseID: "kb", TencentFileSync: true, Status: types.DataSourceStatusActive}
+	require.NoError(t, db.Create(ds).Error)
+	r := &knowledgeRepository{db: db}
+	now := time.Now().UTC()
+	k := &types.Knowledge{ID: "file", TenantID: 1, KnowledgeBaseID: "kb", ParseStatus: types.ParseStatusPending, EnableStatus: "disabled", CreatedAt: now, Metadata: types.JSON(`{"datasource_id":"source","external_id":"file","datasource_version":"v1","datasource_candidate":"true","datasource_async_publish":"true"}`)}
+	require.NoError(t, db.Create(k).Error)
+	_, err = r.PublishSourceCandidate(context.Background(), ds, k.ID)
+	require.Error(t, err, "submission alone cannot publish")
+	require.NoError(t, db.Model(k).Updates(map[string]any{"parse_status": types.ParseStatusProcessing, "processed_at": now}).Error)
+	require.NoError(t, db.Model(ds).Update("status", types.DataSourceStatusPaused).Error)
+	_, err = r.PublishSourceCandidate(context.Background(), ds, k.ID)
+	require.Error(t, err, "pause fences publication")
+	require.NoError(t, db.Model(ds).Update("status", types.DataSourceStatusActive).Error)
+	ok, err := r.PublishSourceCandidate(context.Background(), ds, k.ID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	got, err := r.GetKnowledgeByIDOnly(context.Background(), k.ID)
+	require.NoError(t, err)
+	require.False(t, got.IsDataSourceCandidate())
+	require.Equal(t, "enabled", got.EnableStatus)
+	// A slow older candidate must not overtake a newly submitted file version.
+	older := *k
+	older.ID, older.CreatedAt, older.ProcessedAt, older.ParseStatus = "older", now.Add(-time.Minute), &now, types.ParseStatusProcessing
+	require.NoError(t, db.Create(&older).Error)
+	ok, err = r.PublishSourceCandidate(context.Background(), ds, older.ID)
+	require.NoError(t, err)
+	require.False(t, ok)
+	got, err = r.GetKnowledgeByIDOnly(context.Background(), older.ID)
+	require.NoError(t, err)
+	require.Equal(t, types.ParseStatusCancelled, got.ParseStatus)
+}

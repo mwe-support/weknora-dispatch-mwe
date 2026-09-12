@@ -46,6 +46,13 @@ func (s *DataSourceService) scheduleFileRetry(ctx context.Context, fc datasource
 		result.RetryState = "paused"
 		return nil
 	}
+	if parent == nil {
+		return errors.New("file retry requires a completed normal-pass identity")
+	}
+	retryOf := parent.ID
+	if payload.FileRetryOnly && payload.RetryOf != "" {
+		retryOf = payload.RetryOf
+	}
 	// Asynq schedules with second precision. Round upward so the pass does not
 	// arrive before the cursor's due time and manufacture empty retry rounds.
 	at := when.Truncate(time.Second).Add(time.Second)
@@ -54,7 +61,7 @@ func (s *DataSourceService) scheduleFileRetry(ctx context.Context, fc datasource
 	child, findErr := s.syncLogRepo.FindByID(ctx, id)
 	if findErr != nil || child == nil {
 		child = &types.SyncLog{ID: id, DataSourceID: ds.ID, TenantID: ds.TenantID, Status: types.SyncLogStatusRunning, StartedAt: time.Now().UTC()}
-		child.Result, _ = (&types.SyncResult{RetryState: "scheduled", RetryRound: payload.FileRetryRound + 1, RetryOf: parent.ID, NextRetryAt: when}).ToJSON()
+		child.Result, _ = (&types.SyncResult{Engine: "tencent-file-v1", RetryState: "scheduled", RetryRound: 1, RetryOf: retryOf, NextRetryAt: when}).ToJSON()
 		if err = s.syncLogRepo.Create(ctx, child); err != nil {
 			return err
 		}
@@ -66,14 +73,14 @@ func (s *DataSourceService) scheduleFileRetry(ctx context.Context, fc datasource
 		child.Status = types.SyncLogStatusRunning
 		child.FinishedAt = nil
 		child.ErrorMessage = ""
-		child.Result, _ = (&types.SyncResult{RetryState: "scheduled", RetryRound: payload.FileRetryRound + 1, RetryOf: parent.ID, NextRetryAt: when}).ToJSON()
+		child.Result, _ = (&types.SyncResult{Engine: "tencent-file-v1", RetryState: "scheduled", RetryRound: 1, RetryOf: retryOf, NextRetryAt: when}).ToJSON()
 		if err = s.syncLogRepo.UpdateResult(ctx, child); err != nil {
 			return err
 		}
 	}
 	payload.FileRetryOnly = true
-	payload.FileRetryRound++
-	payload.RetryOf = parent.ID
+	payload.FileRetryRound = 1
+	payload.RetryOf = retryOf
 	payload.SyncLogID = id
 	payload.ForceFull = false
 	payload.Trigger = "file_compensation"
@@ -81,9 +88,11 @@ func (s *DataSourceService) scheduleFileRetry(ctx context.Context, fc datasource
 	if err != nil {
 		return err
 	}
-	_, err = s.taskEnqueuer.Enqueue(asynq.NewTask(types.TypeDataSourceSync, body),
-		asynq.Queue(types.QueueSync), asynq.TaskID("file-retry:"+id), asynq.ProcessAt(*when),
-		asynq.MaxRetry(2), asynq.Timeout(2*time.Hour), asynq.Retention(24*time.Hour))
+	_, err = s.taskEnqueuer.Enqueue(asynq.NewTask(types.TypeDataSourceFileRetry, body),
+		asynq.Queue(types.QueueSourceRetry), asynq.TaskID("file-retry:"+id), asynq.ProcessAt(*when),
+		// Queue recovery can resume remaining files after a worker crash. The
+		// persisted per-file attempt still prevents a second compensation call.
+		asynq.MaxRetry(1), asynq.Timeout(types.TencentSourceTaskTimeout), asynq.Retention(24*time.Hour))
 	if err != nil && !errors.Is(err, asynq.ErrTaskIDConflict) && !errors.Is(err, asynq.ErrDuplicateTask) {
 		// An unsent retry must not leave HasRunningSync permanently blocking cron.
 		child.Status = types.SyncLogStatusFailed

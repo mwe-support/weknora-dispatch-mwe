@@ -70,6 +70,9 @@ type DataSourceService interface {
 
 	// ProcessSync handles the actual sync operation (called by asynq task)
 	ProcessSync(ctx context.Context, task *asynq.Task) error
+	// PublishSourceCandidate is called by the existing postprocess fan-in once
+	// a downloaded source file has completed core indexing and image extraction.
+	PublishSourceCandidate(ctx context.Context, tenant uint64, knowledgeID string) (bool, error)
 }
 
 // DataSourceRepository defines database access patterns for data sources

@@ -143,7 +143,7 @@ func (r *DataSourceRepository) UpdateSyncState(ctx context.Context, ds *types.Da
 		Model(&types.DataSource{}).
 		Where("id = ?", ds.ID)
 	if ds.Type == types.ConnectorTypeTencentDocs {
-		query = query.Where("NOT EXISTS (?)", r.db.Model(&types.ProcessingJob{}).Select("1").Where("datasource_id = ? AND tenant_id = ?", ds.ID, ds.TenantID))
+		query = query.Where("tencent_file_sync = ? OR NOT EXISTS (?)", true, r.db.Model(&types.ProcessingJob{}).Select("1").Where("datasource_id = ? AND tenant_id = ?", ds.ID, ds.TenantID))
 		// A worker from an older scope/credential configuration cannot replace
 		// the new execution cursor. Keep legacy connectors' update contract.
 		if len(ds.Config) == 0 {

@@ -94,6 +94,9 @@ func ProcessingSourceRevisions(source *types.DataSource) (scope, auth string, er
 	slices.Sort(ids)
 	ids = slices.Compact(ids)
 	scopeBytes, err := json.Marshal([]any{source.ID, source.TenantID, source.KnowledgeBaseID, source.Type, ids, config.Settings})
+	if source.TencentFileSync {
+		scopeBytes = append(scopeBytes, []byte("/file-sync-v1")...)
+	}
 	if err != nil {
 		return "", "", err
 	}

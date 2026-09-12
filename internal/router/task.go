@@ -35,6 +35,7 @@ type AsynqTaskParams struct {
 	MaintenanceServer    *asynq.Server `name:"maintenanceAsynqServer"`
 	SharedServer         *asynq.Server `name:"sharedAsynqServer"`
 	WikiServer           *asynq.Server `name:"wikiAsynqServer"`
+	SourceRetryServer    *asynq.Server `name:"sourceRetryAsynqServer"`
 	KnowledgeService     interfaces.KnowledgeService
 	KnowledgeBaseService interfaces.KnowledgeBaseService
 	TagService           interfaces.KnowledgeTagService
@@ -229,6 +230,11 @@ func NewWikiAsynqServer(svc interfaces.SystemSettingService) *asynq.Server {
 	return newAsynqServer(concurrency, types.QueueWeightsForPool(types.WorkerPoolWiki))
 }
 
+func NewSourceRetryAsynqServer() *asynq.Server {
+	log.Printf("asynq source-retry server starting with concurrency=1")
+	return newAsynqServer(1, types.QueueWeightsForPool(types.WorkerPoolSourceRetry))
+}
+
 func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// Create a new mux and register all handlers
 	mux := asynq.NewServeMux()
@@ -310,6 +316,7 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 
 	// Register data source sync handler
 	mux.HandleFunc(types.TypeDataSourceSync, params.DataSourceService.ProcessSync)
+	mux.HandleFunc(types.TypeDataSourceFileRetry, params.DataSourceService.ProcessSync)
 	for _, queue := range types.QueueDefinitions() {
 		mux.HandleFunc(types.TypeProcessingStep+":"+queue.Name, params.Processing.Process)
 	}
@@ -335,6 +342,7 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	runPool("maintenance-pool", params.MaintenanceServer)
 	runPool("shared-pool", params.SharedServer)
 	runPool("wiki-pool", params.WikiServer)
+	runPool("source-retry-pool", params.SourceRetryServer)
 	go params.Processing.Run(context.Background(), params.Inspector)
 	return mux
 }

@@ -153,7 +153,7 @@ func processingSourceEditReason(before, after *types.DataSource) (string, string
 		return types.ProcessingCanceled, "SOURCE_PAUSED", nil
 	}
 	// Skip harmless display/counter changes without parsing legacy credentials.
-	if before.Type == after.Type && string(before.Config) == string(after.Config) {
+	if before.Type == after.Type && before.TencentFileSync == after.TencentFileSync && string(before.Config) == string(after.Config) {
 		return "", "", nil
 	}
 	scope, auth, err := ProcessingSourceRevisions(after)

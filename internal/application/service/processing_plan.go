@@ -21,6 +21,9 @@ func ProcessingLifecycleEnabled(source *types.DataSource) bool {
 	if source == nil || source.Type != types.ConnectorTypeTencentDocs {
 		return false
 	}
+	if source.TencentFileSync {
+		return false
+	}
 	for _, id := range strings.Split(os.Getenv("WEKNORA_PROCESSING_SOURCES"), ",") {
 		if strings.TrimSpace(id) == "*" || (strings.TrimSpace(id) != "" && strings.TrimSpace(id) == source.ID) {
 			return true

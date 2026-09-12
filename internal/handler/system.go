@@ -1691,6 +1691,7 @@ func aggregateRuntimeWorkerPools(pools []RuntimeWorkerPool, servers []types.Work
 		types.WorkerPoolMaintenance: types.QueueWeightsForPool(types.WorkerPoolMaintenance),
 		types.WorkerPoolShared:      types.QueueWeightsForSharedPool(),
 		types.WorkerPoolWiki:        types.QueueWeightsForPool(types.WorkerPoolWiki),
+		types.WorkerPoolSourceRetry: types.QueueWeightsForPool(types.WorkerPoolSourceRetry),
 	}
 	indexes := make(map[string]int, len(pools))
 	for i := range pools {
@@ -1766,6 +1767,7 @@ func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
 			{Name: types.WorkerPoolMaintenance, Concurrency: allocation.Maintenance, QueueCount: queueCounts[types.WorkerPoolMaintenance]},
 			{Name: types.WorkerPoolShared, Concurrency: allocation.Shared, QueueCount: len(types.QueueWeightsForSharedPool())},
 			{Name: types.WorkerPoolWiki, Concurrency: allocation.Wiki, QueueCount: queueCounts[types.WorkerPoolWiki]},
+			{Name: types.WorkerPoolSourceRetry, Concurrency: 1, QueueCount: queueCounts[types.WorkerPoolSourceRetry]},
 		},
 		Timestamp: time.Now().Unix(),
 	}
