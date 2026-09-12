@@ -20,15 +20,16 @@ type ProcessingExecutor func(context.Context, types.ProcessingLease) (types.Proc
 // ProcessingService delivers committed outbox entries and executes one leased
 // unit. Business failures are committed to the ledger and acknowledged to Asynq.
 type ProcessingService struct {
-	repo      *repository.ProcessingRepository
-	tasks     interfaces.TaskEnqueuer
-	execute   ProcessingExecutor
-	knowledge *knowledgeService
+	repo         *repository.ProcessingRepository
+	tasks        interfaces.TaskEnqueuer
+	execute      ProcessingExecutor
+	knowledge    *knowledgeService
+	dispatchWake chan struct{}
 }
 
 func NewProcessingService(repo *repository.ProcessingRepository, tasks interfaces.TaskEnqueuer, execute ProcessingExecutor, knowledge interfaces.KnowledgeService) *ProcessingService {
 	s, _ := knowledge.(*knowledgeService)
-	return &ProcessingService{repo: repo, tasks: tasks, execute: execute, knowledge: s}
+	return &ProcessingService{repo: repo, tasks: tasks, execute: execute, knowledge: s, dispatchWake: make(chan struct{}, 1)}
 }
 
 func (s *ProcessingService) Dispatch(ctx context.Context) error {
@@ -87,7 +88,35 @@ func (s *ProcessingService) Dispatch(ctx context.Context) error {
 			failures = errors.Join(failures, err)
 		}
 	}
+	if len(ops) == 100 && failures == nil {
+		s.wakeDispatch() // Drain another committed batch without waiting for the fallback poll.
+	}
 	return failures
+}
+
+func (s *ProcessingService) wakeDispatch() {
+	select {
+	case s.dispatchWake <- struct{}{}:
+	default:
+	}
+}
+
+func (s *ProcessingService) runDispatch(ctx context.Context) {
+	// The durable outbox remains authoritative. Polling covers other producers,
+	// missed/coalesced wake-ups and restarts; normal completion signals immediately.
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for ctx.Err() == nil {
+		if err := s.Dispatch(ctx); err != nil && ctx.Err() == nil {
+			logger.Warnf(ctx, "[Processing] lifecycle delivery deferred: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.dispatchWake:
+		case <-ticker.C:
+		}
+	}
 }
 
 func (s *ProcessingService) Process(ctx context.Context, task *asynq.Task) error {
@@ -137,6 +166,9 @@ func (s *ProcessingService) Process(ctx context.Context, task *asynq.Task) error
 		outcome.Retryable = lease.Step.Stage == "export_start"
 	}
 	err = s.repo.FinishStep(ctx, payload.TenantID, *lease, outcome)
+	if err == nil {
+		s.wakeDispatch() // Only wake after the completion and successor outbox commit.
+	}
 	if errors.Is(err, repository.ErrProcessingConflict) || errors.Is(err, repository.ErrProcessingScope) || errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil
 	}
@@ -158,6 +190,12 @@ func (s *ProcessingService) run(ctx context.Context, lease types.ProcessingLease
 // Run uses a keyset cursor so a permanently blocked source cannot starve later
 // jobs. Backend inspection errors never imply that an acknowledged task is lost.
 func (s *ProcessingService) Run(ctx context.Context, inspector *asynq.Inspector) {
+	dispatchStopped := make(chan struct{})
+	go func() {
+		defer close(dispatchStopped)
+		s.runDispatch(ctx)
+	}()
+	defer func() { <-dispatchStopped }()
 	if s.knowledge != nil {
 		go s.runMaintenance(ctx)
 	}
@@ -197,9 +235,7 @@ func (s *ProcessingService) Run(ctx context.Context, inspector *asynq.Inspector)
 				cursor = ""
 			}
 		}
-		if err = s.Dispatch(ctx); err != nil && ctx.Err() == nil {
-			logger.Warnf(ctx, "[Processing] lifecycle delivery deferred: %v", err)
-		}
+		s.wakeDispatch()
 		select {
 		case <-ctx.Done():
 			return
