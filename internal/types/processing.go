@@ -376,8 +376,12 @@ func ProcessingQueue(stage string, metadata ...JSON) string {
 	switch stage {
 	case "export_start", "export_poll", "download":
 		return QueueExport
-	case "scan_page", "scan_document", "discover", "metadata", "fetch", "native_read", "normalize", "legacy_snapshot":
+	case "scan_page", "scan_document", "discover", "metadata", "fetch", "native_read", "legacy_snapshot":
 		return QueueSync
+	case "normalize":
+		// Inputs are already local artifacts. Source scans/retries must not
+		// prevent ready documents from reaching the independent parsing pool.
+		return QueueDefault
 	case "summary", "embedding", "faq_embedding":
 		return QueueSummary
 	case "asset", "assets", "asset_download", "images", "ocr", "image_ocr", "image_caption", "image_index":

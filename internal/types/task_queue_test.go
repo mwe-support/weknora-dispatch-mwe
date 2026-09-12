@@ -2,6 +2,16 @@ package types
 
 import "testing"
 
+func TestLocalNormalizationDoesNotWaitBehindSourceIO(t *testing.T) {
+	queue := ProcessingQueue("normalize")
+	if QueueWeightsForPool(WorkerPoolCore)[queue] == 0 || QueueWeightsForSharedPool()[queue] == 0 {
+		t.Fatal("ready local normalization cannot run while the source pool is occupied")
+	}
+	if QueueWeightsForPool(WorkerPoolMaintenance)[queue] != 0 {
+		t.Fatal("local normalization still shares source I/O capacity")
+	}
+}
+
 func TestExportReceiptsDoNotWaitBehindSourceScanFIFO(t *testing.T) {
 	for _, stage := range []string{"export_start", "export_poll", "download"} {
 		if ProcessingQueue(stage) != QueueExport {
