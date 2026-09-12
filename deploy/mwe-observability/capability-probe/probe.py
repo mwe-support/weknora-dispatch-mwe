@@ -88,6 +88,7 @@ class Probe:
         self.interval = env_int("PROBE_INTERVAL_SECONDS", 30, 10, 300)
         self.log_window = env_int("LOG_WINDOW_SECONDS", 120, 30, 900)
         self._metrics = ""
+        self._collected_at = 0.0
         self._lock = threading.Lock()
 
     def collect(self) -> str:
@@ -109,6 +110,8 @@ class Probe:
             "# TYPE kb_component_blocking_log gauge",
             "# HELP kb_gpu_probe_ready Whether nvidia-smi succeeded for the configured physical GPU.",
             "# TYPE kb_gpu_probe_ready gauge",
+            "# HELP kb_gpu_sample_timestamp_seconds Time of the GPU reading, not the later scrape.",
+            "# TYPE kb_gpu_sample_timestamp_seconds gauge",
             "# HELP kb_gpu_utilization_percent Current GPU compute utilization.",
             "# TYPE kb_gpu_utilization_percent gauge",
             "# HELP kb_gpu_memory_used_bytes Current GPU framebuffer memory usage.",
@@ -173,6 +176,7 @@ class Probe:
                 continue
             uuid, name, utilization, memory_used, memory_total, temperature, power, power_limit = rows[0]
             labels = base + f',uuid="{escape_label(uuid)}",name="{escape_label(name)}"'
+            lines.append(f"kb_gpu_sample_timestamp_seconds{{{labels}}} {time.time()}")
             lines.append(f"kb_gpu_utilization_percent{{{labels}}} {numeric(utilization)}")
             lines.append(f"kb_gpu_memory_used_bytes{{{labels}}} {numeric(memory_used, 1024 * 1024)}")
             lines.append(f"kb_gpu_memory_total_bytes{{{labels}}} {numeric(memory_total, 1024 * 1024)}")
@@ -207,11 +211,16 @@ class Probe:
             else:
                 with self._lock:
                     self._metrics = value
+                    self._collected_at = time.time()
             time.sleep(max(1, self.interval - (time.monotonic() - started)))
 
     def metrics(self) -> str:
         with self._lock:
-            return self._metrics
+            stale = not self._metrics or time.time() - self._collected_at > max(90, self.interval * 2 + 30)
+            status = ('# HELP kb_probe_snapshot_stale Whether the cached probe snapshot expired.\n'
+                      '# TYPE kb_probe_snapshot_stale gauge\n'
+                      f'kb_probe_snapshot_stale{{host="{escape_label(self.host)}"}} {int(stale)}\n')
+            return status if stale else self._metrics + status
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -240,6 +249,16 @@ def self_test() -> None:
     assert escape_label('a"b\\c\n') == 'a\\"b\\\\c\\n'
     assert BLOCKING_SIGNATURES["cuda_unavailable"].search("Failed to initialize NVML: Unknown Error")
     assert not BLOCKING_SIGNATURES["cuda_unavailable"].search("CUDA initialized successfully")
+    # Cached values must disappear on an expired probe, not look freshly sampled.
+    probe = object.__new__(Probe)
+    probe.host, probe.interval = "test", 30
+    probe._lock = threading.Lock()
+    probe._metrics = "kb_gpu_utilization_percent 12\n"
+    probe._collected_at = time.time()
+    assert "kb_gpu_utilization_percent" in probe.metrics()
+    probe._collected_at -= 600
+    assert "kb_gpu_utilization_percent" not in probe.metrics()
+    assert 'kb_probe_snapshot_stale{host="test"} 1' in probe.metrics()
 
 
 if __name__ == "__main__":

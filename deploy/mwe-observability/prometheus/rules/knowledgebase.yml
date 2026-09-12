@@ -19,6 +19,15 @@ groups:
           description: "Stage {{ $labels.stage }} is blocked. Retry only that stage after resolving its recorded cause."
   - name: knowledgebase-health
     rules:
+      - alert: KnowledgeBaseTelemetryStale
+        expr: kb_probe_snapshot_stale == 1 or absent(kb_probe_last_success_timestamp_seconds)
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hardware telemetry has no fresh capability snapshot"
+          description: "The collector is unavailable or its last complete sample expired. Missing hardware values must not be interpreted as zero load."
+
       - alert: KnowledgeBaseEndpointDown
         expr: probe_success{stack="mwe-knowledgebase",component=~"weknora-app|weknora-frontend|minio|qdrant|mineru|embedding|reranker|q4-gpu0|q4-gpu1|mcp-transport"} == 0
         for: 2m
