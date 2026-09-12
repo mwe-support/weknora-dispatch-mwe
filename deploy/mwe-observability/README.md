@@ -56,6 +56,34 @@ The capability probe mounts the Docker socket. Docker API access is
 root-equivalent even with a read-only mount; keep the stack loopback-only and
 do not install unreviewed Grafana plugins or Alloy configuration.
 
+## Hardware readings and verification
+
+Hardware cards show the last sample at the selected time range's end. Selecting
+a fixed historical range does not make it move when auto-refresh runs. The log
+buttons update only `var-log_container` through Grafana's existing location
+service, preserving relative time, refresh and other filters. Use “返回当前 6 小时”
+to return to a rolling window. GPU readings are sampled about every 30 seconds;
+their actual sample timestamps are displayed. Expired cached probe data is
+removed and produces a telemetry-stale warning instead of looking current.
+
+CPU non-idle, network and disk rates use a five-minute window. CPU non-idle
+includes I/O wait, which is also shown separately. Memory usage is based on
+`MemTotal - MemAvailable`; no configured swap yields 0%, not 100%. Disk curves
+are throughput rather than occupied capacity, and RAID/physical device curves
+must not be summed. Network curves show each host interface separately so VPN
+traffic is not added to the physical interface carrying it.
+
+The default Unix exporter disables `netdev`: `/proc/net` resolves in the
+collector's container network namespace. A second native Unix exporter enables
+only `netdev` under `/host/proc/1`, using the existing read-only host proc mount.
+Its metrics are identified by `job="integrations/host_network"`; incorrect old
+container network history is not blended into the corrected chart.
+
+Run `node scripts/test-hardware-navigation.mjs` from this directory for the
+relative/historical navigation regression check. On the monitored Linux host,
+run `python3 scripts/verify-host-metrics.py --gpu` to compare the real collectors
+with `/proc`, root filesystem capacity and physical GPU identities/capacities.
+
 ## Initial deployment on marvel-kb
 
 Copy this directory to `/public/knowledgebase/observability`, then run:
