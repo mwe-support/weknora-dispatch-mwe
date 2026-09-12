@@ -158,30 +158,45 @@ def outputs():
             else:yield panel
     retained={p['id']:p for p in flatten(home['panels']) if p['id'] not in range(101,108)}
     home['panels']=[]
-    summary=[('current_run_progress','新流程同步批次'),('current_document_lifecycle','新流程文档'),('unresolved_incidents','待复查异常事件'),('stage_retry_queue','活动 / 待处理阶段')]
-    for index,(view,title) in enumerate(summary):
-        where=" WHERE evidence_basis='verified_v2'"
-        home['panels'].append({'id':101+index,'type':'stat','title':title,
-            'description':'来自统一生命周期视图。计数单位是视图行，不把目录、文档、尝试或异常事件混算。完整明细及冻结分页见处理生命周期看板。',
-            'gridPos':{'h':4,'w':6,'x':index*6,'y':0},'datasource':{'type':'postgres','uid':'weknora-postgres'},
-            'targets':[{'refId':'A','format':'table','rawQuery':True,'rawSql':f'SELECT COUNT(*)::bigint AS total FROM mwe_processing_{view}{where}'}],
+    summary=[
+        (104,'执行中阶段','executing',0,0,'当前版本已领取且租约仍有效的阶段；可能正在等待网络或 CPU，不等于 GPU 推理。'),
+        (110,'排队 / 待派发阶段','queued',6,0,'尚未执行的阶段；包含待派发记录，与 Redis 瞬时队列长度可能略有差异。'),
+        (111,'等待结果 / 重试阶段','waiting',12,0,'等待外部结果、子阶段完成或重试时间；不计入执行中。'),
+        (103,'异常 / 待恢复阶段','abnormal',18,0,'当前版本失败、阻塞或执行租约失效的阶段。租约失效单独等待系统恢复，不冒充正在执行。'),
+        (102,'当前版本文档（含已完成）','documents',12,4,'登记的当前版本文档总数，包含已完成、未启动、处理中和异常文档，不是并发数。'),
+        (101,'当前批次记录（含已结束）','batches',18,4,'被标为当前代的同步批次记录数，包含已结束批次，不是正在运行的批次数。'),
+    ]
+    for panel_id,title,column,x,y,description in summary:
+        home['panels'].append({'id':panel_id,'type':'stat','title':title,
+            'description':description+' 数据为查询时的当前状态，不随右上角历史时间范围回溯。',
+            'gridPos':{'h':4,'w':6,'x':x,'y':y},'datasource':{'type':'postgres','uid':'weknora-postgres'},
+            'targets':[{'refId':'A','format':'table','rawQuery':True,'rawSql':f'SELECT {column} AS total FROM processing_runtime_counts'}],
             'options':{'reduceOptions':{'calcs':['lastNotNull'],'fields':'','values':False},'textMode':'auto','colorMode':'value','graphMode':'none'},
-            'fieldConfig':{'defaults':{'noValue':'读取状态未知','min':0,'color':{'mode':'thresholds'} if view=='unresolved_incidents' else {'mode':'fixed','fixedColor':'blue'},'thresholds':{'mode':'absolute','steps':[{'color':'green','value':None},{'color':'red','value':1}]}},'overrides':[]}})
-    home['panels'].append({'id':107,'type':'text','title':'定位失败文档','gridPos':{'h':3,'w':24,'x':0,'y':4},
-        'options':{'mode':'markdown','content':'[打开文档处理与失败复查看板](/d/mwe-processing-lifecycle-v2) · 按工作空间、知识库和腾讯路径定位文件，查看大小、失败阶段和原因。历史流程记录保留在本页底部的折叠区。'}})
-    for id,x in [(6,0),(7,12)]:retained[id]['gridPos']={'h':8,'w':12,'x':x,'y':7};home['panels'].append(retained[id])
-    for id,x in [(1,0),(2,12)]:retained[id]['gridPos']={'h':4,'w':12,'x':x,'y':15};home['panels'].append(retained[id])
-    infra=[]; y=20
+            'fieldConfig':{'defaults':{'noValue':'读取状态未知','min':0,'color':{'mode':'thresholds'} if panel_id==103 else {'mode':'fixed','fixedColor':'blue'},'thresholds':{'mode':'absolute','steps':[{'color':'green','value':None},{'color':'red','value':1}]}},'overrides':[]}})
+    for panel_id,title,llama_metric,vllm_metric,x in [(112,'模型执行请求','requests_processing','num_requests_running',0),(113,'模型端排队请求','requests_deferred','num_requests_waiting',6)]:
+        series=f'(llamacpp:{llama_metric}{{job=~"q4-gpu[01]"}} or vllm:{vllm_metric}{{job=~"embedding|reranker"}})'
+        expr=f'sum({series}) and on() (count({series}) == 4) and on() (count(up{{job=~"q4-gpu[01]|embedding|reranker"}} == 1) == 4)'
+        home['panels'].append({'id':panel_id,'type':'stat','title':title,'gridPos':{'h':4,'w':6,'x':x,'y':4},
+            'description':'Qwythos 双 GPU（聊天/图片）、向量和重排服务的实际请求数；不含 MinerU。请求不是文档，且执行请求可能处于预处理。取所选结束时刻的采样；4 个端点或指标不完整时显示未知，不补零。',
+            'datasource':{'type':'prometheus','uid':'prometheus'},
+            'targets':[{'refId':'A','expr':expr,'instant':True,'range':False,'legendFormat':'请求'}],
+            'options':{'reduceOptions':{'calcs':['lastNotNull'],'fields':'','values':False},'textMode':'auto','colorMode':'value','graphMode':'none'},
+            'fieldConfig':{'defaults':{'noValue':'采集不完整','min':0,'decimals':0,'color':{'mode':'fixed','fixedColor':'blue'}},'overrides':[]}})
+    home['panels'].append({'id':107,'type':'text','title':'如何对照任务与 GPU','gridPos':{'h':4,'w':24,'x':0,'y':8},
+        'options':{'mode':'markdown','content':'**排队、等待和异常都不等于正在执行。** 执行中按有效租约统计，可包含网络等待；扫描、源内容读取、导出和下载不要求 GPU 工作。\n\n阶段与文档卡片反映查询时的最新状态；模型/GPU 卡片取所选结束时刻的采样。对照当前运行情况时，请保持时间范围结束于“现在”并刷新。[查看具体文档和失败原因](/d/mwe-processing-lifecycle-v2)。未满足前置条件的计划阶段不计入排队；历史记录保留在底部折叠区。'}})
+    for id,x in [(6,0),(7,12)]:retained[id]['gridPos']={'h':8,'w':12,'x':x,'y':12};home['panels'].append(retained[id])
+    for id,x in [(1,0),(2,12)]:retained[id]['gridPos']={'h':4,'w':12,'x':x,'y':20};home['panels'].append(retained[id])
+    infra=[]; y=25
     hardware_header = [[108,109]] if 108 in retained and 109 in retained else []
     for group in hardware_header + [[14,15,16,17],[18,19],[8,20,21,22],[23],[13]]:
         for id in group:
             p=retained[id];p['gridPos']['y']=y;infra.append(p)
         y+=max(retained[id]['gridPos']['h'] for id in group)
-    home['panels'].append({'id':2001,'type':'row','title':'硬件趋势与服务日志','collapsed':True,'gridPos':{'h':1,'w':24,'x':0,'y':19},'panels':infra})
+    home['panels'].append({'id':2001,'type':'row','title':'硬件趋势与服务日志','collapsed':True,'gridPos':{'h':1,'w':24,'x':0,'y':24},'panels':infra})
     legacy=[]
     for id,x,y,w,h in [(10,0,20,24,13),(43,0,33,24,2),(11,0,35,12,10),(12,12,35,12,10),(44,0,45,12,2),(45,12,45,12,2),(3,0,47,8,4),(4,8,47,8,4),(5,16,47,8,4),(9,0,51,24,8)]:
-        p=retained[id];p['gridPos']={'h':h,'w':w,'x':x,'y':y+1};legacy.append(p)
-    home['panels'].append({'id':2002,'type':'row','title':'历史流程复查（保留原始记录）','collapsed':True,'gridPos':{'h':1,'w':24,'x':0,'y':20},'panels':legacy})
+        p=retained[id];p['gridPos']={'h':h,'w':w,'x':x,'y':y+6};legacy.append(p)
+    home['panels'].append({'id':2002,'type':'row','title':'历史流程复查（保留原始记录）','collapsed':True,'gridPos':{'h':1,'w':24,'x':0,'y':25},'panels':legacy})
     home['title']='WeKnora · 运行总览'
     home['version']=max(home.get('version',1),18)
     home.setdefault('links',[])
