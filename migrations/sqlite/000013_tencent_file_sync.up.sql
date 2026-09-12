@@ -1,0 +1,1 @@
+ALTER TABLE data_sources ADD COLUMN tencent_file_sync BOOLEAN NOT NULL DEFAULT FALSE;

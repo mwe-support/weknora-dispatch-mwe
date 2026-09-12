@@ -39,6 +39,7 @@ const (
 	// ConnectorTypeTencentDocs syncs Tencent Docs knowledge spaces through
 	// Tencent Docs' official Streamable HTTP MCP service.
 	ConnectorTypeTencentDocs = "tencent_docs"
+	TencentSourceTaskTimeout = 24 * time.Hour
 
 	// Sync modes
 	SyncModeIncremental = "incremental"
@@ -66,6 +67,9 @@ const (
 type DataSource struct {
 	// Server-only optimistic guard for settings read before a source-row lock.
 	SettingsFingerprint string `json:"-" gorm:"-"`
+	// Server-owned cutover flag. Existing ledger sources are drained before
+	// enabling the file connector; historical processing records stay intact.
+	TencentFileSync bool `json:"-" gorm:"not null;default:false"`
 
 	// Unique identifier
 	ID string `json:"id" gorm:"type:varchar(36);primaryKey"`
@@ -220,7 +224,8 @@ func (s *SyncLog) BeforeCreate(tx *gorm.DB) error {
 // included in API responses — handlers serialize via dto.NewDataSourceResponse
 // which strips the Credentials map by construction.
 type DataSourceConfig struct {
-	FAQEnabled bool `json:"-"`
+	SyncRunID  string `json:"-"` // Current source pass; never part of persisted credentials/settings.
+	FAQEnabled bool   `json:"-"`
 	// Common fields applicable to most connectors
 	Type string `json:"type"`
 
@@ -418,6 +423,7 @@ type SyncCursor struct {
 
 // SyncResult summarizes the outcome of a sync operation
 type SyncResult struct {
+	Engine string `json:"engine,omitempty"`
 	// Per-source-file proof of completed FAQ import; an empty incremental run
 	// must never clear a previous file failure in observability.
 	FAQCompleted map[string]time.Time `json:"faq_completed,omitempty"`

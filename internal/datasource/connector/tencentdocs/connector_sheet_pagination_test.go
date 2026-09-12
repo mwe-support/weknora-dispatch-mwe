@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 type sheetRangeCall struct {
@@ -48,7 +50,7 @@ func (f *fakeSheetConnectorClient) GetSheetCells(
 	return result, nil
 }
 
-func TestConnectorFetchAllAcceptsPageRelativeSheetRows(t *testing.T) {
+func TestLegacySheetRendererAcceptsPageRelativeSheetRows(t *testing.T) {
 	const fileID = "relative-sheet"
 	base := &fakeConnectorClient{
 		nodes: map[string][]Node{"space-1/": {{
@@ -60,7 +62,7 @@ func TestConnectorFetchAllAcceptsPageRelativeSheetRows(t *testing.T) {
 	}
 	client := &fakeSheetConnectorClient{
 		fakeConnectorClient: base,
-		relativeRows:       true,
+		relativeRows:        true,
 		sheets: map[string][]SheetInfo{fileID: {{
 			ID: "sheet-1", Name: "Relative", RowCount: 191, ColCount: 2,
 		}}},
@@ -69,14 +71,8 @@ func TestConnectorFetchAllAcceptsPageRelativeSheetRows(t *testing.T) {
 			{Row: 118, Col: 0, StringValue: "ROW-119"},
 		}},
 	}
-	connector := newConnectorWithClientFactory(func(MCPClientConfig) (Client, error) {
-		return client, nil
-	})
 
-	items, err := connector.FetchAll(
-		context.Background(), testDataSourceConfig(encodeSpaceResourceID("space-1")),
-		[]string{encodeSpaceResourceID("space-1")},
-	)
+	items, err := legacySheetItems(context.Background(), client)
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
 	}
@@ -85,7 +81,7 @@ func TestConnectorFetchAllAcceptsPageRelativeSheetRows(t *testing.T) {
 	}
 }
 
-func TestConnectorFetchAllReadsEverySheetRowBeyondGenericContentLimit(t *testing.T) {
+func TestLegacySheetRendererReadsEverySheetRowBeyondGenericContentLimit(t *testing.T) {
 	base := &fakeConnectorClient{
 		nodes: map[string][]Node{"space-1/": {{
 			ID: "PMJIUYDBGCPD", Title: "供应商列表 2026",
@@ -114,15 +110,8 @@ func TestConnectorFetchAllReadsEverySheetRowBeyondGenericContentLimit(t *testing
 			{Row: 190, Col: 1, ValueType: "STRING", StringValue: "LAST-SUPPLIER"},
 		}},
 	}
-	connector := newConnectorWithClientFactory(func(MCPClientConfig) (Client, error) {
-		return client, nil
-	})
 
-	items, err := connector.FetchAll(
-		context.Background(),
-		testDataSourceConfig(encodeSpaceResourceID("space-1")),
-		[]string{encodeSpaceResourceID("space-1")},
-	)
+	items, err := legacySheetItems(context.Background(), client)
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
 	}
@@ -167,7 +156,7 @@ func TestConnectorFetchAllReadsEverySheetRowBeyondGenericContentLimit(t *testing
 	}
 }
 
-func TestConnectorFetchAllScansSparseTailAndReportsEmittedRows(t *testing.T) {
+func TestLegacySheetRendererScansSparseTailAndReportsEmittedRows(t *testing.T) {
 	const fileID = "sparse-sheet"
 	base := &fakeConnectorClient{
 		nodes: map[string][]Node{"space-1/": {{
@@ -188,15 +177,8 @@ func TestConnectorFetchAllScansSparseTailAndReportsEmittedRows(t *testing.T) {
 			{Row: 569, Col: 2, ValueType: "STRING", StringValue: "TAIL-570"},
 		}},
 	}
-	connector := newConnectorWithClientFactory(func(MCPClientConfig) (Client, error) {
-		return client, nil
-	})
 
-	items, err := connector.FetchAll(
-		context.Background(),
-		testDataSourceConfig(encodeSpaceResourceID("space-1")),
-		[]string{encodeSpaceResourceID("space-1")},
-	)
+	items, err := legacySheetItems(context.Background(), client)
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
 	}
@@ -221,7 +203,7 @@ func TestConnectorFetchAllScansSparseTailAndReportsEmittedRows(t *testing.T) {
 	}
 }
 
-func TestConnectorFetchAllOmitsEmptyWorksheetTablesAndUnusedColumns(t *testing.T) {
+func TestLegacySheetRendererOmitsEmptyWorksheetTablesAndUnusedColumns(t *testing.T) {
 	const fileID = "trimmed-sheet"
 	base := &fakeConnectorClient{
 		nodes: map[string][]Node{"space-1/": {{
@@ -244,15 +226,8 @@ func TestConnectorFetchAllOmitsEmptyWorksheetTablesAndUnusedColumns(t *testing.T
 			},
 		},
 	}
-	connector := newConnectorWithClientFactory(func(MCPClientConfig) (Client, error) {
-		return client, nil
-	})
 
-	items, err := connector.FetchAll(
-		context.Background(),
-		testDataSourceConfig(encodeSpaceResourceID("space-1")),
-		[]string{encodeSpaceResourceID("space-1")},
-	)
+	items, err := legacySheetItems(context.Background(), client)
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
 	}
@@ -279,4 +254,17 @@ func TestConnectorFetchAllOmitsEmptyWorksheetTablesAndUnusedColumns(t *testing.T
 			t.Fatalf("%s=%q, want %q", key, got, want)
 		}
 	}
+}
+
+// Historical native Sheet jobs still use this renderer. New source syncs
+// export XLSX instead and are covered by TestSourceExportsFourTypesWithoutReadingBody.
+func legacySheetItems(ctx context.Context, client *fakeSheetConnectorClient) ([]types.FetchedItem, error) {
+	for id := range client.sheets {
+		result, err := fetchSheetMarkdown(ctx, client, id)
+		if err != nil {
+			return nil, err
+		}
+		return []types.FetchedItem{{Content: []byte(result.Text), Metadata: result.Metadata}}, nil
+	}
+	return nil, nil
 }

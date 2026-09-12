@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand/v2"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,7 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-const maxFileRetries = 3
+const maxFileRetries = 1
 
 type fileRetry struct {
 	FolderPath           string    `json:"folder_path,omitempty"`
@@ -31,6 +30,13 @@ type fileRetry struct {
 	ExportTaskID         string    `json:"export_task_id,omitempty"`
 	ExportModifiedAt     uint64    `json:"export_modified_at,omitempty"`
 	ExportStartUncertain bool      `json:"export_start_uncertain,omitempty"`
+	Error                string    `json:"error,omitempty"`
+	FirstError           string    `json:"first_error,omitempty"`
+	ErrorAt              time.Time `json:"error_at,omitempty"`
+	Stage                string    `json:"stage,omitempty"`
+	ExportURL            string    `json:"export_url_encrypted,omitempty"`
+	ExportFileName       string    `json:"export_file_name,omitempty"`
+	ExportURLExpiresAt   time.Time `json:"export_url_expires_at,omitempty"`
 }
 
 type exportTaskError struct {
@@ -56,6 +62,17 @@ func isRateLimited(message string) bool {
 }
 
 func fileRetryCategory(err error, stage string) (string, bool) {
+	var wait *MCPBudgetWaitError
+	if errors.As(err, &wait) {
+		return "RATE_LIMITED", true
+	}
+	var nativeSize *NativeLimitError
+	if errors.As(err, &nativeSize) {
+		return "FILE_SIZE_EXCEEDED", false
+	}
+	if errors.Is(err, ErrUnsupportedSourceType) {
+		return "UNSUPPORTED_FILE_TYPE", false
+	}
 	var size *ExportSizeExceededError
 	var tool *MCPToolError
 	if stage == "ingest" {
@@ -71,6 +88,10 @@ func fileRetryCategory(err error, stage string) (string, bool) {
 	}
 	if errors.Is(err, datasource.ErrInvalidCredentials) {
 		return "AUTH_REQUIRED", false
+	}
+	var notSent *exportNotSentError
+	if errors.As(err, &notSent) && isTransientReadError(err) {
+		return "TRANSIENT_NETWORK", true
 	}
 	if errors.As(err, &tool) {
 		switch tool.Code {
@@ -111,6 +132,19 @@ func (s *fetchState) trackFileRetry(item *types.FetchedItem) {
 	r.SpaceID, r.SourceResourceID = item.Metadata["space_id"], item.SourceResourceID
 	r.FolderPath = item.Metadata["folder_path"]
 	r.Category = item.Metadata["retry_category"]
+	r.Error, r.Stage = item.Metadata["error"], item.Metadata["error_stage"]
+	if r.FirstError == "" {
+		r.FirstError = r.Error
+	}
+	if item.Metadata["retained_failure"] != "true" {
+		r.ErrorAt = time.Now().UTC()
+	}
+	if s.retryPass && item.Metadata["retry_admission_wait"] == "true" && r.Attempt > 0 {
+		r.Attempt-- // Waiting for admission is not a failed request.
+	}
+	if item.Metadata["export_not_sent"] == "true" {
+		r.ExportStartUncertain = false
+	}
 	if id := item.Metadata["retry_export_task_id"]; id != "" {
 		r.ExportTaskID = id
 		r.ExportStartUncertain = false
@@ -127,8 +161,10 @@ func (s *fetchState) trackFileRetry(item *types.FetchedItem) {
 	if item.Metadata["retryable"] == "true" && r.Node.ID != "" && r.Node.Type != "folder" && r.Node.Type != "wiki_folder" {
 		if r.Attempt < maxFileRetries {
 			r.State = "scheduled"
-			base := time.Minute * time.Duration(2<<r.Attempt)
-			r.NextAt = time.Now().UTC().Add(base + time.Duration(rand.Int64N(int64(base/4))))
+			r.NextAt = time.Now().UTC() // Dispatched only after this source's normal pass returns.
+			if ms, err := strconv.ParseInt(item.Metadata["retry_after_ms"], 10, 64); err == nil && ms > 0 {
+				r.NextAt = r.NextAt.Add(time.Duration(ms) * time.Millisecond)
+			}
 		} else {
 			r.State = "exhausted"
 		}
@@ -149,7 +185,7 @@ func (c *Connector) NextFileRetry(cursor *types.SyncCursor) (*time.Time, error) 
 	var next *time.Time
 	for _, r := range state.FileRetries {
 		// Coalesce one source's retry batch after all pending files become due.
-		if r.State == "scheduled" && !r.NextAt.IsZero() && (next == nil || r.NextAt.After(*next)) {
+		if r.State == "scheduled" && r.Attempt < maxFileRetries && !r.NextAt.IsZero() && (next == nil || r.NextAt.After(*next)) {
 			at := r.NextAt
 			next = &at
 		}
@@ -158,6 +194,7 @@ func (c *Connector) NextFileRetry(cursor *types.SyncCursor) (*time.Time, error) 
 }
 
 func (c *Connector) FetchRetryStream(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor, h datasource.StreamHandler) (*types.SyncCursor, error) {
+	ctx = WithManagedRetries(ctx)
 	if config == nil {
 		return nil, fmt.Errorf("%w: retry config required", datasource.ErrInvalidConfig)
 	}
@@ -176,7 +213,7 @@ func (c *Connector) FetchRetryStream(ctx context.Context, config *types.DataSour
 		return nil, err
 	}
 	defer client.Close()
-	s := &fetchState{faq: config.FAQEnabled, client: client, handler: h, previous: previous, next: copyTencentDocsCursor(previous), seenDocs: map[string]bool{}, seenFileIDs: map[string]bool{}, visitedNodes: map[string]bool{}}
+	s := &fetchState{faq: config.FAQEnabled, retryPass: true, client: client, handler: h, previous: previous, next: copyTencentDocsCursor(previous), seenDocs: map[string]bool{}, seenFileIDs: map[string]bool{}, visitedNodes: map[string]bool{}}
 	ids := make([]string, 0, len(previous.FileRetries))
 	for id := range previous.FileRetries {
 		ids = append(ids, id)
@@ -185,10 +222,13 @@ func (c *Connector) FetchRetryStream(ctx context.Context, config *types.DataSour
 	for _, id := range ids {
 		r := s.next.FileRetries[id]
 		s.folderPath = r.FolderPath
-		if r.State == "exhausted" || r.State == "needs_manual" || (r.State == "scheduled" && r.Attempt >= maxFileRetries) {
+		if r.State == "exhausted" || r.State == "needs_manual" {
+			continue
+		}
+		if (r.State == "scheduled" || r.State == "running") && r.Attempt >= maxFileRetries {
 			// A crash after consuming the last attempt is not successful recovery.
 			// Report the durable terminal state without making any remote call.
-			item := failedFetchedItem(id, r.Node.Title, r.SpaceID, r.Node, r.SourceResourceID, errors.New("previous file failure requires manual action"))
+			item := failedFetchedItem(id, r.Node.Title, r.SpaceID, r.Node, r.SourceResourceID, errors.New("Final source retry was interrupted before recording a result"))
 			item.Metadata["retryable"] = "false"
 			if r.Category != "" {
 				item.Metadata["retry_category"] = r.Category
@@ -205,6 +245,7 @@ func (c *Connector) FetchRetryStream(ctx context.Context, config *types.DataSour
 			return nil, fmt.Errorf("%w: invalid retry target", datasource.ErrInvalidConfig)
 		}
 		r.Attempt++
+		r.State = "running"
 		s.next.FileRetries[id] = r
 		// Persist attempts before I/O so worker crashes cannot reset the retry budget.
 		if err = s.checkpoint(ctx); err != nil {

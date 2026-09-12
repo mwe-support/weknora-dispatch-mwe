@@ -33,12 +33,13 @@ func TestTencentRetryDoesNotAcknowledgeNewVersionUsingOldExport(t *testing.T) {
 	cursor, err := c.FetchRetryStream(context.Background(), cfg, syncCursorFromTencentDocs(p), h)
 	require.NoError(t, err)
 	require.Len(t, h.items, 1)
-	require.Equal(t, "VERSION-3", string(h.items[0].Content))
-	require.Equal(t, 1, client.exportStarts)
+	require.Empty(t, h.items[0].Content)
+	require.Contains(t, h.items[0].Metadata["error"], "SOURCE_CHANGED")
+	require.Equal(t, 0, client.exportStarts)
 	state, err := decodeTencentDocsCursor(cursor)
 	require.NoError(t, err)
-	require.EqualValues(t, 3, state.DocumentTimes[id])
-	require.Empty(t, state.FileRetries)
+	require.EqualValues(t, 1, state.DocumentTimes[id])
+	require.Equal(t, "exhausted", state.FileRetries[id].State)
 }
 
 type rejectedIngestHandler struct{ recordingStreamHandler }

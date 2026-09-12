@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
+	"strings"
 )
 
 // ExportSizeExceededError distinguishes a local capacity guard from a parser
@@ -13,6 +15,19 @@ type ExportSizeExceededError struct {
 	LimitBytes           int64
 	ActualBytes          *int64
 	ObservedAtLeastBytes int64
+}
+
+var sourceErrorURL = regexp.MustCompile(`https?://[^\s"'<>]+`)
+var sourceErrorSecret = regexp.MustCompile(`(?i)(authorization|cookie|password|api[_-]?key|[a-z0-9_-]*token|secret)\s*["']?\s*[:=]\s*[^\r\n,}]+`)
+
+func safeSourceError(message string) string {
+	message = sourceErrorURL.ReplaceAllString(message, "[URL_REDACTED]")
+	message = sourceErrorSecret.ReplaceAllString(message, "[SECRET_REDACTED]")
+	message = strings.Join(strings.Fields(message), " ")
+	if len(message) > 1000 {
+		message = strings.ToValidUTF8(message[:1000], "")
+	}
+	return message
 }
 
 func (e *ExportSizeExceededError) Error() string {
@@ -61,6 +76,18 @@ func addFileFailureMetadata(metadata map[string]string, err error) {
 	category, retryable := fileRetryCategory(err, stage)
 	metadata["retryable"] = strconv.FormatBool(retryable)
 	metadata["retry_category"] = category
+	var notSent *exportNotSentError
+	if errors.As(err, &notSent) {
+		metadata["export_not_sent"] = "true"
+	}
+	var wait *MCPBudgetWaitError
+	if errors.As(err, &wait) {
+		metadata["retry_admission_wait"] = "true"
+		metadata["retry_after_ms"] = strconv.FormatInt(wait.RetryAfter.Milliseconds(), 10)
+	}
+	if errors.Is(err, ErrUnsupportedSourceType) {
+		metadata["error_reason_code"], metadata["error_reason"] = "UNSUPPORTED_FILE_TYPE", "不支持的文档类型"
+	}
 	var task *exportTaskError
 	if errors.As(err, &task) {
 		metadata["retry_export_task_id"] = task.taskID

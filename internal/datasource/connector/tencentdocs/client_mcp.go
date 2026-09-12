@@ -369,7 +369,7 @@ func (c *TencentDocsMCPClient) StartExport(ctx context.Context, fileID string) (
 		return nil, err
 	}
 	if err := c.ensureReady(ctx); err != nil {
-		return nil, err
+		return nil, &exportNotSentError{err: err}
 	}
 	var task ExportTask
 	if err := c.callToolJSON(ctx, toolExportFile, map[string]interface{}{"file_id": fileID}, &task); err != nil {

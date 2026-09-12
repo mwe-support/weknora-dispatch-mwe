@@ -420,6 +420,8 @@ func (c *Connector) FetchAll(
 }
 
 type tencentDocsCursor struct {
+	RunID                string               `json:"run_id,omitempty"`
+	Completed            map[string]bool      `json:"completed_in_run,omitempty"`
 	FolderPaths          map[string]string    `json:"folder_paths,omitempty"`
 	DocumentTimes        map[string]uint64    `json:"document_times"`
 	ResourceFingerprints map[string]string    `json:"resource_fingerprints,omitempty"`
@@ -506,6 +508,7 @@ func (c *Connector) fetch(
 	incremental bool,
 	handler datasource.StreamHandler,
 ) ([]types.FetchedItem, *tencentDocsCursor, error) {
+	ctx = WithManagedRetries(ctx)
 	if len(resourceIDs) == 0 {
 		return nil, nil, errors.New("no Tencent Docs resources configured")
 	}
@@ -527,8 +530,17 @@ func (c *Connector) fetch(
 		visitedNodes:      make(map[string]bool),
 		next:              copyTencentDocsCursor(previous),
 	}
+	if state.next.RunID != config.SyncRunID {
+		state.next.RunID, state.next.Completed = config.SyncRunID, map[string]bool{}
+	}
 	if state.next.RetryScope != "" && state.next.RetryScope != retryScope(config) {
-		state.next.FileRetries = map[string]fileRetry{}
+		for id, failure := range state.next.FileRetries {
+			if failure.State == "scheduled" {
+				failure.State, failure.NextAt = "needs_manual", time.Time{}
+				failure.Error = safeSourceError("Source configuration changed; previous failure: " + failure.Error)
+				state.next.FileRetries[id] = failure
+			}
+		}
 	}
 	state.next.RetryScope = retryScope(config)
 	for _, selectedID := range resourceIDs {
@@ -558,6 +570,12 @@ func (c *Connector) fetch(
 			continue
 		}
 
+		if stopped, err := state.skipTerminalFile(ctx, ref.spaceID, Node{ID: ref.nodeID}, selectedID); stopped || err != nil {
+			if err != nil {
+				return nil, nil, err
+			}
+			continue
+		}
 		info, err := client.GetFileInfo(ctx, ref.nodeID)
 		if err != nil {
 			nodeType := "wiki_file"
@@ -631,12 +649,17 @@ func (c *Connector) fetch(
 
 func copyTencentDocsCursor(previous *tencentDocsCursor) *tencentDocsCursor {
 	next := &tencentDocsCursor{
+		Completed:            make(map[string]bool),
 		FolderPaths:          make(map[string]string),
 		DocumentTimes:        make(map[string]uint64),
 		ResourceFingerprints: make(map[string]string),
 		FileRetries:          make(map[string]fileRetry),
 	}
 	if previous != nil {
+		next.RunID = previous.RunID
+		for id, done := range previous.Completed {
+			next.Completed[id] = done
+		}
 		for id, p := range previous.FolderPaths {
 			next.FolderPaths[id] = p
 		}
@@ -671,6 +694,7 @@ func nodeFromFileInfo(info *FileInfo) Node {
 
 type fetchState struct {
 	faq               bool
+	retryPass         bool
 	folderPath        string
 	client            Client
 	handler           datasource.StreamHandler
@@ -726,6 +750,12 @@ func (s *fetchState) emit(ctx context.Context, item types.FetchedItem) error {
 	if item.Metadata == nil {
 		item.Metadata = map[string]string{}
 	}
+	if message := item.Metadata["error"]; message != "" {
+		if client, ok := s.client.(*TencentDocsMCPClient); ok && client.config.Token != "" {
+			message = strings.ReplaceAll(message, client.config.Token, "[SECRET_REDACTED]")
+		}
+		item.Metadata["error"] = safeSourceError(message)
+	}
 	item.Metadata["folder_path"] = s.folderPath
 	item.Metadata["source_path"] = strings.TrimPrefix(s.folderPath+"/"+item.Title, "/")
 	if item.Metadata["error"] != "" {
@@ -749,7 +779,7 @@ func (s *fetchState) emit(ctx context.Context, item types.FetchedItem) error {
 		delete(s.next.ResourceFingerprints, item.ExternalID)
 		if h, ok := s.handler.(interface{ ItemIngestError(string) error }); ok {
 			if err := h.ItemIngestError(item.ExternalID); err != nil {
-				item.Metadata["error"] = err.Error()
+				item.Metadata["error"] = safeSourceError(err.Error())
 				addFileFailureMetadata(item.Metadata, withFileStage("ingest", err))
 				s.trackFileRetry(&item)
 				if h, ok := s.handler.(interface{ UpdateFileFailure(types.FetchedItem) }); ok {
@@ -762,6 +792,9 @@ func (s *fetchState) emit(ctx context.Context, item types.FetchedItem) error {
 			s.trackFileRetry(&item)
 		}
 		s.rememberFolder(item)
+	}
+	if !s.retryPass && s.next.RunID != "" && item.Metadata["file_id"] != "" && item.Metadata["node_type"] != "folder" && item.Metadata["node_type"] != "wiki_folder" {
+		s.next.Completed[item.Metadata["file_id"]] = true
 	}
 	return s.checkpoint(ctx)
 }
@@ -932,6 +965,19 @@ func (s *fetchState) fetchNode(
 	knownInfo *FileInfo,
 	sourceResourceID string,
 ) error {
+	if !s.retryPass {
+		if s.next.Completed[node.ID] {
+			s.seenFileIDs[node.ID], s.seenDocs[fetchedNodeResourceID(spaceID, node.ID)] = true, true
+			return nil
+		}
+		if stopped, err := s.skipTerminalFile(ctx, spaceID, node, sourceResourceID); stopped || err != nil {
+			return err
+		}
+	}
+	if isTencentDocsOnlineType(node.DocumentType) && sourceExportFormat(node.DocumentType) == "" {
+		s.seenDocs[fetchedNodeResourceID(spaceID, node.ID)] = true
+		return s.emit(ctx, failedFetchedItem(fetchedNodeResourceID(spaceID, node.ID), node.Title, spaceID, node, sourceResourceID, ErrUnsupportedSourceType))
+	}
 	info := knownInfo
 	var err error
 	if info == nil {
@@ -970,92 +1016,11 @@ func (s *fetchState) fetchNode(
 		resolved.DocumentType = node.DocumentType
 		resolved.HasChildren = node.HasChildren
 	}
-	if strings.EqualFold(resolved.Type, "resource") {
-		return s.fetchResource(ctx, spaceID, resolved, info, sourceResourceID)
+	if isTencentDocsOnlineType(info.Type) && sourceExportFormat(info.Type) == "" {
+		s.seenDocs[fetchedNodeResourceID(spaceID, node.ID)] = true
+		return s.emit(ctx, failedFetchedItem(fetchedNodeResourceID(spaceID, node.ID), resolved.Title, spaceID, resolved, sourceResourceID, ErrUnsupportedSourceType))
 	}
-	return s.fetchDocument(ctx, spaceID, resolved, info, sourceResourceID)
-}
-
-func (s *fetchState) fetchDocument(
-	ctx context.Context,
-	spaceID string,
-	node Node,
-	knownInfo *FileInfo,
-	sourceResourceID string,
-) error {
-	externalID := fetchedNodeResourceID(spaceID, node.ID)
-	if s.seenFileIDs[node.ID] {
-		return nil
-	}
-	s.seenFileIDs[node.ID] = true
-	s.seenDocs[externalID] = true
-
-	info := knownInfo
-	var err error
-	if info == nil {
-		info, err = s.client.GetFileInfo(ctx, node.ID)
-	}
-	if err != nil {
-		return s.emit(ctx, failedFetchedItem(
-			externalID, node.Title, spaceID, node, sourceResourceID,
-			withFileStage("fetch_metadata", fmt.Errorf("get Tencent Docs file info: %w", err)),
-		))
-	}
-	if s.incremental && s.previous != nil && s.sameFolder(externalID) && s.previous.DocumentTimes[externalID] == info.ModifiedAt && info.ModifiedAt != 0 {
-		s.next.DocumentTimes[externalID] = info.ModifiedAt
-		return s.checkpoint(ctx)
-	}
-
-	documentType := firstNonEmpty(node.DocumentType, info.Type)
-	contentText, contentMetadata, err := fetchOnlineDocumentContent(
-		ctx, s.client, node.ID, documentType,
-	)
-	if err != nil {
-		title := firstNonEmpty(info.Title, node.Title)
-		if s.previous != nil {
-			if previousTime, ok := s.previous.DocumentTimes[externalID]; ok {
-				s.next.DocumentTimes[externalID] = previousTime
-			}
-		}
-		return s.emit(ctx, failedFetchedItem(
-			externalID, title, spaceID, node, sourceResourceID,
-			withFileStage("fetch_content", fmt.Errorf("get Tencent Docs content: %w", err)),
-		))
-	}
-	s.next.DocumentTimes[externalID] = info.ModifiedAt
-	delete(s.next.ResourceFingerprints, externalID)
-	title := info.Title
-	if title == "" {
-		title = node.Title
-	}
-	url := info.URL
-	if url == "" {
-		url = node.URL
-	}
-	metadata := map[string]string{
-		"channel":       types.ChannelTencentDocs,
-		"space_id":      spaceID,
-		"file_id":       node.ID,
-		"node_type":     node.Type,
-		"document_type": documentType,
-	}
-	for key, value := range contentMetadata {
-		metadata[key] = value
-	}
-	if spaceID == "" {
-		metadata["location"] = "personal_home"
-	}
-	return s.emit(ctx, types.FetchedItem{
-		ExternalID:       externalID,
-		Title:            title,
-		Content:          []byte(contentText),
-		ContentType:      "text/markdown",
-		FileName:         sanitizeTencentDocsFileName(title) + ".md",
-		URL:              url,
-		UpdatedAt:        timestamp(info.ModifiedAt),
-		SourceResourceID: sourceResourceID,
-		Metadata:         metadata,
-	})
+	return s.fetchResource(ctx, spaceID, resolved, info, sourceResourceID)
 }
 
 func (s *fetchState) fetchResource(
@@ -1083,7 +1048,7 @@ func (s *fetchState) fetchResource(
 			withFileStage("fetch_metadata", fmt.Errorf("get Tencent Docs resource info: %w", err)),
 		))
 	}
-	if s.incremental && s.previous != nil && s.sameFolder(externalID) && s.previous.DocumentTimes[externalID] == info.ModifiedAt && info.ModifiedAt != 0 {
+	if sourceExportFormat(info.Type) == "" && s.incremental && s.previous != nil && s.sameFolder(externalID) && s.previous.DocumentTimes[externalID] == info.ModifiedAt && info.ModifiedAt != 0 {
 		s.next.DocumentTimes[externalID] = info.ModifiedAt
 		return s.checkpoint(ctx)
 	}
@@ -1092,12 +1057,7 @@ func (s *fetchState) fetchResource(
 	// newer metadata timestamp must never acknowledge an older export body.
 	pendingVersion := s.next.FileRetries[externalID]
 	if pendingVersion.ExportTaskID != "" && pendingVersion.ExportModifiedAt != info.ModifiedAt {
-		pendingVersion.ExportTaskID = ""
-		pendingVersion.ExportStartUncertain = false
-		s.next.FileRetries[externalID] = pendingVersion
-		if err = s.checkpoint(ctx); err != nil {
-			return err
-		}
+		return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID, errors.New("SOURCE_CHANGED: retry cannot replace the recorded export snapshot"))
 	}
 	var task *ExportTask
 	if pending := s.next.FileRetries[externalID]; pending.ExportTaskID != "" {
@@ -1133,25 +1093,15 @@ func (s *fetchState) fetchResource(
 	}
 	exportCtx, cancel := context.WithTimeout(ctx, exportTimeout)
 	defer cancel()
-	var status *ExportStatus
-	for {
+	status, err := savedExportStatus(s.next.FileRetries[externalID])
+	if err != nil {
+		return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID, err)
+	}
+	for status == nil || status.Progress < 100 {
 		status, err = s.client.GetExportProgress(exportCtx, task.ID)
 		if err != nil {
 			if isUnsupportedResourceExportError(err) {
-				title := firstNonEmpty(info.Title, node.Title)
-				extension := strings.ToLower(strings.TrimSpace(node.DocumentType))
-				fingerprint := resourceFingerprint(nil, "unsupported-export:"+extension, title)
-				s.next.ResourceFingerprints[externalID] = fingerprint
-				s.next.DocumentTimes[externalID] = info.ModifiedAt
-				if s.incremental && s.previous != nil && s.sameFolder(externalID) &&
-					s.previous.ResourceFingerprints[externalID] == fingerprint {
-					delete(s.next.FileRetries, externalID)
-					return s.checkpoint(ctx)
-				}
-				return s.emit(ctx, skippedFetchedItem(
-					externalID, title, spaceID, node, sourceResourceID,
-					"unsupported_file_type", extension, title,
-				))
+				return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID, withFileStage("export", errors.Join(ErrUnsupportedSourceType, err)))
 			}
 			return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID,
 				withExportTask(task.ID, withFileStage("export", fmt.Errorf("poll Tencent Docs resource export: %w", err))))
@@ -1180,19 +1130,14 @@ func (s *fetchState) fetchResource(
 	}
 	title := firstNonEmpty(info.Title, node.Title, fileName)
 	extension := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileName)), ".")
+	if expected := sourceExportFormat(firstNonEmpty(info.Type, node.DocumentType)); expected != "" && extension != expected {
+		return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID, ErrUnsupportedSourceType)
+	}
 	if !types.IsSupportedKnowledgeFileExtension(extension) && !(s.faq && (extension == "json" || extension == "tsv")) {
-		fingerprint := resourceFingerprint(nil, fileName, title)
-		s.next.ResourceFingerprints[externalID] = fingerprint
-		s.next.DocumentTimes[externalID] = info.ModifiedAt
-		if s.incremental && s.previous != nil && s.sameFolder(externalID) &&
-			s.previous.ResourceFingerprints[externalID] == fingerprint {
-			delete(s.next.FileRetries, externalID)
-			return s.checkpoint(ctx)
-		}
-		return s.emit(ctx, skippedFetchedItem(
-			externalID, title, spaceID, node, sourceResourceID,
-			"unsupported_file_type", extension, fileName,
-		))
+		return s.emitResourceFailure(ctx, externalID, spaceID, node, info, sourceResourceID, ErrUnsupportedSourceType)
+	}
+	if err := s.saveExportURL(ctx, externalID, status, fileName); err != nil {
+		return err
 	}
 	data, err := s.client.DownloadExport(ctx, status.FileURL)
 	if err != nil {
@@ -1200,18 +1145,22 @@ func (s *fetchState) fetchResource(
 	}
 	fingerprint := resourceFingerprint(data, fileName, title)
 	s.next.ResourceFingerprints[externalID] = fingerprint
-	if s.incremental && s.previous != nil && s.sameFolder(externalID) && info.ModifiedAt == 0 &&
-		s.previous.ResourceFingerprints[externalID] == fingerprint {
+	unchanged := s.incremental && s.previous != nil && s.previous.ResourceFingerprints[externalID] == fingerprint
+	if unchanged && s.sameFolder(externalID) {
 		s.next.DocumentTimes[externalID] = info.ModifiedAt
 		delete(s.next.FileRetries, externalID)
 		return s.checkpoint(ctx)
 	}
 	s.next.DocumentTimes[externalID] = info.ModifiedAt
 	metadata := map[string]string{
-		"channel":   types.ChannelTencentDocs,
-		"space_id":  spaceID,
-		"file_id":   node.ID,
-		"node_type": node.Type,
+		"channel":            types.ChannelTencentDocs,
+		"space_id":           spaceID,
+		"file_id":            node.ID,
+		"node_type":          node.Type,
+		"source_fingerprint": fingerprint,
+	}
+	if unchanged {
+		metadata["directory_only"] = "true"
 	}
 	if spaceID == "" {
 		metadata["location"] = "personal_home"
@@ -1256,7 +1205,8 @@ func skippedFetchedItem(
 
 func resourceFingerprint(data []byte, fileName, title string) string {
 	hash := sha256.New()
-	_, _ = hash.Write(data)
+	digest := exportContentDigest(data)
+	_, _ = hash.Write(digest[:])
 	_, _ = hash.Write([]byte{0})
 	_, _ = hash.Write([]byte(fileName))
 	_, _ = hash.Write([]byte{0})

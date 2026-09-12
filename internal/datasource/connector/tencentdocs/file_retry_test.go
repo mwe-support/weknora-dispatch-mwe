@@ -94,14 +94,14 @@ func TestFileRetryOnlyFetchesFailedFileAndPreservesCursor(t *testing.T) {
 	p.FileRetries[id] = r
 	delete(client.contentErrs, "bad")
 	client.listCalls = 0
-	client.contentGets = 0
+	client.exportPolls = 0
 	h = &recordingStreamHandler{}
 	cursor, err = c.FetchRetryStream(context.Background(), cfg, syncCursorFromTencentDocs(p), h)
 	if err != nil {
 		t.Fatal(err)
 	}
 	end, _ := decodeTencentDocsCursor(cursor)
-	if client.listCalls != 0 || client.contentGets != 1 || len(h.items) != 1 || len(end.FileRetries) != 0 || len(end.DocumentTimes) != 2 {
+	if client.listCalls != 0 || client.exportPolls != 1 || len(h.items) != 1 || len(end.FileRetries) != 0 || len(end.DocumentTimes) != 2 {
 		t.Fatalf("retry repeated successful files or lost cursor: %+v", end)
 	}
 	if string(h.items[0].Content) != "RECOVERED" {

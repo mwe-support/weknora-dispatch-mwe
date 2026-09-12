@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -26,6 +27,7 @@ type fakeConnectorClient struct {
 	exportData   map[string][]byte
 	contentGets  int
 	exportStarts int
+	exportPolls  int
 	downloads    int
 	closed       int
 }
@@ -82,8 +84,18 @@ func (f *fakeConnectorClient) GetContent(_ context.Context, fileID string) (*Doc
 	copy := *content
 	return &copy, nil
 }
-func (f *fakeConnectorClient) StartExport(context.Context, string) (*ExportTask, error) {
+func (f *fakeConnectorClient) StartExport(_ context.Context, id string) (*ExportTask, error) {
 	f.exportStarts++
+	if task, ok := f.exportTasks[id]; ok {
+		copy := *task
+		return &copy, nil
+	}
+	if _, ok := f.contents[id]; ok {
+		return &ExportTask{ID: "fixture-export:" + id}, nil
+	}
+	if _, ok := f.contentErrs[id]; ok {
+		return &ExportTask{ID: "fixture-export:" + id}, nil
+	}
 	for _, task := range f.exportTasks {
 		copy := *task
 		return &copy, nil
@@ -91,6 +103,19 @@ func (f *fakeConnectorClient) StartExport(context.Context, string) (*ExportTask,
 	return nil, errors.New("missing export task")
 }
 func (f *fakeConnectorClient) GetExportProgress(_ context.Context, taskID string) (*ExportStatus, error) {
+	f.exportPolls++
+	if strings.HasPrefix(taskID, "fixture-export:") {
+		id := strings.TrimPrefix(taskID, "fixture-export:")
+		if err := f.contentErrs[id]; err != nil {
+			return nil, err
+		}
+		info := f.infos[id]
+		format := sourceExportFormat(info.Type)
+		if format == "" {
+			format = "docx"
+		}
+		return &ExportStatus{Progress: 100, FileName: info.Title + "." + format, FileURL: "https://docs.qq.com/fixture-export/" + id}, nil
+	}
 	if err := f.exportErrs[taskID]; err != nil {
 		return nil, err
 	}
@@ -123,13 +148,19 @@ func TestConnectorFetchAllSkipsUnsupportedExportProgress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
 	}
-	if len(items) != 1 || items[0].Metadata["skip_reason"] != "unsupported_file_type" ||
-		items[0].Metadata["error"] != "" {
-		t.Fatalf("items = %+v, want one unsupported-file skip", items)
+	if len(items) != 1 || items[0].Metadata["retry_category"] != "UNSUPPORTED_FILE_TYPE" ||
+		items[0].Metadata["error"] == "" {
+		t.Fatalf("items = %+v, want one permanent unsupported-file error", items)
 	}
 }
 func (f *fakeConnectorClient) DownloadExport(_ context.Context, fileURL string) ([]byte, error) {
 	f.downloads++
+	if strings.HasPrefix(fileURL, "https://docs.qq.com/fixture-export/") {
+		id := strings.TrimPrefix(fileURL, "https://docs.qq.com/fixture-export/")
+		if content, ok := f.contents[id]; ok {
+			return []byte(content.Text), nil
+		}
+	}
 	data, ok := f.exportData[fileURL]
 	if !ok {
 		return nil, errors.New("missing export data")
@@ -180,7 +211,7 @@ func TestTencentDocsOnlineTypeCompatibilityMatrix(t *testing.T) {
 	}
 }
 
-func TestConnectorFetchAllUsesContentPathForNonSheetOnlineDocumentTypes(t *testing.T) {
+func TestConnectorExportsSupportedOnlineTypesAndRejectsOthers(t *testing.T) {
 	for _, documentType := range []string{
 		"word", "form", "slide", "smartcanvas", "smartsheet", "mind", "flowchart",
 	} {
@@ -199,11 +230,18 @@ func TestConnectorFetchAllUsesContentPathForNonSheetOnlineDocumentTypes(t *testi
 				context.Background(), testDataSourceConfig(encodeSpaceResourceID("space-1")),
 				[]string{encodeSpaceResourceID("space-1")},
 			)
-			if err != nil || len(items) != 1 || string(items[0].Content) != "content" {
+			if err != nil || len(items) != 1 {
 				t.Fatalf("FetchAll() = %+v, %v", items, err)
 			}
-			if client.contentGets != 1 || client.exportStarts != 0 {
-				t.Fatalf("GetContent=%d StartExport=%d, want 1/0", client.contentGets, client.exportStarts)
+			if sourceExportFormat(documentType) == "" {
+				if client.exportStarts != 0 || items[0].Metadata["retry_category"] != "UNSUPPORTED_FILE_TYPE" {
+					t.Fatal("unsupported online type was exported")
+				}
+			} else if client.exportStarts != 1 || string(items[0].Content) != "content" {
+				t.Fatal("supported online type was not exported")
+			}
+			if client.contentGets != 0 {
+				t.Fatalf("GetContent=%d, source sync must not read bodies through MCP", client.contentGets)
 			}
 		})
 	}
@@ -352,7 +390,7 @@ func TestConnectorFetchAllSelectedSpaceTraversesAndDeduplicates(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("FetchAll() len = %d, want 2: %+v", len(items), items)
 	}
-	if items[0].ContentType != "text/markdown" || items[0].Metadata["channel"] != types.ChannelTencentDocs {
+	if items[0].ContentType != "application/octet-stream" || items[0].Metadata["channel"] != types.ChannelTencentDocs {
 		t.Fatalf("item metadata = %+v", items[0])
 	}
 }
@@ -674,8 +712,8 @@ func TestConnectorFetchAllSkipsUnsupportedExportedResourceExtension(t *testing.T
 		t.Fatalf("items = %+v, want one explicit skip placeholder", items)
 	}
 	item := items[0]
-	if item.Metadata["error"] != "" || item.Metadata["skip_reason"] != "unsupported_file_type" {
-		t.Fatalf("item metadata = %+v, want a non-failure unsupported-file skip", item.Metadata)
+	if item.Metadata["error"] == "" || item.Metadata["retry_category"] != "UNSUPPORTED_FILE_TYPE" {
+		t.Fatalf("item metadata = %+v, want permanent unsupported-file failure", item.Metadata)
 	}
 	if len(item.Content) != 0 || item.URL != "" {
 		t.Fatalf("item = %+v, unsupported file must not reach ingestion", item)
@@ -699,15 +737,15 @@ func TestConnectorFetchIncrementalSkipsUnchangedUnsupportedExportMetadata(t *tes
 	config := testDataSourceConfig(encodeSpaceResourceID("space-1"))
 
 	first, cursor, err := connector.FetchIncremental(context.Background(), config, nil)
-	if err != nil || len(first) != 1 || first[0].Metadata["skip_reason"] != "unsupported_file_type" {
+	if err != nil || len(first) != 1 || first[0].Metadata["retry_category"] != "UNSUPPORTED_FILE_TYPE" {
 		t.Fatalf("first FetchIncremental() = %+v, %+v, %v", first, cursor, err)
 	}
 	second, _, err := connector.FetchIncremental(context.Background(), config, cursor)
 	if err != nil {
 		t.Fatalf("second FetchIncremental() error: %v", err)
 	}
-	if len(second) != 0 {
-		t.Fatalf("second items = %+v, want unchanged unsupported file to stay skipped", second)
+	if len(second) != 1 || second[0].Metadata["retry_category"] != "UNSUPPORTED_FILE_TYPE" || client.exportStarts != 1 {
+		t.Fatalf("second items = %+v, want retained failure without another export", second)
 	}
 	if client.downloads != 0 {
 		t.Fatalf("DownloadExport() calls = %d, unsupported file must never be downloaded", client.downloads)
@@ -949,8 +987,8 @@ func TestConnectorFetchStreamEmitsAndCheckpointsWithoutBuffering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchStream() error: %v", err)
 	}
-	if len(handler.items) != 2 || len(handler.checkpoints) != 2 {
-		t.Fatalf("items=%d checkpoints=%d, want 2/2", len(handler.items), len(handler.checkpoints))
+	if len(handler.items) != 2 || len(handler.checkpoints) != 8 {
+		t.Fatalf("items=%d checkpoints=%d, want 2/8 (export intent, task, URL, item)", len(handler.items), len(handler.checkpoints))
 	}
 	if next == nil || next.ConnectorCursor == nil {
 		t.Fatal("final cursor is nil")
@@ -978,8 +1016,8 @@ func TestConnectorFetchStreamExportsUnclassifiedFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchStream() error: %v", err)
 	}
-	if len(handler.items) != 1 || len(handler.checkpoints) != 3 {
-		t.Fatalf("items=%d checkpoints=%d, want 1/3 (intent, task ID, result)", len(handler.items), len(handler.checkpoints))
+	if len(handler.items) != 1 || len(handler.checkpoints) != 4 {
+		t.Fatalf("items=%d checkpoints=%d, want 1/4 (intent, task ID, URL, result)", len(handler.items), len(handler.checkpoints))
 	}
 	if handler.items[0].FileName != "org-chart.png" || string(handler.items[0].Content) != "png-bytes" {
 		t.Fatalf("stream item = %+v", handler.items[0])
@@ -1008,8 +1046,8 @@ func TestConnectorFetchStreamCheckpointsAndSkipsUnchangedUnsupportedResource(t *
 	if err != nil || len(firstHandler.items) != 1 || len(firstHandler.checkpoints) != 3 {
 		t.Fatalf("first FetchStream items=%+v checkpoints=%d err=%v", firstHandler.items, len(firstHandler.checkpoints), err)
 	}
-	if firstHandler.items[0].Metadata["skip_reason"] != "unsupported_file_type" {
-		t.Fatalf("first item = %+v, want explicit unsupported skip", firstHandler.items[0])
+	if firstHandler.items[0].Metadata["retry_category"] != "UNSUPPORTED_FILE_TYPE" {
+		t.Fatalf("first item = %+v, want explicit unsupported failure", firstHandler.items[0])
 	}
 
 	secondHandler := &recordingStreamHandler{}
@@ -1019,12 +1057,12 @@ func TestConnectorFetchStreamCheckpointsAndSkipsUnchangedUnsupportedResource(t *
 	if err != nil {
 		t.Fatalf("second FetchStream() error: %v", err)
 	}
-	if len(secondHandler.items) != 0 || len(secondHandler.checkpoints) != 3 {
-		t.Fatalf("second items=%d checkpoints=%d, want 0/3", len(secondHandler.items), len(secondHandler.checkpoints))
+	if len(secondHandler.items) != 1 || len(secondHandler.checkpoints) != 1 || client.exportStarts != 1 {
+		t.Fatalf("second items=%d checkpoints=%d, want retained failure without export", len(secondHandler.items), len(secondHandler.checkpoints))
 	}
-	state, _ := decodeTencentDocsCursor(secondHandler.checkpoints[2])
-	if len(state.FileRetries) != 0 {
-		t.Fatal("unchanged skip retained stale export task")
+	state, _ := decodeTencentDocsCursor(secondHandler.checkpoints[0])
+	if len(state.FileRetries) != 1 {
+		t.Fatal("permanent unsupported record was lost")
 	}
 	if client.downloads != 0 {
 		t.Fatalf("DownloadExport() calls = %d, unsupported resource must not be downloaded", client.downloads)
