@@ -58,6 +58,24 @@ CREATE OR REPLACE VIEW :"observer_schema".task_pending_ops AS
  WHERE step_id IS NULL OR delivered_at IS NULL;
 -- Context is keyed to the exact job or scan step, never joined by title or to
 -- the newest knowledge version. Only recorded source metadata is exposed.
+-- Overview counts must not traverse the detailed evidence/legacy joins. Only
+-- aggregate state is exposed here; source configuration and content stay private.
+CREATE OR REPLACE VIEW :"observer_schema".processing_runtime_counts AS
+ WITH current_jobs AS (
+  SELECT id,kind FROM :"app_schema".processing_jobs WHERE is_current
+ ), stages AS (
+  SELECT
+   count(*) FILTER (WHERE s.status='running' AND s.lease_expires_at>NOW())::bigint AS executing,
+   count(*) FILTER (WHERE s.status IN ('queued','enqueue_pending'))::bigint AS queued,
+   count(*) FILTER (WHERE s.status IN ('waiting_external','retry_wait'))::bigint AS waiting,
+   count(*) FILTER (WHERE s.status IN ('failed','blocked') OR
+     (s.status='running' AND (s.lease_expires_at IS NULL OR s.lease_expires_at<=NOW())))::bigint AS abnormal
+  FROM :"app_schema".processing_steps s JOIN current_jobs j ON j.id=s.job_id
+  WHERE j.kind<>'legacy'
+ ), jobs AS (
+  SELECT count(*) FILTER (WHERE kind='document')::bigint AS documents,
+         count(*) FILTER (WHERE kind='scan')::bigint AS batches FROM current_jobs
+ ) SELECT stages.*,jobs.* FROM stages CROSS JOIN jobs;
 CREATE OR REPLACE VIEW :"observer_schema".processing_job_context AS
  SELECT j.tenant_id,j.id AS job_id,COALESCE(t.name,j.tenant_id::text) AS workspace_name,
  ds.type AS source_type,NULLIF(j.metadata->>'file_id','') AS file_id,
