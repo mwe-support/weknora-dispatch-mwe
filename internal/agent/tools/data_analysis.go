@@ -473,8 +473,17 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 		}
 
 		createTableSQL := buildExcelCreateTableSQL(tableName, filename, sheetNames)
-
-		if _, err := t.db.ExecContext(ctx, createTableSQL); err != nil {
+		_, loadErr := t.db.ExecContext(ctx, createTableSQL)
+		// Tencent exports can omit the default number format in style records.
+		// Repair only that compatibility error in a temporary copy, without
+		// changing the saved workbook or making another source request.
+		if loadErr != nil && strings.Contains(loadErr.Error(), "Invalid xf entry in styles.xml") {
+			if normalized, err := excelWithExplicitNumberFormats(filename); err == nil {
+				defer os.Remove(normalized)
+				_, loadErr = t.db.ExecContext(ctx, buildExcelCreateTableSQL(tableName, normalized, sheetNames))
+			}
+		}
+		if err := loadErr; err != nil {
 			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from Excel (sheets=%v): %v", sheetNames, err)
 			return nil, fmt.Errorf("failed to create table from Excel file (sheets=%v): %w", sheetNames, err)
 		}

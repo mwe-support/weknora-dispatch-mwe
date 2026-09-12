@@ -1,15 +1,88 @@
 package tools
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "github.com/duckdb/duckdb-go/v2"
 	"github.com/xuri/excelize/v2"
 )
+
+func TestLoadFromExcel_OmittedDefaultNumberFormat(t *testing.T) {
+	db := newTestDuckDB(t)
+	path := filepath.Join(t.TempDir(), "export.xlsx")
+	writeWorkbook(t, path, map[string][][]any{"Sheet1": {{"name", "amount"}, {"sample", 42}}}, []string{"Sheet1"})
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	z, err := zip.NewReader(bytes.NewReader(original), int64(len(original)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exported bytes.Buffer
+	w := zip.NewWriter(&exported)
+	for _, f := range z.File {
+		if f.Name != "xl/styles.xml" {
+			if err := w.Copy(f); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		r, err := f.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := io.ReadAll(r)
+		r.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		b = bytes.ReplaceAll(b, []byte(` numFmtId="0"`), nil)
+		header := f.FileHeader
+		dst, err := w.CreateHeader(&header)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = dst.Write(b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(path, exported.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.ExecContext(context.Background(), buildExcelCreateTableSQL("raw_export", path, nil))
+	if err == nil || !strings.Contains(err.Error(), "Invalid xf entry") {
+		t.Fatalf("fixture must reproduce missing style default: %v", err)
+	}
+	tool := &DataAnalysisTool{db: db, sessionID: "export-style-compatibility"}
+	schema, err := tool.LoadFromExcel(context.Background(), path, "repaired_export")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if schema.RowCount != 1 {
+		t.Fatalf("unexpected rows: %d", schema.RowCount)
+	}
+	var amount string
+	if err = db.QueryRow(`SELECT amount FROM repaired_export`).Scan(&amount); err != nil || amount != "42" {
+		t.Fatalf("cell changed: %q, %v", amount, err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(after, exported.Bytes()) {
+		t.Fatal("saved source workbook changed")
+	}
+}
 
 // newTestDuckDB opens an in-memory DuckDB and loads the extensions the
 // Data Analysis tool needs. If the extensions can't be installed (e.g. the
