@@ -1,0 +1,6 @@
+# MWE production: I/O-heavy source tasks share the maintenance worker pool.
+# Tencent per-credential pacing and model concurrency limits remain separate.
+services:
+  app:
+    environment:
+      WEKNORA_ASYNQ_MAINTENANCE_CONCURRENCY: "4"
