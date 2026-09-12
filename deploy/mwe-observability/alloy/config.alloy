@@ -20,6 +20,28 @@ prometheus.exporter.unix "host" {
   procfs_path = "/host/proc"
   sysfs_path  = "/host/sys"
   rootfs_path = "/host/root"
+  // /proc/net follows the caller's network namespace even through a bind mount.
+  // Network counters come from the host PID 1 view below instead.
+  disable_collectors = ["netdev"]
+}
+
+prometheus.exporter.unix "host_network" {
+  procfs_path   = "/host/proc/1"
+  set_collectors = ["netdev"]
+}
+
+discovery.relabel "host_network" {
+  targets = prometheus.exporter.unix.host_network.targets
+  rule {
+    target_label = "job"
+    replacement  = "integrations/host_network"
+  }
+}
+
+prometheus.scrape "host_network" {
+  targets         = discovery.relabel.host_network.output
+  scrape_interval = "15s"
+  forward_to      = [prometheus.relabel.host.receiver]
 }
 
 prometheus.scrape "host" {
