@@ -123,6 +123,46 @@ CREATE OR REPLACE VIEW :"observer_schema".processing_legacy_context AS
  JOIN :"app_schema".sync_logs s ON s.id=e.run_id AND s.tenant_id=e.tenant_id AND s.data_source_id=e.datasource_id
  CROSS JOIN LATERAL (SELECT s.result->'errors'->(e.error_ordinal::int-1) AS value) item;
 -- Apply on every install/upgrade, including an existing secrets file.
+CREATE OR REPLACE FUNCTION :"observer_schema".safe_source_error(message text)
+RETURNS text LANGUAGE sql IMMUTABLE AS $$
+ SELECT CASE WHEN COALESCE(message,'') ~* '(authorization|password|cookie|secret|api[_-]?key|token)[[:space:]]*["'']?[[:space:]]*[:=]'
+ THEN '[认证或敏感信息已隐藏]'
+ ELSE LEFT(regexp_replace(regexp_replace(COALESCE(message,''),'https?://[^[:space:]]+','[URL_REDACTED]','g'),'[[:cntrl:]]',' ','g'),1000) END
+$$;
+CREATE OR REPLACE VIEW :"observer_schema".tencent_file_failures AS
+ SELECT ds.tenant_id,ds.id AS datasource_id,ds.name AS source_name,ds.knowledge_base_id,kb.name AS kb_name,
+ e.key AS external_id,e.value->'node'->>'node_id' AS file_id,e.value->'node'->>'title' AS title,
+ e.value->>'folder_path' AS folder_path,e.value->>'state' AS state,
+ CASE WHEN e.value->>'attempt' ~ '^[0-9]{1,8}$' THEN (e.value->>'attempt')::int ELSE 0 END AS attempt,
+ e.value->>'stage' AS stage,e.value->>'category' AS category,
+ :"observer_schema".safe_source_error(e.value->>'error') AS error_message,
+ :"observer_schema".safe_source_error(e.value->>'first_error') AS first_error,
+ CASE WHEN pg_input_is_valid(e.value->>'error_at','timestamp with time zone') AND e.value->>'error_at' NOT LIKE '0001-%'
+ THEN (e.value->>'error_at')::timestamptz END AS error_at
+ FROM :"app_schema".data_sources ds
+ JOIN :"app_schema".knowledge_bases kb ON kb.id=ds.knowledge_base_id AND kb.tenant_id=ds.tenant_id AND kb.deleted_at IS NULL
+ CROSS JOIN LATERAL jsonb_each(CASE WHEN jsonb_typeof(ds.last_sync_cursor->'connector_cursor'->'file_retries')='object'
+ THEN ds.last_sync_cursor->'connector_cursor'->'file_retries' ELSE '{}'::jsonb END) e
+ WHERE ds.type='tencent_docs' AND ds.tencent_file_sync AND ds.deleted_at IS NULL AND ds.status<>'deleted'
+ AND e.value->>'state' IN ('scheduled','running','needs_manual','exhausted');
+CREATE OR REPLACE VIEW :"observer_schema".tencent_file_runs AS
+ SELECT s.id AS run_id,s.tenant_id,ds.id AS datasource_id,ds.name AS source_name,ds.knowledge_base_id,kb.name AS kb_name,
+ s.status,s.started_at,s.finished_at,s.items_total,s.items_created,s.items_updated,s.items_skipped,s.items_failed,
+ s.result->>'retry_state' AS retry_state,s.result->>'retry_of' AS retry_of,
+ :"observer_schema".safe_source_error(s.error_message) AS error_message
+ FROM :"app_schema".sync_logs s
+ JOIN :"app_schema".data_sources ds ON ds.id=s.data_source_id AND ds.tenant_id=s.tenant_id
+ JOIN :"app_schema".knowledge_bases kb ON kb.id=ds.knowledge_base_id AND kb.tenant_id=ds.tenant_id
+ WHERE ds.type='tencent_docs' AND ds.tencent_file_sync AND ds.deleted_at IS NULL AND kb.deleted_at IS NULL
+ AND s.result->>'engine'='tencent-file-v1';
+CREATE OR REPLACE VIEW :"observer_schema".tencent_file_knowledge AS
+ SELECT k.id,k.tenant_id,k.knowledge_base_id,k.title,k.folder_path,k.parse_status,k.summary_status,k.updated_at,
+ k.metadata->>'datasource_id' AS datasource_id,k.metadata->>'file_id' AS file_id,
+ k.metadata->>'datasource_candidate'='true' AS unpublished,
+ :"observer_schema".safe_source_error(COALESCE(NULLIF(k.error_message,''),k.metadata->>'datasource_processing_failed')) AS error_message
+ FROM :"app_schema".knowledges k WHERE k.deleted_at IS NULL AND k.metadata->>'datasource_async_publish'='true';
+CREATE OR REPLACE VIEW :"observer_schema".knowledge_file_inventory AS
+ SELECT id,tenant_id,knowledge_base_id,parse_status FROM :"app_schema".knowledges WHERE deleted_at IS NULL;
 REVOKE ALL ON ALL TABLES IN SCHEMA :"app_schema" FROM :"observer_role";
 ALTER DEFAULT PRIVILEGES IN SCHEMA :"app_schema" REVOKE SELECT ON TABLES FROM :"observer_role";
 GRANT USAGE ON SCHEMA :"app_schema", :"observer_schema" TO :"observer_role";

@@ -202,6 +202,8 @@ def outputs():
     home.setdefault('links',[])
     if not any(link.get('url')=='/d/mwe-processing-lifecycle-v2' for link in home['links']):
         home['links'].append({'title':'处理生命周期','type':'link','url':'/d/mwe-processing-lifecycle-v2','targetBlank':False})
+    from tencent_file_observability import configure
+    configure(home)
     result[home_path]=json.dumps(home,ensure_ascii=False,indent=2)+'\n'
     return result
 

@@ -19,8 +19,8 @@
     {
       "id": 104,
       "type": "stat",
-      "title": "执行中阶段",
-      "description": "当前版本已领取且租约仍有效的阶段；可能正在等待网络或 CPU，不等于 GPU 推理。 数据为查询时的当前状态，不随右上角历史时间范围回溯。",
+      "title": "实际后台执行任务",
+      "description": "Redis 中实际 Asynq 任务数量；任务可能执行网络或 CPU 工作，不等于 GPU 推理。监控不可用或超过60秒未更新时显示未知。",
       "gridPos": {
         "h": 4,
         "w": 6,
@@ -28,15 +28,15 @@
         "y": 0
       },
       "datasource": {
-        "type": "postgres",
-        "uid": "weknora-postgres"
+        "type": "prometheus",
+        "uid": "prometheus"
       },
       "targets": [
         {
           "refId": "A",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT executing AS total FROM processing_runtime_counts"
+          "expr": "(sum(redis_key_size{host=\"marvel-kb\",job=\"integrations/redis\",key=~\"asynq:.*:(active)\"}) or vector(0)) and on() (redis_up{host=\"marvel-kb\",job=\"integrations/redis\"} == 1) and on() (time() - timestamp(redis_up{host=\"marvel-kb\",job=\"integrations/redis\"}) < 60)",
+          "instant": true,
+          "range": false
         }
       ],
       "options": {
@@ -79,8 +79,8 @@
     {
       "id": 110,
       "type": "stat",
-      "title": "排队 / 待派发阶段",
-      "description": "尚未执行的阶段；包含待派发记录，与 Redis 瞬时队列长度可能略有差异。 数据为查询时的当前状态，不随右上角历史时间范围回溯。",
+      "title": "普通后台排队任务",
+      "description": "Redis 中实际 Asynq 任务数量；任务可能执行网络或 CPU 工作，不等于 GPU 推理。监控不可用或超过60秒未更新时显示未知。",
       "gridPos": {
         "h": 4,
         "w": 6,
@@ -88,15 +88,15 @@
         "y": 0
       },
       "datasource": {
-        "type": "postgres",
-        "uid": "weknora-postgres"
+        "type": "prometheus",
+        "uid": "prometheus"
       },
       "targets": [
         {
           "refId": "A",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT queued AS total FROM processing_runtime_counts"
+          "expr": "(sum(redis_key_size{host=\"marvel-kb\",job=\"integrations/redis\",key=~\"asynq:.*:(pending|scheduled|retry)\",key!~\"asynq:[{]sync_retry[}]:.*\"}) or vector(0)) and on() (redis_up{host=\"marvel-kb\",job=\"integrations/redis\"} == 1) and on() (time() - timestamp(redis_up{host=\"marvel-kb\",job=\"integrations/redis\"}) < 60)",
+          "instant": true,
+          "range": false
         }
       ],
       "options": {
@@ -139,8 +139,8 @@
     {
       "id": 111,
       "type": "stat",
-      "title": "等待结果 / 重试阶段",
-      "description": "等待外部结果、子阶段完成或重试时间；不计入执行中。 数据为查询时的当前状态，不随右上角历史时间范围回溯。",
+      "title": "待补试文档",
+      "description": "同源正常文件获取和提交完成后补试，每文件最多一次；一个补试任务可以处理多个文件。",
       "gridPos": {
         "h": 4,
         "w": 6,
@@ -156,7 +156,7 @@
           "refId": "A",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT waiting AS total FROM processing_runtime_counts"
+          "rawSql": "SELECT count(*) AS total FROM tencent_file_failures WHERE state='scheduled'"
         }
       ],
       "options": {
@@ -199,8 +199,8 @@
     {
       "id": 103,
       "type": "stat",
-      "title": "异常 / 待恢复阶段",
-      "description": "当前版本失败、阻塞或执行租约失效的阶段。租约失效单独等待系统恢复，不冒充正在执行。 数据为查询时的当前状态，不随右上角历史时间范围回溯。",
+      "title": "源文件最终失败 / 待核对",
+      "description": "永久拒绝、补试仍失败及未知导出；后续同步不自动重开这些文件。",
       "gridPos": {
         "h": 4,
         "w": 6,
@@ -216,7 +216,7 @@
           "refId": "A",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT abnormal AS total FROM processing_runtime_counts"
+          "rawSql": "SELECT count(*) AS total FROM tencent_file_failures WHERE state IN ('needs_manual','exhausted')"
         }
       ],
       "options": {
@@ -258,8 +258,8 @@
     {
       "id": 102,
       "type": "stat",
-      "title": "当前版本文档（含已完成）",
-      "description": "登记的当前版本文档总数，包含已完成、未启动、处理中和异常文档，不是并发数。 数据为查询时的当前状态，不随右上角历史时间范围回溯。",
+      "title": "知识文件（含候选与已完成）",
+      "description": "数据库知识文件数量，包含后台处理中和候选文件，不是并发数。",
       "gridPos": {
         "h": 4,
         "w": 6,
@@ -275,7 +275,7 @@
           "refId": "A",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT documents AS total FROM processing_runtime_counts"
+          "rawSql": "SELECT count(*) AS total FROM knowledge_file_inventory"
         }
       ],
       "options": {
@@ -318,8 +318,8 @@
     {
       "id": 101,
       "type": "stat",
-      "title": "当前批次记录（含已结束）",
-      "description": "被标为当前代的同步批次记录数，包含已结束批次，不是正在运行的批次数。 数据为查询时的当前状态，不随右上角历史时间范围回溯。",
+      "title": "源同步批次（含已结束）",
+      "description": "源文件获取提交的批次记录，不代表解析、索引、摘要已结束。",
       "gridPos": {
         "h": 4,
         "w": 6,
@@ -335,7 +335,7 @@
           "refId": "A",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT batches AS total FROM processing_runtime_counts"
+          "rawSql": "SELECT count(*) AS total FROM tencent_file_runs"
         }
       ],
       "options": {
@@ -485,7 +485,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**排队、等待和异常都不等于正在执行。** 执行中按有效租约统计，可包含网络等待；扫描、源内容读取、导出和下载不要求 GPU 工作。\n\n阶段与文档卡片反映查询时的最新状态；模型/GPU 卡片取所选结束时刻的采样。对照当前运行情况时，请保持时间范围结束于“现在”并刷新。[查看具体文档和失败原因](/d/mwe-processing-lifecycle-v2)。未满足前置条件的计划阶段不计入排队；历史记录保留在底部折叠区。"
+        "content": "**正常源同步与补试分开。** 每个数据源本轮正常文件导出、下载并提交 WeKnora 后，才补试该源失败文件一次。解析、图片、向量和摘要使用原有流程。后台活动任务包括网络/CPU工作；GPU请求单独统计。目录树来自本地路径，不调用腾讯 MCP。"
       }
     },
     {
@@ -2542,6 +2542,148 @@
           "type": "timeseries"
         }
       ]
+    },
+    {
+      "id": 120,
+      "type": "row",
+      "title": "腾讯文件同步、补试与最终失败",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 121,
+      "type": "table",
+      "title": "文件补试和永久失败",
+      "description": "按时间排序，最多显示1000条，可按腾讯数据源筛选。补试/永久错误来自持久游标，不受同步日志100条错误样本上限影响。",
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weknora-postgres"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT source_name AS \"数据源\",kb_name AS \"知识库\",concat_ws('/',NULLIF(folder_path,''),title) AS \"腾讯文档路径\",file_id AS \"文件ID\",\nCASE WHEN category='EXPORT_START_UNCERTAIN' THEN '需核对已有导出' WHEN state='scheduled' THEN '待补试：等待同源正常获取结束' WHEN state='running' THEN '正在补试' WHEN state='exhausted' THEN '补试已用尽：永久失败' ELSE '永久失败：需人工解除' END AS \"状态\",\nattempt AS \"已补试次数\",stage AS \"失败阶段\",category AS \"错误类别\",error_message AS \"具体错误\",first_error AS \"首次错误\",error_at AS \"最近错误记录\"\nFROM tencent_file_failures WHERE (${td_source:sqlstring}='' OR datasource_id=${td_source:sqlstring}) ORDER BY error_at DESC NULLS LAST,datasource_id,external_id LIMIT 1000"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "enablePagination": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 122,
+      "type": "table",
+      "title": "源文件获取与提交记录",
+      "description": "按时间排序，最多显示1000条，可按腾讯数据源筛选。补试/永久错误来自持久游标，不受同步日志100条错误样本上限影响。",
+      "gridPos": {
+        "x": 0,
+        "y": 38,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weknora-postgres"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT source_name AS \"数据源\",kb_name AS \"知识库\",CASE WHEN retry_of IS NULL OR retry_of='' THEN '正常获取' ELSE '同源补试' END AS \"阶段\",status AS \"记录状态\",items_total AS \"本次处理\",items_created AS \"已提交新文件\",items_updated AS \"已提交更新\",items_failed AS \"失败\",started_at AS \"开始时间\",finished_at AS \"获取提交结束\",error_message AS \"错误说明\",run_id AS \"同步记录ID\"\nFROM tencent_file_runs WHERE (${td_source:sqlstring}='' OR datasource_id=${td_source:sqlstring}) ORDER BY started_at DESC LIMIT 1000"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "enablePagination": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 123,
+      "type": "table",
+      "title": "提交后的 WeKnora 文件处理",
+      "description": "按时间排序，最多显示1000条，可按腾讯数据源筛选。补试/永久错误来自持久游标，不受同步日志100条错误样本上限影响。",
+      "gridPos": {
+        "x": 0,
+        "y": 49,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weknora-postgres"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT title AS \"文档\",folder_path AS \"目录\",parse_status AS \"解析索引状态\",summary_status AS \"摘要状态\",CASE WHEN unpublished THEN '候选：尚未发布' ELSE '已发布/普通文件' END AS \"发布状态\",error_message AS \"处理错误\",updated_at AS \"更新时间\",file_id AS \"腾讯文件ID\",id AS \"知识ID\"\nFROM tencent_file_knowledge WHERE (${td_source:sqlstring}='' OR datasource_id=${td_source:sqlstring}) ORDER BY updated_at DESC LIMIT 1000"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "enablePagination": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": []
+      }
     }
   ],
   "preload": false,
@@ -2714,6 +2856,25 @@
         "skipUrlSync": false,
         "sort": 1,
         "type": "query"
+      },
+      {
+        "name": "td_source",
+        "label": "腾讯源文件筛选",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "weknora-postgres"
+        },
+        "query": "SELECT '全部腾讯数据源' AS __text,'' AS __value UNION ALL SELECT name,id FROM data_sources WHERE type='tencent_docs' AND deleted_at IS NULL",
+        "definition": "SELECT '全部腾讯数据源' AS __text,'' AS __value UNION ALL SELECT name,id FROM data_sources WHERE type='tencent_docs' AND deleted_at IS NULL",
+        "refresh": 1,
+        "multi": false,
+        "includeAll": false,
+        "current": {
+          "text": "全部腾讯数据源",
+          "value": ""
+        },
+        "options": []
       }
     ]
   },

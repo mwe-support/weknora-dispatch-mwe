@@ -72,7 +72,8 @@ prometheus.exporter.postgres "weknora" {
     "postgresql://" + sys.env("WEKNORA_DB_USER") + ":" +
     encoding.url_encode(sys.env("WEKNORA_DB_PASSWORD")) + "@" +
     sys.env("WEKNORA_DB_HOST") + ":" + sys.env("WEKNORA_DB_PORT") + "/" +
-    sys.env("WEKNORA_DB_NAME") + "?sslmode=disable",
+    // Bound read-only monitoring queries so they cannot hold DDL locks indefinitely.
+    sys.env("WEKNORA_DB_NAME") + "?sslmode=disable&application_name=weknora_alloy_monitor&options=-c%20statement_timeout%3D10000",
   ]
   custom_queries_config_path = "/etc/alloy/weknora-queries.yml"
   disable_default_metrics    = true
@@ -88,6 +89,58 @@ prometheus.scrape "postgres" {
 prometheus.exporter.redis "weknora" {
   redis_addr     = sys.env("WEKNORA_REDIS_HOST") + ":" + sys.env("WEKNORA_REDIS_PORT")
   redis_password = sys.env("WEKNORA_REDIS_PASSWORD")
+  // Fixed queue keys only; never export task payloads or key values.
+  export_key_values = false
+  check_single_keys = [
+    "db0=asynq:{default}:active",
+    "db0=asynq:{default}:pending",
+    "db0=asynq:{default}:scheduled",
+    "db0=asynq:{default}:retry",
+    "db0=asynq:{chat_attachment}:active",
+    "db0=asynq:{chat_attachment}:pending",
+    "db0=asynq:{chat_attachment}:scheduled",
+    "db0=asynq:{chat_attachment}:retry",
+    "db0=asynq:{postprocess}:active",
+    "db0=asynq:{postprocess}:pending",
+    "db0=asynq:{postprocess}:scheduled",
+    "db0=asynq:{postprocess}:retry",
+    "db0=asynq:{summary}:active",
+    "db0=asynq:{summary}:pending",
+    "db0=asynq:{summary}:scheduled",
+    "db0=asynq:{summary}:retry",
+    "db0=asynq:{multimodal}:active",
+    "db0=asynq:{multimodal}:pending",
+    "db0=asynq:{multimodal}:scheduled",
+    "db0=asynq:{multimodal}:retry",
+    "db0=asynq:{graph}:active",
+    "db0=asynq:{graph}:pending",
+    "db0=asynq:{graph}:scheduled",
+    "db0=asynq:{graph}:retry",
+    "db0=asynq:{question}:active",
+    "db0=asynq:{question}:pending",
+    "db0=asynq:{question}:scheduled",
+    "db0=asynq:{question}:retry",
+    "db0=asynq:{sync}:active",
+    "db0=asynq:{sync}:pending",
+    "db0=asynq:{sync}:scheduled",
+    "db0=asynq:{sync}:retry",
+    "db0=asynq:{sync_export}:active",
+    "db0=asynq:{sync_export}:pending",
+    "db0=asynq:{sync_export}:scheduled",
+    "db0=asynq:{sync_export}:retry",
+    "db0=asynq:{sync_retry}:active",
+    "db0=asynq:{sync_retry}:pending",
+    "db0=asynq:{sync_retry}:scheduled",
+    "db0=asynq:{sync_retry}:retry",
+    "db0=asynq:{low}:active",
+    "db0=asynq:{low}:pending",
+    "db0=asynq:{low}:scheduled",
+    "db0=asynq:{low}:retry",
+    "db0=asynq:{wiki}:active",
+    "db0=asynq:{wiki}:pending",
+    "db0=asynq:{wiki}:scheduled",
+    "db0=asynq:{wiki}:retry",
+  ]
 }
 
 prometheus.scrape "redis" {
